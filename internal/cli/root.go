@@ -43,6 +43,8 @@ func Execute() error {
 		newUsageCmd(),
 		newUICmd(),
 		newPruneCodexaCmd(),
+		newHookCmd(),
+		newRecordSessionCmd(),
 	)
 	return root.Execute()
 }
