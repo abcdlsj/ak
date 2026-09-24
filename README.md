@@ -39,6 +39,7 @@ ak sync
 ak                          open the TUI (Providers / Usage, Tab to switch)
 ak list                     list providers
 ak add / rm / edit          manage providers
+ak import --from cc-switch  pick which cc-switch providers to copy over
 ak sync                     regenerate commands from the config
 ak doctor                   check for anything that would break the commands
 ak usage                    token usage by provider and model
@@ -80,6 +81,14 @@ seconds and later ones are near-instant. Claude's logs do not record which
 provider a session used, so `ak hook install` adds a `SessionStart` hook that
 records the mapping. Cost comes from models.dev; models it does not know are
 reported as unpriced rather than billed as zero.
+
+**cc-switch import is selective.** `ak import --from cc-switch` reads
+`~/.cc-switch/cc-switch.db` read-only, prints what it found, then opens a picker
+so you choose exactly which providers to copy. Nothing is written until you
+confirm, and cc-switch's own database is never modified. Providers that are
+ready to use are pre-selected; ones still missing an API key are left unticked
+so a half-configured provider is not imported by accident. `--all` skips the
+picker for scripted use.
 
 ## Rolling back
 

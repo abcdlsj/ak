@@ -12,13 +12,15 @@ import (
 
 func newImportCmd() *cobra.Command {
 	var from string
+	var all bool
 	cmd := &cobra.Command{
 		Use:   "import",
 		Short: "Import providers from an existing configuration",
 		Long: `Read providers from an existing configuration into ak.
 
   ak import --from claude-settings   # env block of ~/.claude/settings.json
-  ak import --from codexa            # ~/.codex/profiles/*/`,
+  ak import --from codexa            # ~/.codex/profiles/*/
+  ak import --from cc-switch         # ~/.cc-switch/cc-switch.db, pick from a list`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -29,12 +31,15 @@ func newImportCmd() *cobra.Command {
 				return importClaudeSettings(cfg)
 			case "codexa":
 				return importCodexa(cfg)
+			case "cc-switch":
+				return importCCSwitch(cfg, all)
 			default:
-				return fmt.Errorf("--from must be claude-settings or codexa, got %q", from)
+				return fmt.Errorf("--from must be claude-settings, codexa or cc-switch, got %q", from)
 			}
 		},
 	}
-	cmd.Flags().StringVar(&from, "from", "", "Source: claude-settings or codexa")
+	cmd.Flags().StringVar(&from, "from", "", "Source: claude-settings, codexa or cc-switch")
+	cmd.Flags().BoolVar(&all, "all", false, "Import every provider without the selection prompt (cc-switch only)")
 	cmd.MarkFlagRequired("from")
 	return cmd
 }
@@ -60,8 +65,7 @@ func importClaudeSettings(cfg *config.Config) error {
 	}
 	env := settings.Env
 
-	base := env["ANTHROPIC_BASE_URL"]
-	if base == "" {
+	if env["ANTHROPIC_BASE_URL"] == "" {
 		return fmt.Errorf("%s has no ANTHROPIC_BASE_URL in env, nothing to import", path)
 	}
 
@@ -77,24 +81,12 @@ func importClaudeSettings(cfg *config.Config) error {
 		}
 	}
 
-	p := config.Provider{
-		Kind:    config.KindClaude,
-		BaseURL: base,
-		Model:   env["ANTHROPIC_MODEL"],
-		Haiku:   env["ANTHROPIC_DEFAULT_HAIKU_MODEL"],
-		Sonnet:  env["ANTHROPIC_DEFAULT_SONNET_MODEL"],
-		Opus:    env["ANTHROPIC_DEFAULT_OPUS_MODEL"],
-		Env:     map[string]string{},
-	}
-	if k := env["ANTHROPIC_API_KEY"]; k != "" {
-		p.APIKey, p.KeyField = k, "api_key"
-	} else if k := env["ANTHROPIC_AUTH_TOKEN"]; k != "" {
-		p.APIKey, p.KeyField = k, "auth_token"
-	}
+	p, _ := claudeProviderFromEnv(env)
 	// Carry over the remaining provider-specific keys so they do not linger in
 	// settings.json. Only provider keys are collected; global preferences such
 	// as NODE_EXTRA_CA_CERTS, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC and
 	// CLAUDE_AUTOCOMPACT_PCT_OVERRIDE must stay in settings.json.
+	p.Env = map[string]string{}
 	for _, k := range []string{
 		"CLAUDE_CODE_SUBAGENT_MODEL",
 		"CLAUDE_CODE_MAX_CONTEXT_TOKENS",
@@ -137,6 +129,36 @@ func importClaudeSettings(cfg *config.Config) error {
 	fmt.Println("  CLAUDE_AUTOCOMPACT_PCT_OVERRIDE and friends).")
 	fmt.Printf("\nThen verify with `ak-%s -p 'reply OK'`.\n", name)
 	return nil
+}
+
+// claudeProviderFromEnv maps a claude env block onto a provider. The returned
+// set holds the keys that were consumed, so a caller can decide what to do
+// with the rest: settings.json keeps global preferences in place, while
+// cc-switch treats the whole block as belonging to the provider.
+func claudeProviderFromEnv(env map[string]string) (config.Provider, map[string]bool) {
+	p := config.Provider{
+		Kind:    config.KindClaude,
+		BaseURL: env["ANTHROPIC_BASE_URL"],
+		Model:   env["ANTHROPIC_MODEL"],
+		Haiku:   env["ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+		Sonnet:  env["ANTHROPIC_DEFAULT_SONNET_MODEL"],
+		Opus:    env["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+	}
+	if k := env["ANTHROPIC_API_KEY"]; k != "" {
+		p.APIKey, p.KeyField = k, "api_key"
+	} else if k := env["ANTHROPIC_AUTH_TOKEN"]; k != "" {
+		p.APIKey, p.KeyField = k, "auth_token"
+	}
+	consumed := map[string]bool{
+		"ANTHROPIC_BASE_URL":             true,
+		"ANTHROPIC_MODEL":                true,
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  true,
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": true,
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   true,
+		"ANTHROPIC_API_KEY":              true,
+		"ANTHROPIC_AUTH_TOKEN":           true,
+	}
+	return p, consumed
 }
 
 // importCodexa reads codexa's profiles and merges duplicates.
