@@ -162,61 +162,86 @@ func startOfWeek(t time.Time) time.Time {
 }
 
 // renderHeatmap renders the heatmap. Each row is a weekday, each column a week.
-func renderHeatmap(cells []heatCell) string {
+//
+// width is the number of columns available. A full history easily runs past a
+// normal terminal, so when it does not fit only the most recent weeks are drawn
+// -- truncated rows look broken rather than merely long.
+//
+// Every column occupies exactly colWidth characters so the month labels stay
+// aligned with the columns below them.
+func renderHeatmap(cells []heatCell, width int) string {
 	if len(cells) == 0 {
 		return "  no data\n"
 	}
 
-	weekdayLabels := []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
-	var b strings.Builder
+	const (
+		colWidth  = 3 // two block glyphs plus a separating space
+		labelWide = 4 // weekday label plus its trailing space
+	)
 
-	// Row label style.
+	// Keep at least a few weeks even on a very narrow terminal.
+	maxWeeks := (width - labelWide) / colWidth
+	if maxWeeks < 4 {
+		maxWeeks = 4
+	}
+
+	totalWeeks := (len(cells) + 6) / 7
+	truncated := false
+	if totalWeeks > maxWeeks {
+		cells = cells[(totalWeeks-maxWeeks)*7:]
+		truncated = true
+	}
+
+	weekdayLabels := []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+
+	var b strings.Builder
 	labelStyle := lipgloss.NewStyle().Faint(true).Width(3)
 	monthStyle := lipgloss.NewStyle().Faint(true)
 
-	// Render row by row: 7 rows (Sunday through Saturday).
 	weeks := (len(cells) + 6) / 7
-	for wd := 0; wd < 7; wd++ {
-		b.WriteString(labelStyle.Render(weekdayLabels[wd][:1]))
-		b.WriteString(" ")
 
-		// The month label row is inserted before Wednesday, matching GitHub.
-		if wd == 1 {
-			lastMonth := ""
-			for w := 0; w < weeks; w++ {
-				idx := w*7 + wd
-				m := ""
-				if idx < len(cells) {
-					t, _ := time.Parse("2006-01-02", cells[idx].Date)
-					m = fmt.Sprintf("%-3d", int(t.Month()))
-					if m == lastMonth {
-						m = "   "
-					} else {
-						lastMonth = m
-					}
-				} else {
-					m = "   "
-				}
-				b.WriteString(monthStyle.Render(strings.TrimLeft(m, " ")))
-				b.WriteString(" ")
+	// Month labels sit above the columns, only on a row that has cells.
+	// A label is printed when the month changes, padded to colWidth so the
+	// next label lands on the correct column.
+	lastMonth := 0
+	b.WriteString(labelStyle.Render(" "))
+	b.WriteString(" ")
+	for w := 0; w < weeks; w++ {
+		idx := w*7 + 1 // Monday
+		month := 0
+		if idx < len(cells) {
+			if t, err := time.Parse("2006-01-02", cells[idx].Date); err == nil {
+				month = int(t.Month())
 			}
-			b.WriteString("\n")
-			b.WriteString(labelStyle.Render(" "))
-			b.WriteString(" ")
 		}
+		switch {
+		case month == 0:
+			b.WriteString(monthStyle.Render("   "))
+		case month != lastMonth:
+			b.WriteString(monthStyle.Render(pad(fmt.Sprintf("%d", month), colWidth)))
+			lastMonth = month
+		default:
+			b.WriteString("   ")
+		}
+	}
+	b.WriteString("\n")
+
+	for wd := 0; wd < 7; wd++ {
+		b.WriteString(labelStyle.Render(string(weekdayLabels[wd][0])))
+		b.WriteString(" ")
 
 		for w := 0; w < weeks; w++ {
 			idx := w*7 + wd
 			if idx >= len(cells) {
-				b.WriteString(" ")
-				b.WriteString(" ")
+				b.WriteString("   ")
 				continue
 			}
 			c := cells[idx]
+			// A block glyph rather than a space: spaces are invisible on some
+			// terminal backgrounds, colour blocks are more legible.
 			style := lipgloss.NewStyle().Foreground(heatLevels[c.Level])
-			// Use a block character rather than a space: spaces are invisible on
-			// some terminal backgrounds, color blocks are more legible.
 			b.WriteString(style.Render("██"))
+			b.WriteString(" ")
 		}
 		b.WriteString("\n")
 	}
@@ -225,7 +250,21 @@ func renderHeatmap(cells []heatCell) string {
 	b.WriteString("\n  less ")
 	for i := 1; i <= 14; i += 3 {
 		b.WriteString(lipgloss.NewStyle().Foreground(heatLevels[i]).Render("██"))
+		b.WriteString(" ")
 	}
 	b.WriteString(" more\n")
+	if truncated {
+		b.WriteString("  (only the last ")
+		b.WriteString(fmt.Sprintf("%d", weeks))
+		b.WriteString(" weeks are shown)\n")
+	}
 	return b.String()
+}
+
+// pad right-pads s with spaces to width n.
+func pad(s string, n int) string {
+	for len(s) < n {
+		s += " "
+	}
+	return s
 }

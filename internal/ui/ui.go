@@ -214,7 +214,7 @@ func (m Model) usageView() string {
 
 	b.WriteString(titleStyle.Render("Daily tokens"))
 	b.WriteString("\n")
-	b.WriteString(renderHeatmap(buildHeatmap(m.usage.ByDate)))
+	b.WriteString(renderHeatmap(buildHeatmap(m.usage.ByDate), m.heatmapWidth()))
 	b.WriteString("\n")
 
 	if len(m.usage.ByProvider) > 0 {
@@ -252,6 +252,18 @@ func (m Model) usageView() string {
 	}
 
 	return b.String()
+}
+
+// heatmapWidth returns the columns available to the heatmap.
+//
+// WindowSizeMsg has not arrived yet on the very first frame; fall back to a
+// conservative width rather than assuming an arbitrarily wide terminal.
+func (m Model) heatmapWidth() int {
+	const fallback = 100
+	if m.width <= 0 {
+		return fallback
+	}
+	return m.width
 }
 
 // bar renders a proportion bar, making relative magnitude obvious.
