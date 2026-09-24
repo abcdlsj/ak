@@ -7,13 +7,14 @@ import (
 	"time"
 )
 
-// Cache 是增量扫描的状态。数百 MB 的日志每次全解要数秒,靠它做到近乎瞬时。
+// Cache holds incremental scan state. Fully parsing hundreds of MB of logs
+// takes seconds every time; this brings repeat runs down to near-instant.
 type Cache struct {
-	// Files 记录每个文件的指纹与已解析偏移。
+	// Files records each file's fingerprint and parsed offset.
 	Files map[string]fileFinger `json:"files"`
-	// Rows 是每个文件的已解析结果,文件未变时直接复用。
+	// Rows holds each file's parsed results, reused directly when unchanged.
 	Rows map[string][]Row `json:"rows"`
-	// Version 变化时缓存整体作废。
+	// Version invalidates the whole cache when it changes.
 	Version int `json:"version"`
 }
 
@@ -74,14 +75,14 @@ func saveCache(c Cache) error {
 	return os.Rename(tmp, p)
 }
 
-// sessionIndex 是 session_id → 供应商的映射,由 SessionStart hook 维护。
+// sessionIndex maps session_id to provider, maintained by the SessionStart hook.
 type sessionIndex struct {
 	Sessions map[string]string `json:"sessions"` // session_id -> provider
 }
 
 var sessionIdx sessionIndex
 
-// loadSessionIndex 载入归属索引。
+// loadSessionIndex loads the attribution index.
 func loadSessionIndex() {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -105,7 +106,7 @@ func loadSessionIndex() {
 	}
 }
 
-// lookupSessionOwner 查 session 归属的供应商。
+// lookupSessionOwner looks up the provider a session belongs to.
 func lookupSessionOwner(id string) (string, bool) {
 	if sessionIdx.Sessions == nil {
 		loadSessionIndex()
@@ -114,7 +115,7 @@ func lookupSessionOwner(id string) (string, bool) {
 	return p, ok
 }
 
-// RecordSession 追加一条 session 归属记录,hook 调用。
+// RecordSession appends a session attribution record; called by the hook.
 func RecordSession(sessionID, provider string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {

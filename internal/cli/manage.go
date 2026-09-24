@@ -15,12 +15,12 @@ import (
 func newAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <name>",
-		Short: "新增一个供应商",
-		Long: `新增供应商并立即生成命令。
+		Short: "Add a provider",
+		Long: `Add a provider and generate its command immediately.
 
-两种用法:
+Two ways to use it:
   ak add kimi --kind claude --base-url https://api.moonshot.cn/anthropic --key sk-... --model kimi-k2.7-code
-  ak add kimi        # 不带参数时进入交互表单`,
+  ak add kimi        # with no flags, prompts for each field`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
@@ -33,7 +33,7 @@ func newAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// 没给任何实质内容则视为要交互录入。
+			// No substantive input given, so fall back to interactive entry.
 			if p.BaseURL == "" {
 				p, err = interactiveAdd(name)
 				if err != nil {
@@ -45,17 +45,17 @@ func newAddCmd() *cobra.Command {
 	}
 
 	f := cmd.Flags()
-	f.String("kind", "claude", "引擎:claude 或 codex")
-	f.String("base-url", "", "API 端点")
+	f.String("kind", "claude", "Engine: claude or codex")
+	f.String("base-url", "", "API endpoint")
 	f.String("key", "", "API key")
-	f.String("model", "", "主模型")
-	f.String("haiku", "", "haiku 档模型(claude)")
-	f.String("sonnet", "", "sonnet 档模型(claude)")
-	f.String("opus", "", "opus 档模型(claude)")
-	f.String("key-field", "auth_token", "claude 鉴权变量:auth_token 或 api_key")
-	f.String("wire-api", "responses", "codex 协议:responses 或 chat")
-	f.String("reasoning", "", "codex 默认 reasoning effort")
-	f.String("display", "", "列表里显示的名字")
+	f.String("model", "", "Primary model")
+	f.String("haiku", "", "haiku-tier model (claude)")
+	f.String("sonnet", "", "sonnet-tier model (claude)")
+	f.String("opus", "", "opus-tier model (claude)")
+	f.String("key-field", "auth_token", "claude auth variable: auth_token or api_key")
+	f.String("wire-api", "responses", "codex wire API: responses or chat")
+	f.String("reasoning", "", "codex default reasoning effort")
+	f.String("display", "", "Name shown in listings")
 	return cmd
 }
 
@@ -81,13 +81,13 @@ func buildProviderFromFlags(cmd *cobra.Command) (config.Provider, error) {
 	return p, nil
 }
 
-// doAdd 写入配置、校验、立即 sync。
+// doAdd writes the config, validates it, then syncs immediately.
 func doAdd(cfg *config.Config, name string, p config.Provider) error {
 	if err := config.ValidateName(name); err != nil {
 		return err
 	}
 	if _, exists := cfg.Providers[name]; exists {
-		return fmt.Errorf("供应商 %q 已存在,先 `ak rm %s`", name, name)
+		return fmt.Errorf("provider %q already exists, run `ak rm %s` first", name, name)
 	}
 	if cfg.Providers == nil {
 		cfg.Providers = map[string]config.Provider{}
@@ -107,7 +107,7 @@ func newRemoveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "rm <name>",
 		Aliases: []string{"remove"},
-		Short:   "删除供应商及其生成的命令",
+		Short:   "Remove a provider and its generated commands",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
@@ -116,7 +116,7 @@ func newRemoveCmd() *cobra.Command {
 			}
 			name := args[0]
 			if _, ok := cfg.Providers[name]; !ok {
-				return fmt.Errorf("供应商 %q 不存在", name)
+				return fmt.Errorf("provider %q does not exist", name)
 			}
 			delete(cfg.Providers, name)
 			if cfg.Settings.Default == name {
@@ -133,7 +133,7 @@ func newRemoveCmd() *cobra.Command {
 func newDefaultCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "default [name]",
-		Short: "查看或设置默认供应商",
+		Short: "Show or set the default provider",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -141,32 +141,33 @@ func newDefaultCmd() *cobra.Command {
 			}
 			if len(args) == 0 {
 				if cfg.Settings.Default == "" {
-					fmt.Println("未设置默认供应商。")
+					fmt.Println("No default provider set.")
 					return nil
 				}
-				fmt.Printf("默认供应商: %s\n", cfg.Settings.Default)
+				fmt.Printf("default provider: %s\n", cfg.Settings.Default)
 				return nil
 			}
 			name := args[0]
 			if _, ok := cfg.Providers[name]; !ok {
-				return fmt.Errorf("供应商 %q 不存在", name)
+				return fmt.Errorf("provider %q does not exist", name)
 			}
 			cfg.Settings.Default = name
 			if err := config.Save(cfg); err != nil {
 				return err
 			}
-			fmt.Printf("默认供应商已设为 %s\n", name)
+			fmt.Printf("default provider set to %s\n", name)
 			return nil
 		},
 	}
 }
 
-// newEnvCmd 打印某个供应商将要注入的环境,用于调试。
-// 这是验证 shim 行为最便宜的方式:不用真发起请求就能看到确切环境。
+// newEnvCmd prints the environment a provider would inject, for debugging.
+// This is the cheapest way to verify shim behaviour: the exact environment is
+// visible without issuing a real request.
 func newEnvCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "env <name> [variant]",
-		Short: "打印供应商将要注入的环境变量",
+		Short: "Print the environment a provider would inject",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
@@ -176,7 +177,7 @@ func newEnvCmd() *cobra.Command {
 			name := args[0]
 			p, ok := cfg.Providers[name]
 			if !ok {
-				return fmt.Errorf("供应商 %q 不存在", name)
+				return fmt.Errorf("provider %q does not exist", name)
 			}
 			variant := ""
 			if len(args) > 1 {
@@ -193,13 +194,13 @@ func newEnvCmd() *cobra.Command {
 				return nil
 			}
 			printEnvPlan(envPlanViewFrom(codexPlanFor(name, p, key)), cfg.Settings.Prefix+name)
-			fmt.Printf("  (codex 供应商还会生成 ~/.codex/ak-%s.config.toml,经 --profile 生效)\n", name)
+			fmt.Printf("  (a codex provider also generates ~/.codex/ak-%s.config.toml, applied via --profile)\n", name)
 			return nil
 		},
 	}
 }
 
-// interactiveAdd 用标准输入做最小交互。有 gum 时优先用它,交互更顺手。
+// interactiveAdd is a minimal stdin prompt. gum is preferred when available.
 func interactiveAdd(name string) (config.Provider, error) {
 	r := bufio.NewReader(os.Stdin)
 	ask := func(label, def string) string {
@@ -216,33 +217,33 @@ func interactiveAdd(name string) (config.Provider, error) {
 		return line
 	}
 
-	kind := ask("引擎 (claude/codex)", "claude")
+	kind := ask("engine (claude/codex)", "claude")
 	p := config.Provider{
 		Kind:     config.Kind(kind),
-		BaseURL:  ask("API 端点", ""),
-		Model:    ask("主模型", ""),
+		BaseURL:  ask("API endpoint", ""),
+		Model:    ask("primary model", ""),
 		APIKey:   ask("API key", ""),
-		Display:  ask("显示名", name),
-		KeyField: ask("鉴权变量 (auth_token/api_key)", "auth_token"),
-		WireAPI:  ask("codex 协议 (responses/chat)", "responses"),
+		Display:  ask("display name", name),
+		KeyField: ask("auth variable (auth_token/api_key)", "auth_token"),
+		WireAPI:  ask("codex wire API (responses/chat)", "responses"),
 	}
 	return p, nil
 }
 
 func printEnvPlan(plan envPlanView, cmd string) {
-	fmt.Printf("# %s 将注入:\n", cmd)
+	fmt.Printf("# %s would inject:\n", cmd)
 	for _, line := range plan {
 		fmt.Printf("  %s\n", line)
 	}
 }
 
-// envPlanView 是脱敏后的环境展示。
+// envPlanView is the masked environment display.
 type envPlanView []string
 
 func newUICmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "ui",
-		Short: "打开 TUI(无参数运行 ak 同此)",
+		Short: "Open the TUI (same as running ak with no arguments)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return ui.RunUI()
 		},

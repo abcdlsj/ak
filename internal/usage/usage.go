@@ -1,7 +1,8 @@
-// Package usage 统计 claude 与 codex 的 token 用量。
+// Package usage counts token usage for claude and codex.
 //
-// 数据源是本机 session 日志,不是代理转发:cc-switch 靠自建代理记账,
-// ak 不挂代理,所以改为解析 ~/.claude/projects 与 ~/.codex/sessions 的 jsonl。
+// The data source is local session logs, not proxy forwarding: cc-switch
+// accounts for usage through a self-hosted proxy. ak runs no proxy, so it
+// parses the jsonl files under ~/.claude/projects and ~/.codex/sessions.
 package usage
 
 import (
@@ -17,7 +18,7 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 )
 
-// Tokens 是一次请求的 token 明细。
+// Tokens is the token breakdown of a single request.
 type Tokens struct {
 	Input      int64 `json:"input"`
 	Output     int64 `json:"output"`
@@ -26,22 +27,23 @@ type Tokens struct {
 	Thinking   int64 `json:"thinking"`
 }
 
-// Total 是计费用的总量:cache 读写单列不计入,与 models.dev 的计费口径一致。
+// Total is the billable amount: cache reads and writes are counted separately,
+// matching models.dev's billing basis.
 func (t Tokens) Total() int64 {
 	return t.Input + t.Output + t.CacheRead + t.CacheWrite
 }
 
-// Row 是一条聚合结果。
+// Row is one aggregation result.
 type Row struct {
 	Date     string `json:"date"`     // YYYY-MM-DD
-	Provider string `json:"provider"` // 供应商名,unknown 表示无法归属
+	Provider string `json:"provider"` // Provider name; unknown means unattributable
 	Model    string `json:"model"`
 	Engine   string `json:"engine"` // claude | codex
 	Tokens   Tokens `json:"tokens"`
 	Sessions int    `json:"sessions"`
 }
 
-// Summary 是汇总视图。
+// Summary is the aggregated view.
 type Summary struct {
 	TotalTokens int64         `json:"total_tokens"`
 	TotalCost   float64       `json:"total_cost"`
@@ -49,34 +51,35 @@ type Summary struct {
 	ByProvider  []ProviderRow `json:"by_provider"`
 	ByModel     []ModelRow    `json:"by_model"`
 	ByHour      [24]int64     `json:"by_hour"`
-	// ByDate 是热力图的数据源,按日期升序。
+	// ByDate is the heatmap data source, ascending by date.
 	ByDate []DateRow `json:"by_date"`
-	// UnpricedTokens 是查不到定价的 token 数,成本数字会偏低。
+	// UnpricedTokens is the token count with no pricing data, so the cost figure is an underestimate.
 	UnpricedTokens int64 `json:"unpriced_tokens"`
 }
 
-// ProviderRow 是按供应商汇总。
+// ProviderRow aggregates by provider.
 type ProviderRow struct {
 	Name   string  `json:"name"`
 	Tokens int64   `json:"tokens"`
 	Cost   float64 `json:"cost"`
 }
 
-// ModelRow 是按模型汇总。
+// ModelRow aggregates by model.
 type ModelRow struct {
 	Model  string  `json:"model"`
 	Tokens int64   `json:"tokens"`
 	Cost   float64 `json:"cost"`
 }
 
-// DateRow 是按日期汇总,热力图用。
+// DateRow aggregates by date, used by the heatmap.
 type DateRow struct {
 	Date   string  `json:"date"`
 	Tokens int64   `json:"tokens"`
 	Cost   float64 `json:"cost"`
 }
 
-// Aggregate 全量统计。首次扫描需要解析数百 MB 日志,之后靠缓存增量。
+// Aggregate counts everything. The first scan parses hundreds of MB of logs;
+// subsequent runs are incremental via the cache.
 func Aggregate(cfg *config.Config) (Summary, error) {
 	cache, err := loadCache()
 	if err != nil {
@@ -88,14 +91,14 @@ func Aggregate(cfg *config.Config) (Summary, error) {
 		return Summary{}, err
 	}
 	if err := saveCache(cache); err != nil {
-		// 缓存写失败不影响结果。
+		// A cache write failure does not affect the result.
 		_ = err
 	}
 
 	return summarize(rows, cfg), nil
 }
 
-// summarize 把明细行汇总成各种视图。
+// summarize aggregates detail rows into the various views.
 func summarize(rows []Row, cfg *config.Config) Summary {
 	var s Summary
 	byProvider := map[string]*ProviderRow{}
@@ -105,10 +108,6 @@ func summarize(rows []Row, cfg *config.Config) Summary {
 	for _, r := range rows {
 		t := r.Tokens
 		s.TotalTokens += t.Total()
-		for h := 0; h < 24; h++ {
-			// ByHour 由调用方按时间戳填,这里先留空。
-		}
-
 		cost, priced := costOf(r, cfg)
 		if priced {
 			s.TotalCost += cost
@@ -175,17 +174,18 @@ func sortedDates(m map[string]*DateRow) []DateRow {
 	return out
 }
 
-// ---- 扫描 ----
+// ---- scanning ----
 
-// fileFinger 是文件的增量指纹。size+mtime 变化才重新解析。
+// fileFinger is a file's incremental fingerprint. The file is re-parsed only
+// when size or mtime changes.
 type fileFinger struct {
 	Size  int64     `json:"size"`
 	Mtime time.Time `json:"mtime"`
-	// Offset 是已解析到的字节位置,支持只解析新增部分。
+	// Offset is the byte position already parsed, enabling new-bytes-only parsing.
 	Offset int64 `json:"offset"`
 }
 
-// scanAll 扫描 claude 与 codex 的日志目录。
+// scanAll scans the claude and codex log directories.
 func scanAll(cfg *config.Config, cache *Cache) ([]Row, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -211,10 +211,10 @@ func scanAll(cfg *config.Config, cache *Cache) ([]Row, error) {
 	return rows, nil
 }
 
-// lineParser 从一行 jsonl 提取用量,返回 false 表示该行无关。
+// lineParser extracts usage from one jsonl line; false means the line is irrelevant.
 type lineParser func(line []byte, row *Row) bool
 
-// scanTree 递归扫描目录下的 *.jsonl。
+// scanTree recursively scans *.jsonl under a directory.
 func scanTree(root, engine string, cache *Cache, parse lineParser) ([]Row, error) {
 	var rows []Row
 
@@ -230,7 +230,7 @@ func scanTree(root, engine string, cache *Cache, parse lineParser) ([]Row, error
 
 		cached, ok := cache.Files[path]
 		if ok && cached.Size == fp.Size && cached.Mtime.Equal(fp.Mtime) {
-			// 未变,直接用缓存行。
+			// Unchanged: reuse the cached rows directly.
 			rows = append(rows, cache.Rows[path]...)
 			return nil
 		}
@@ -254,8 +254,9 @@ func scanTree(root, engine string, cache *Cache, parse lineParser) ([]Row, error
 	return rows, nil
 }
 
-// parseFile 解析单个 jsonl 的新增部分。
-// sessionMeta 是该文件所属 session 的元信息(claude 侧无,codex 侧有)。
+// parseFile parses the new portion of a single jsonl.
+// sessionMeta holds the metadata of the session owning this file
+// (absent on the claude side, present on the codex side).
 func parseFile(path, engine string, offset int64, parse lineParser) ([]Row, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -267,8 +268,8 @@ func parseFile(path, engine string, offset int64, parse lineParser) ([]Row, int6
 		return nil, offset, err
 	}
 
-	// codex 的 session_meta 在第一行,含 model_provider 与 model;
-	// token_count 事件里没有这两个字段,必须从这里补。
+	// codex's session_meta carries model_provider and model, neither of which
+	// appears in token_count events, so both must be filled in from here.
 	meta := sessionMeta{}
 	if engine == "codex" && offset == 0 {
 		meta = codexSessionMeta(f)
@@ -282,8 +283,9 @@ func parseFile(path, engine string, offset int64, parse lineParser) ([]Row, int6
 	for {
 		line, err := br.ReadBytes('\n')
 		if len(line) > 0 {
-			// 预筛:不含 usage / token_count 的行不值得做 JSON 解码。
-			// 数百 MB 的日志里绝大多数行是纯文本,这一步省掉大部分开销。
+			// Pre-filter: lines without usage / token_count are not worth a JSON decode.
+			// The vast majority of the hundreds of MB of logs are plain text, so
+			// this step saves most of the work.
 			if bytes.Contains(line, []byte(`"usage"`)) ||
 				bytes.Contains(line, []byte(`"token_count"`)) {
 				var row Row
@@ -305,15 +307,16 @@ func parseFile(path, engine string, offset int64, parse lineParser) ([]Row, int6
 	return rows, fiSizeOr(f, offset), nil
 }
 
-// sessionMeta 是 codex session 文件的元信息。
+// sessionMeta is the metadata of a codex session file.
 type sessionMeta struct {
 	Provider string
 	Model    string
 }
 
-// codexSessionMeta 读 codex session 文件,取 model_provider 与 model。
-// 两者出现在不同事件里:model_provider 在首行的 session_meta,
-// model 在 turn_context。token_count 事件里都没有,必须从这里补。
+// codexSessionMeta reads a codex session file for model_provider and model.
+// They appear in different events: model_provider in the first line's
+// session_meta, model in turn_context. Neither is present in token_count
+// events, so both must be filled in from here.
 func codexSessionMeta(f *os.File) sessionMeta {
 	out := sessionMeta{}
 	br := bufio.NewReader(f)
@@ -346,7 +349,7 @@ func codexSessionMeta(f *os.File) sessionMeta {
 	return out
 }
 
-// dateOf 从 ISO 时间戳取日期部分。
+// dateOf takes the date portion of an ISO timestamp.
 func dateOf(ts string) string {
 	if len(ts) >= 10 {
 		return ts[:10]
@@ -354,14 +357,14 @@ func dateOf(ts string) string {
 	return "unknown"
 }
 
-// unknownProvider / unknownModel 是归属或模型未知时的占位值。
+// unknownProvider / unknownModel are placeholders for unknown attribution or model.
 const (
 	unknownProvider = "unknown"
 	unknownModel    = "unknown"
 )
 
-// parseClaudeLine 解析 claude 的 assistant 消息。
-// 每条带完整 usage:input/output/cache_creation/cache_read/thinking。
+// parseClaudeLine parses claude's assistant messages.
+// Each carries full usage: input/output/cache_creation/cache_read/thinking.
 func parseClaudeLine(line []byte, row *Row) bool {
 	var d struct {
 		Type      string `json:"type"`
@@ -389,7 +392,8 @@ func parseClaudeLine(line []byte, row *Row) bool {
 
 	row.Engine = "claude"
 	row.Model = d.Message.Model
-	// claude 的 jsonl 不记录供应商,靠 SessionStart hook 补的归属索引查。
+	// claude's jsonl records no provider; look it up in the attribution index
+	// maintained by the SessionStart hook.
 	row.Provider = providerForSession(d.SessionID)
 	row.Date = dateOf(d.Timestamp)
 	row.Sessions = 1
@@ -403,7 +407,7 @@ func parseClaudeLine(line []byte, row *Row) bool {
 	return true
 }
 
-// providerForSession 从 ak 自己的 session 归属索引查供应商。
+// providerForSession looks up the provider from ak's own session attribution index.
 func providerForSession(sessionID string) string {
 	if sessionID == "" {
 		return unknownProvider
@@ -414,7 +418,7 @@ func providerForSession(sessionID string) string {
 	return unknownProvider
 }
 
-// fiSizeOr 取文件当前大小,失败时退回默认值。
+// fiSizeOr takes the file's current size, falling back to the default on error.
 func fiSizeOr(f *os.File, def int64) int64 {
 	if fi, err := f.Stat(); err == nil {
 		return fi.Size()
@@ -422,11 +426,13 @@ func fiSizeOr(f *os.File, def int64) int64 {
 	return def
 }
 
-// parseCodexLine 解析 codex 的 token_count 事件。
+// parseCodexLine parses codex's token_count events.
 //
-// 注意:total_token_usage 是**累计值**,只能取 session 的末值;
-// last_token_usage 才是增量,可逐条累加。二者混用会算重 —— 这是本包最容易出错的地方。
-// model 与 model_provider 都不在这类事件里,由调用方从 session_meta / turn_context 填。
+// Note: total_token_usage is a CUMULATIVE value, valid only as the session's
+// last reading; last_token_usage is the increment and may be summed per event.
+// Mixing the two double-counts, and this is the easiest mistake to make in this
+// package. Neither model nor model_provider appears in these events; the caller
+// fills them from session_meta / turn_context.
 func parseCodexLine(line []byte, row *Row) bool {
 	var d struct {
 		Timestamp string `json:"timestamp"`

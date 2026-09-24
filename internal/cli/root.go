@@ -1,4 +1,4 @@
-// Package cli 是 ak 的命令行入口。
+// Package cli is the command-line entry point for ak.
 package cli
 
 import (
@@ -10,22 +10,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version 由构建时注入。
+// Version is injected at build time.
 var Version = "dev"
 
-// Execute 是程序主入口。
+// Execute is the program's main entry point.
 func Execute() error {
 	root := &cobra.Command{
 		Use:   "ak",
-		Short: "多供应商并列的 claude / codex 启动器",
-		Long: `ak 为每个供应商生成一个独立命令(ak-kimi、ak-cpa),
-供应商之间并列而非互斥,适合多 worktree / 多 session 并行。
+		Short: "Parallel claude / codex launcher with one command per provider",
+		Long: `ak generates one command per provider (ak-kimi, ak-cpa). Providers sit
+side by side rather than being mutually exclusive, which suits running
+multiple worktrees, sessions and agents in parallel.
 
-无参数运行进入 TUI。`,
+Run with no arguments to open the TUI.`,
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		// 无参数时进 TUI。
+		// No arguments means open the TUI.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return ui.RunUI()
 		},
@@ -49,7 +50,7 @@ func Execute() error {
 	return root.Execute()
 }
 
-// loadConfig 读取并校验配置。
+// loadConfig loads and validates the config.
 func loadConfig() (*config.Config, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -61,7 +62,7 @@ func loadConfig() (*config.Config, error) {
 	return cfg, nil
 }
 
-// warnf 往 stderr 打提示。
+// warnf writes a warning to stderr.
 func warnf(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", a...)
 }

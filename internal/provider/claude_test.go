@@ -22,9 +22,10 @@ func unsetSet(p EnvPlan) map[string]bool {
 	return m
 }
 
-// TestNormalizeModels 照 cc-switch 的 normalize_claude_models_in_value 语义
-// (src-tauri/src/services/provider/mod.rs:7341):
-// haiku ← 现值 → small_fast → model;sonnet/opus ← 现值 → model → small_fast。
+// TestNormalizeModels follows the semantics of cc-switch's
+// normalize_claude_models_in_value (src-tauri/src/services/provider/mod.rs:7341):
+// haiku <- current value -> small_fast -> model;
+// sonnet/opus <- current value -> model -> small_fast.
 func TestNormalizeModels(t *testing.T) {
 	tests := []struct {
 		name                            string
@@ -32,21 +33,21 @@ func TestNormalizeModels(t *testing.T) {
 		wantHaiku, wantSonnet, wantOpus string
 	}{
 		{
-			name:       "只有 model:三档全部继承 model",
+			name:       "model only: all three tiers inherit model",
 			p:          config.Provider{Model: "m1"},
 			wantHaiku:  "m1",
 			wantSonnet: "m1",
 			wantOpus:   "m1",
 		},
 		{
-			name:       "只有 small_fast:haiku 用它,sonnet/opus 回落到它",
+			name:       "small_fast only: haiku uses it, sonnet/opus fall back to it",
 			p:          config.Provider{Env: map[string]string{"ANTHROPIC_SMALL_FAST_MODEL": "sf"}},
 			wantHaiku:  "sf",
 			wantSonnet: "sf",
 			wantOpus:   "sf",
 		},
 		{
-			name: "两者都有:haiku 优先 small_fast,sonnet/opus 优先 model",
+			name: "both present: haiku prefers small_fast, sonnet/opus prefer model",
 			p: config.Provider{
 				Model: "m1",
 				Env:   map[string]string{"ANTHROPIC_SMALL_FAST_MODEL": "sf"},
@@ -56,7 +57,7 @@ func TestNormalizeModels(t *testing.T) {
 			wantOpus:   "m1",
 		},
 		{
-			name: "三档已显式指定:不得被改写",
+			name: "all three tiers explicit: must not be rewritten",
 			p: config.Provider{
 				Model: "m1", Haiku: "h", Sonnet: "s", Opus: "o",
 				Env: map[string]string{"ANTHROPIC_SMALL_FAST_MODEL": "sf"},
@@ -71,19 +72,20 @@ func TestNormalizeModels(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, h, s, o := normalizeModels(tt.p)
 			if h != tt.wantHaiku {
-				t.Errorf("haiku = %q, 期望 %q", h, tt.wantHaiku)
+				t.Errorf("haiku = %q, want %q", h, tt.wantHaiku)
 			}
 			if s != tt.wantSonnet {
-				t.Errorf("sonnet = %q, 期望 %q", s, tt.wantSonnet)
+				t.Errorf("sonnet = %q, want %q", s, tt.wantSonnet)
 			}
 			if o != tt.wantOpus {
-				t.Errorf("opus = %q, 期望 %q", o, tt.wantOpus)
+				t.Errorf("opus = %q, want %q", o, tt.wantOpus)
 			}
 		})
 	}
 }
 
-// TestClaudeEnv_SmallFastAlwaysUnset 确认已废弃的变量永不被 export 且一定 unset。
+// TestClaudeEnv_SmallFastAlwaysUnset checks that the deprecated variable is
+// never exported and is always unset.
 func TestClaudeEnv_SmallFastAlwaysUnset(t *testing.T) {
 	p := config.Provider{
 		Kind: config.KindClaude, BaseURL: "https://x", Model: "m",
@@ -92,15 +94,17 @@ func TestClaudeEnv_SmallFastAlwaysUnset(t *testing.T) {
 	plan := ClaudeEnv("x", p, "", "k")
 
 	if v, ok := envMap(plan)["ANTHROPIC_SMALL_FAST_MODEL"]; ok {
-		t.Errorf("已废弃变量被 export 了: %q", v)
+		t.Errorf("deprecated variable was exported: %q", v)
 	}
 	if !unsetSet(plan)["ANTHROPIC_SMALL_FAST_MODEL"] {
-		t.Error("已废弃变量必须出现在 unset 列表里")
+		t.Error("deprecated variable must appear in the unset list")
 	}
 }
 
-// TestClaudeEnv_KeyFieldExclusive 确认两个鉴权变量只写一个,另一个必须 unset。
-// 否则嵌套启动时会从父进程泄漏,导致静默走错供应商。
+// TestClaudeEnv_KeyFieldExclusive checks that only one of the two auth
+// variables is written and the other is unset. Otherwise it would leak in from
+// the parent process on a nested launch and silently route to the wrong
+// provider.
 func TestClaudeEnv_KeyFieldExclusive(t *testing.T) {
 	tests := []struct {
 		keyField  string
@@ -121,19 +125,20 @@ func TestClaudeEnv_KeyFieldExclusive(t *testing.T) {
 			env := envMap(plan)
 
 			if env[tt.wantSet] != "secret" {
-				t.Errorf("%s 应为 secret,实际 %q", tt.wantSet, env[tt.wantSet])
+				t.Errorf("%s should be secret, got %q", tt.wantSet, env[tt.wantSet])
 			}
 			if _, ok := env[tt.wantUnset]; ok {
-				t.Errorf("%s 不该被 export", tt.wantUnset)
+				t.Errorf("%s should not be exported", tt.wantUnset)
 			}
 			if !unsetSet(plan)[tt.wantUnset] {
-				t.Errorf("%s 必须出现在 unset 列表里", tt.wantUnset)
+				t.Errorf("%s must appear in the unset list", tt.wantUnset)
 			}
 		})
 	}
 }
 
-// TestClaudeEnv_TailEnvOverrides 确认 [providers.x.env] 能覆盖派生键。
+// TestClaudeEnv_TailEnvOverrides checks that [providers.x.env] can override
+// derived keys.
 func TestClaudeEnv_TailEnvOverrides(t *testing.T) {
 	p := config.Provider{
 		Kind: config.KindClaude, BaseURL: "https://x", Model: "m",
@@ -145,15 +150,16 @@ func TestClaudeEnv_TailEnvOverrides(t *testing.T) {
 	env := envMap(ClaudeEnv("x", p, "", "k"))
 
 	if env["ANTHROPIC_MODEL"] != "override" {
-		t.Errorf("ANTHROPIC_MODEL = %q, 期望被长尾 env 覆盖为 override", env["ANTHROPIC_MODEL"])
+		t.Errorf("ANTHROPIC_MODEL = %q, want the extra env to override it with \"override\"", env["ANTHROPIC_MODEL"])
 	}
 	if env["API_TIMEOUT_MS"] != "600000" {
-		t.Errorf("长尾 env 未生效: %q", env["API_TIMEOUT_MS"])
+		t.Errorf("extra env not applied: %q", env["API_TIMEOUT_MS"])
 	}
 }
 
-// TestClaudeEnv_NoGlobalPreferences 确认全局偏好键不会被 shim 注入。
-// 它们留在 settings.json 里继续生效,shim 不该碰。
+// TestClaudeEnv_NoGlobalPreferences checks that global preference keys are not
+// injected by the shim. They keep working from settings.json and the shim must
+// leave them alone.
 func TestClaudeEnv_NoGlobalPreferences(t *testing.T) {
 	p := config.Provider{Kind: config.KindClaude, BaseURL: "https://x", Model: "m"}
 	plan := ClaudeEnv("x", p, "", "k")
@@ -167,15 +173,16 @@ func TestClaudeEnv_NoGlobalPreferences(t *testing.T) {
 		"CLAUDE_CODE_AUTO_COMPACT_WINDOW",
 	} {
 		if _, ok := env[k]; ok {
-			t.Errorf("全局偏好 %s 不该被 shim export", k)
+			t.Errorf("global preference %s must not be exported by the shim", k)
 		}
 		if unset[k] {
-			t.Errorf("全局偏好 %s 不该被 shim unset", k)
+			t.Errorf("global preference %s must not be unset by the shim", k)
 		}
 	}
 }
 
-// TestClaudeEnv_Deterministic 确认输出顺序确定,这是 shim 幂等的前提。
+// TestClaudeEnv_Deterministic checks that the output order is stable, which is
+// what makes the shim idempotent.
 func TestClaudeEnv_Deterministic(t *testing.T) {
 	p := config.Provider{
 		Kind: config.KindClaude, BaseURL: "https://x", Model: "m",
@@ -185,11 +192,11 @@ func TestClaudeEnv_Deterministic(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		got := ClaudeEnv("x", p, "", "k")
 		if len(got.Set) != len(first.Set) {
-			t.Fatal("长度不稳定")
+			t.Fatal("length is unstable")
 		}
 		for j := range got.Set {
 			if got.Set[j] != first.Set[j] {
-				t.Fatalf("第 %d 次迭代顺序不同: %v vs %v", i, got.Set[j], first.Set[j])
+				t.Fatalf("iteration %d differs in order: %v vs %v", i, got.Set[j], first.Set[j])
 			}
 		}
 	}
@@ -204,14 +211,14 @@ func TestEnvKey(t *testing.T) {
 	}
 	for in, want := range tests {
 		if got := EnvKey(in); got != want {
-			t.Errorf("EnvKey(%q) = %q, 期望 %q", in, got, want)
+			t.Errorf("EnvKey(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
 
-// TestCodexProfileTOML_NoArrayTables 是机器化守卫:
-// profile 文件绝不能含数组表,否则万一层叠语义是整表替换,
-// base config 里的 [[skills.config]] 与 [projects.*] 会丢。
+// TestCodexProfileTOML_NoArrayTables is a machine-checked guard: a profile
+// file must never contain array tables, because if the layering replaced whole
+// tables, the base config's [[skills.config]] and [projects.*] would be lost.
 func TestCodexProfileTOML_NoArrayTables(t *testing.T) {
 	p := config.Provider{
 		Kind: config.KindCodex, BaseURL: "https://cpa.example/v1",
@@ -223,17 +230,17 @@ func TestCodexProfileTOML_NoArrayTables(t *testing.T) {
 	}
 	s := string(data)
 	if contains(s, "[[") {
-		t.Errorf("profile 含数组表,会威胁 base config:\n%s", s)
+		t.Errorf("profile contains array tables, which would threaten the base config:\n%s", s)
 	}
 	for _, forbidden := range []string{"skills", "projects", "features", "tui", "hooks"} {
 		if contains(s, forbidden) {
-			t.Errorf("profile 含不该出现的键 %q:\n%s", forbidden, s)
+			t.Errorf("profile contains a key it should not have, %q:\n%s", forbidden, s)
 		}
 	}
-	// 必要键要在。
+	// The required keys must be present.
 	for _, want := range []string{"model_provider", "base_url", "env_key", "AK_KEY_CPA"} {
 		if !contains(s, want) {
-			t.Errorf("profile 缺少 %q:\n%s", want, s)
+			t.Errorf("profile is missing %q:\n%s", want, s)
 		}
 	}
 }

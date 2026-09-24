@@ -1,13 +1,12 @@
-// Package ui 是 ak 的 TUI:Providers 与 Usage 两页。
+// Package ui is ak's TUI, with two pages: Providers and Usage.
 package ui
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
-
 	"strings"
+	"syscall"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/usage"
@@ -20,7 +19,8 @@ var (
 	dimStyle   = lipgloss.NewStyle().Faint(true)
 )
 
-// Run 启动 TUI。返回用户选择启动的供应商名,空表示只是退出。
+// Run starts the TUI. Returns the provider name the user chose to launch;
+// empty means they only quit.
 func Run(cfg *config.Config) (string, error) {
 	m := newModel(cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -34,7 +34,8 @@ func Run(cfg *config.Config) (string, error) {
 	return "", nil
 }
 
-// RunUI 是 cli 调用的入口:进 TUI,用户选了供应商就 exec 它。
+// RunUI is the entry point called from the cli: enter the TUI, then exec the
+// provider the user picked.
 func RunUI() error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -44,7 +45,7 @@ func RunUI() error {
 		return err
 	}
 	if len(cfg.Providers) == 0 {
-		fmt.Println("还没有配置供应商。先 `ak add` 或 `ak import --from claude-settings`。")
+		fmt.Println("No providers configured yet. Run `ak add`, or `ak import --from claude-settings`.")
 		return nil
 	}
 	selected, err := Run(cfg)
@@ -54,15 +55,15 @@ func RunUI() error {
 	if selected == "" {
 		return nil
 	}
-	// 启动选中的供应商。用 syscall.Exec 让 claude 接管当前终端和进程,
-	// 不留下一个多余的中间进程。
+	// Launch the chosen provider. syscall.Exec lets the engine take over the
+	// current terminal and process, leaving no extra intermediate process behind.
 	bin := filepath.Join(config.ExpandHome(cfg.Settings.BinDir),
 		cfg.Settings.Prefix+selected)
 	argv := append([]string{bin}, os.Args[1:]...)
 	return syscall.Exec(bin, argv, os.Environ())
 }
 
-// page 是 TUI 的两个页签。
+// page is one of the TUI's two tabs.
 type page int
 
 const (
@@ -70,7 +71,7 @@ const (
 	pageUsage
 )
 
-// Model 是 TUI 状态。
+// Model is the TUI state.
 type Model struct {
 	cfg      *config.Config
 	page     page
@@ -80,11 +81,11 @@ type Model struct {
 	usage    usage.Summary
 	usageErr error
 	quitting bool
-	// selected 非空表示用户选了一个供应商要启动。
+	// A non-empty selected means the user picked a provider to launch.
 	selected string
 }
 
-// Selected 返回用户选择启动的供应商名,空表示只是退出。
+// Selected returns the provider the user chose to launch; empty means quit only.
 func (m Model) Selected() string { return m.selected }
 
 type usageLoadedMsg struct {
@@ -156,7 +157,7 @@ func (m Model) View() string {
 	if m.quitting {
 		return ""
 	}
-	header := "ak  ·  Providers / Usage(Tab 切换)  ·  q 退出\n\n"
+	header := "ak  -  Providers / Usage (Tab to switch)  -  q to quit\n\n"
 
 	var body string
 	switch m.page {
@@ -171,57 +172,57 @@ func (m Model) View() string {
 func (m Model) providersView() string {
 	names := m.cfg.Names()
 	if len(names) == 0 {
-		return "  没有供应商\n"
+		return "  No providers\n"
 	}
 	out := ""
 	for i, n := range names {
 		p := m.cfg.Providers[n]
 		cursor := "  "
 		if i == m.cursor {
-			cursor = "▸ "
+			cursor = "> "
 		}
 		def := ""
 		if m.cfg.Settings.Default == n {
-			def = "  (默认)"
+			def = "  (default)"
 		}
 		out += fmt.Sprintf("%s%-16s %-7s %s%s\n",
 			cursor, m.cfg.Settings.Prefix+n, p.Kind, dash(p.Model), def)
 	}
-	out += "\n回车启动选中的供应商。\n"
+	out += "\nPress Enter to launch the selected provider.\n"
 	return out
 }
 
 func (m Model) usageView() string {
 	if m.usageErr != nil {
-		return fmt.Sprintf("  读取用量失败:%v\n", m.usageErr)
+		return fmt.Sprintf("  Failed to read usage: %v\n", m.usageErr)
 	}
 	if m.usage.TotalTokens == 0 {
-		return "  正在统计,或本机还没有用量记录。\n"
+		return "  Still collecting, or no usage recorded on this machine.\n"
 	}
 
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("总用量"))
+	b.WriteString(titleStyle.Render("Total"))
 	b.WriteString(fmt.Sprintf("  %s tokens", humanize(m.usage.TotalTokens)))
 	if m.usage.TotalCost > 0 {
-		b.WriteString(fmt.Sprintf("  ·  约 $%.2f", m.usage.TotalCost))
+		b.WriteString(fmt.Sprintf("  -  about $%.2f", m.usage.TotalCost))
 	}
 	if m.usage.UnpricedTokens > 0 {
 		b.WriteString(dimStyle.Render(fmt.Sprintf(
-			"  (%s 无定价,未计入成本)", humanize(m.usage.UnpricedTokens))))
+			"  (%s unpriced, excluded from cost)", humanize(m.usage.UnpricedTokens))))
 	}
 	b.WriteString("\n\n")
 
-	b.WriteString(titleStyle.Render("每日 token"))
+	b.WriteString(titleStyle.Render("Daily tokens"))
 	b.WriteString("\n")
 	b.WriteString(renderHeatmap(buildHeatmap(m.usage.ByDate)))
 	b.WriteString("\n")
 
 	if len(m.usage.ByProvider) > 0 {
-		b.WriteString(titleStyle.Render("按供应商"))
+		b.WriteString(titleStyle.Render("By provider"))
 		b.WriteString("\n")
 		for i, r := range m.usage.ByProvider {
 			if i >= 8 {
-				b.WriteString(dimStyle.Render(fmt.Sprintf("  …另 %d 个\n", len(m.usage.ByProvider)-8)))
+				b.WriteString(dimStyle.Render(fmt.Sprintf("  ...%d more\n", len(m.usage.ByProvider)-8)))
 				break
 			}
 			b.WriteString(fmt.Sprintf("  %-14s %10s", r.Name, humanize(r.Tokens)))
@@ -235,11 +236,11 @@ func (m Model) usageView() string {
 	}
 
 	if len(m.usage.ByModel) > 0 {
-		b.WriteString(titleStyle.Render("按模型"))
+		b.WriteString(titleStyle.Render("By model"))
 		b.WriteString("\n")
 		for i, r := range m.usage.ByModel {
 			if i >= 6 {
-				b.WriteString(dimStyle.Render(fmt.Sprintf("  …另 %d 个\n", len(m.usage.ByModel)-6)))
+				b.WriteString(dimStyle.Render(fmt.Sprintf("  ...%d more\n", len(m.usage.ByModel)-6)))
 				break
 			}
 			b.WriteString(fmt.Sprintf("  %-30s %10s", truncate(r.Model, 30), humanize(r.Tokens)))
@@ -253,7 +254,7 @@ func (m Model) usageView() string {
 	return b.String()
 }
 
-// bar 渲染占比条,直观看出相对量级。
+// bar renders a proportion bar, making relative magnitude obvious.
 func bar(v, max int64) string {
 	if max <= 0 {
 		return ""
@@ -263,14 +264,14 @@ func bar(v, max int64) string {
 	if n < 1 && v > 0 {
 		n = 1
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render(strings.Repeat("━", n))
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render(strings.Repeat("-", n))
 }
 
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return s[:n-1] + "."
 }
 
 func (m Model) loadUsage() tea.Cmd {

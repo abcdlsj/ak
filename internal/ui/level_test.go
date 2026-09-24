@@ -7,8 +7,9 @@ import (
 	"github.com/abcdlsj/ak/internal/usage"
 )
 
-// TestLevelDistribution 确认分级能区分不同量级。
-// 真实用量跨度从几十万到几十亿,挤在同一级就失去意义。
+// TestLevelDistribution confirms leveling can distinguish different magnitudes.
+// Real usage spans from hundreds of thousands to billions, so crowding
+// everything into one level would defeat the purpose.
 func TestLevelDistribution(t *testing.T) {
 	days := []usage.DateRow{
 		{Date: "2026-09-20", Tokens: 100000},
@@ -26,16 +27,16 @@ func TestLevelDistribution(t *testing.T) {
 		got[c.Date] = c.Level
 	}
 	if got["2026-09-22"] != 14 {
-		t.Errorf("最大日 level=%d, 应为 14", got["2026-09-22"])
+		t.Errorf("max day level=%d, want 14", got["2026-09-22"])
 	}
 	if got["2026-09-20"] == 0 {
-		t.Error("最小日 level=0,应与无记录区分")
+		t.Error("min day level=0, should differ from a day with no record")
 	}
-	// 中间量级必须分散开
+	// The middle magnitudes must be spread apart.
 	lv := []int{got["2026-09-20"], got["2026-09-21"], got["2026-09-23"], got["2026-09-24"]}
 	for i := 1; i < len(lv); i++ {
 		if lv[i] == lv[i-1] && lv[i] != 14 {
-			t.Errorf("不同量级挤在同一级: %v", lv)
+			t.Errorf("different magnitudes crowded into one level: %v", lv)
 			break
 		}
 	}

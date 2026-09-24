@@ -7,18 +7,19 @@ import (
 	"github.com/abcdlsj/ak/internal/provider"
 )
 
-// claudePlanFor 计算 claude 供应商的环境方案。
+// claudePlanFor computes the environment plan for a claude provider.
 func claudePlanFor(name string, p config.Provider, variant, key string) provider.EnvPlan {
 	return provider.ClaudeEnv(name, p, variant, key)
 }
 
-// codexPlanFor 计算 codex 供应商的环境方案。
+// codexPlanFor computes the environment plan for a codex provider.
 func codexPlanFor(name string, p config.Provider, key string) provider.EnvPlan {
 	return provider.CodexEnv(name, p, key)
 }
 
-// envPlanViewFrom 把 EnvPlan 转成脱敏后的展示行。
-// 密钥只显示前后各几位,避免在终端和截图里暴露完整 key。
+// envPlanViewFrom converts an EnvPlan into masked display lines.
+// Secrets show only their first and last few characters, so a full key is
+// never exposed in terminal output or screenshots.
 func envPlanViewFrom(plan provider.EnvPlan) envPlanView {
 	out := make(envPlanView, 0, len(plan.Set)+len(plan.Unset))
 	for _, kv := range plan.Set {
@@ -30,7 +31,7 @@ func envPlanViewFrom(plan provider.EnvPlan) envPlanView {
 	return out
 }
 
-// sensitiveMarkers 匹配密钥类变量名。
+// sensitiveMarkers match environment variable names that hold secrets.
 var sensitiveMarkers = []string{"KEY", "TOKEN", "SECRET", "PASSWORD"}
 
 func isSensitiveKey(k string) bool {
@@ -43,7 +44,8 @@ func isSensitiveKey(k string) bool {
 	return false
 }
 
-// maskIfSensitive 对密钥类值打码,保留前后各 4 位便于辨识。
+// maskIfSensitive masks a secret value, keeping the first and last 4
+// characters so the entry is still recognizable.
 func maskIfSensitive(k, v string) string {
 	if !isSensitiveKey(k) || len(v) <= 8 {
 		return v

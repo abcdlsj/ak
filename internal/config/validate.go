@@ -5,10 +5,11 @@ import (
 	"regexp"
 )
 
-// nameRe 限制供应商名可安全用作命令名后缀。
+// nameRe constrains provider names so they are safe as a command name suffix.
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
-// Reserved 是 ak 的子命令名。供应商不得占用,否则 `ak <name>` 产生歧义。
+// Reserved holds ak's own subcommand names. A provider must not claim one,
+// otherwise `ak <name>` becomes ambiguous.
 var Reserved = map[string]bool{
 	"ui": true, "pick": true, "list": true, "ls": true, "add": true,
 	"rm": true, "remove": true, "edit": true, "sync": true, "doctor": true,
@@ -17,8 +18,10 @@ var Reserved = map[string]bool{
 	"prune-codexa": true,
 }
 
-// claudeSubcommands 与 codexSubcommands 是变体名的禁用集。
-// 变体走第一位置参数,若与引擎自身的子命令同名,shim 会把它吞掉导致无法调用该子命令。
+// claudeSubcommands and codexSubcommands are the banned variant names.
+// A variant is matched against the first positional argument, so a variant
+// named like one of the engine's own subcommands would swallow it and make
+// that subcommand unreachable.
 var claudeSubcommands = map[string]bool{
 	"mcp": true, "update": true, "doctor": true, "config": true,
 	"install": true, "setup-token": true, "migrate-installer": true,
@@ -32,21 +35,21 @@ var codexSubcommands = map[string]bool{
 	"unarchive": true, "fork": true, "sandbox": true, "cloud": true,
 }
 
-// ValidateName 校验供应商名。
+// ValidateName validates a provider name.
 func ValidateName(name string) error {
 	if !nameRe.MatchString(name) {
-		return fmt.Errorf("供应商名 %q 非法:只允许小写字母、数字、点、下划线、连字符,且以字母或数字开头", name)
+		return fmt.Errorf("invalid provider name %q: only lowercase letters, digits, dots, underscores and hyphens are allowed, and it must start with a letter or digit", name)
 	}
 	if Reserved[name] {
-		return fmt.Errorf("供应商名 %q 与 ak 子命令冲突", name)
+		return fmt.Errorf("provider name %q collides with an ak subcommand", name)
 	}
 	return nil
 }
 
-// Validate 全量校验配置。
+// Validate validates the whole config.
 func Validate(cfg *Config) error {
 	if cfg.Settings.Prefix == "" {
-		return fmt.Errorf("settings.prefix 不能为空")
+		return fmt.Errorf("settings.prefix must not be empty")
 	}
 	for _, name := range cfg.Names() {
 		if err := ValidateName(name); err != nil {
@@ -59,7 +62,7 @@ func Validate(cfg *Config) error {
 	}
 	if d := cfg.Settings.Default; d != "" {
 		if _, ok := cfg.Providers[d]; !ok {
-			return fmt.Errorf("settings.default 指向不存在的供应商 %q", d)
+			return fmt.Errorf("settings.default points at unknown provider %q", d)
 		}
 	}
 	return nil
@@ -69,31 +72,31 @@ func validateProvider(name string, p Provider) error {
 	switch p.Kind {
 	case KindClaude, KindCodex:
 	case "":
-		return fmt.Errorf("供应商 %q 缺少 kind(claude 或 codex)", name)
+		return fmt.Errorf("provider %q is missing kind (claude or codex)", name)
 	default:
-		return fmt.Errorf("供应商 %q 的 kind %q 无效,只能是 claude 或 codex", name, p.Kind)
+		return fmt.Errorf("provider %q has invalid kind %q; must be claude or codex", name, p.Kind)
 	}
 	if p.BaseURL == "" {
-		return fmt.Errorf("供应商 %q 缺少 base_url", name)
+		return fmt.Errorf("provider %q is missing base_url", name)
 	}
 	if p.APIKey != "" && p.APIKeyRef != "" {
-		return fmt.Errorf("供应商 %q 的 api_key 与 api_key_ref 互斥,只能设一个", name)
+		return fmt.Errorf("provider %q sets both api_key and api_key_ref; only one is allowed", name)
 	}
 	if p.Kind == KindClaude {
 		switch p.KeyField {
 		case "", "auth_token", "api_key":
 		default:
-			return fmt.Errorf("供应商 %q 的 key_field %q 无效,只能是 auth_token 或 api_key", name, p.KeyField)
+			return fmt.Errorf("provider %q has invalid key_field %q; must be auth_token or api_key", name, p.KeyField)
 		}
 	}
 	if p.Kind == KindCodex {
 		switch p.WireAPI {
 		case "", "responses", "chat":
 		default:
-			return fmt.Errorf("供应商 %q 的 wire_api %q 无效,只能是 responses 或 chat", name, p.WireAPI)
+			return fmt.Errorf("provider %q has invalid wire_api %q; must be responses or chat", name, p.WireAPI)
 		}
 		if r := p.Reasoning; r != "" && !validReasoning[r] {
-			return fmt.Errorf("供应商 %q 的 reasoning %q 无效", name, r)
+			return fmt.Errorf("provider %q has invalid reasoning %q", name, r)
 		}
 	}
 	return validateVariants(name, p)
@@ -106,34 +109,36 @@ func validateVariants(name string, p Provider) error {
 	}
 	for v := range p.Variants {
 		if !nameRe.MatchString(v) {
-			return fmt.Errorf("供应商 %q 的变体名 %q 非法", name, v)
+			return fmt.Errorf("provider %q has invalid variant name %q", name, v)
 		}
 		if banned[v] {
-			return fmt.Errorf("供应商 %q 的变体名 %q 与 %s 子命令冲突,会导致该子命令无法调用", name, v, p.Kind)
+			return fmt.Errorf("provider %q variant %q collides with a %s subcommand, making that subcommand unreachable", name, v, p.Kind)
 		}
 		if p.Kind == KindClaude && implicitClaudeVariants[v] {
-			return fmt.Errorf("供应商 %q 的变体名 %q 与内置档位变体冲突", name, v)
+			return fmt.Errorf("provider %q variant %q collides with a built-in model tier variant", name, v)
 		}
 		if p.Kind == KindCodex && validReasoning[v] {
-			return fmt.Errorf("供应商 %q 的变体名 %q 与 reasoning effort 档位冲突", name, v)
+			return fmt.Errorf("provider %q variant %q collides with a reasoning effort level", name, v)
 		}
 	}
 	return nil
 }
 
-// validReasoning 是 codex 的 reasoning effort 档位,也是 codex shim 的隐式变体。
+// validReasoning lists codex's reasoning effort levels. They double as the
+// implicit variants of a codex shim.
 var validReasoning = map[string]bool{
 	"minimal": true, "low": true, "medium": true, "high": true,
 	"xhigh": true, "max": true,
 }
 
-// implicitClaudeVariants 是 claude shim 的内置档位变体。
+// implicitClaudeVariants lists the built-in model tier variants of a claude
+// shim.
 var implicitClaudeVariants = map[string]bool{
 	"opus": true, "sonnet": true, "haiku": true,
 }
 
-// ValidReasoning 暴露给 shim 渲染用。
+// ValidReasoning is exposed for shim rendering.
 func ValidReasoning() map[string]bool { return validReasoning }
 
-// ImplicitClaudeVariants 暴露给 shim 渲染用。
+// ImplicitClaudeVariants is exposed for shim rendering.
 func ImplicitClaudeVariants() map[string]bool { return implicitClaudeVariants }

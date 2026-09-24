@@ -14,11 +14,12 @@ func newUsageCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "usage",
-		Short: "统计 claude / codex 的 token 用量",
-		Long: `解析本机 session 日志统计用量。
+		Short: "Report token usage across claude and codex",
+		Long: `Aggregate usage by parsing the local session logs.
 
-首次扫描需要解析全部历史日志,耗时数秒;之后增量更新,近乎瞬时。
-成本按 models.dev 定价估算,查不到定价的模型只计 token 不计钱。`,
+The first scan parses the whole history and takes a few seconds; later runs
+are incremental and near-instant. Cost is estimated from models.dev pricing;
+models with no pricing contribute tokens only, never a dollar figure.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -37,24 +38,24 @@ func newUsageCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "以 JSON 输出")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
 func printUsage(s usage.Summary) {
-	fmt.Printf("总计 %s tokens", humanizeInt(s.TotalTokens))
+	fmt.Printf("total %s tokens", humanizeInt(s.TotalTokens))
 	if s.TotalCost > 0 {
-		fmt.Printf("  ·  约 $%.2f", s.TotalCost)
+		fmt.Printf("  ·  about $%.2f", s.TotalCost)
 	}
 	if s.UnpricedTokens > 0 {
-		fmt.Printf("  (%s tokens 无定价数据,未计入成本)", humanizeInt(s.UnpricedTokens))
+		fmt.Printf("  (%s tokens have no pricing data and are excluded from cost)", humanizeInt(s.UnpricedTokens))
 	}
 	fmt.Println()
 
 	if len(s.ByProvider) > 0 {
-		fmt.Println("按供应商")
+		fmt.Println("by provider")
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "  供应商\ttokens\t成本")
+		fmt.Fprintln(w, "  provider\ttokens\tcost")
 		for _, r := range s.ByProvider {
 			fmt.Fprintf(w, "  %s\t%s\t%s\n", r.Name, humanizeInt(r.Tokens), costStr(r.Cost))
 		}
@@ -63,9 +64,9 @@ func printUsage(s usage.Summary) {
 	}
 
 	if len(s.ByModel) > 0 {
-		fmt.Println("按模型")
+		fmt.Println("by model")
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "  模型\ttokens\t成本")
+		fmt.Fprintln(w, "  model\ttokens\tcost")
 		for _, r := range s.ByModel {
 			fmt.Fprintf(w, "  %s\t%s\t%s\n", r.Model, humanizeInt(r.Tokens), costStr(r.Cost))
 		}
@@ -74,7 +75,7 @@ func printUsage(s usage.Summary) {
 	}
 
 	if len(s.ByDate) > 0 {
-		fmt.Printf("近 %d 天有记录,最早 %s,最晚 %s。\n",
+		fmt.Printf("%d days on record, earliest %s, latest %s.\n",
 			len(s.ByDate), s.ByDate[0].Date, s.ByDate[len(s.ByDate)-1].Date)
 	}
 }

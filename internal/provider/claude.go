@@ -1,4 +1,5 @@
-// Package provider 把配置里的供应商翻译成 shim 需要的环境变量与配置文件。
+// Package provider translates the configured providers into the environment
+// variables and config files the shims need.
 package provider
 
 import (
@@ -7,27 +8,31 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 )
 
-// KV 是一个有序的环境变量键值对。
+// KV is an ordered environment variable key-value pair.
 type KV struct {
 	Key   string
 	Value string
 }
 
-// EnvPlan 是 shim 要注入的完整环境:Set 逐条 export,Unset 逐条 unset。
+// EnvPlan is the full environment a shim injects: Set is exported, Unset is
+// unset.
 type EnvPlan struct {
 	Set   []KV
 	Unset []string
 }
 
-// claudeAuthKeys 是两个互斥的鉴权变量。只写一个,另一个必须 unset。
+// claudeAuthKeys are the two mutually exclusive auth variables. Only one is
+// written; the other must be unset.
 const (
 	envAuthToken = "ANTHROPIC_AUTH_TOKEN"
 	envAPIKey    = "ANTHROPIC_API_KEY"
 )
 
-// claudeProviderKeys 是供应商专属的环境变量全集,来自 cc-switch 的
-// ENV_PROVIDER_SPECIFIC_EXCLUDES(src-tauri/src/services/provider/mod.rs:6414)。
-// shim 不设置的那些必须显式 unset,否则嵌套启动时会从父进程泄漏进来。
+// claudeProviderKeys is the complete set of provider-specific environment
+// variables, taken from cc-switch's ENV_PROVIDER_SPECIFIC_EXCLUDES
+// (src-tauri/src/services/provider/mod.rs:6414).
+// The ones a shim does not set must be explicitly unset, otherwise they leak
+// in from the parent process on a nested launch.
 var claudeProviderKeys = []string{
 	envAuthToken,
 	envAPIKey,
@@ -37,12 +42,12 @@ var claudeProviderKeys = []string{
 	"ANTHROPIC_DEFAULT_SONNET_MODEL",
 	"ANTHROPIC_DEFAULT_OPUS_MODEL",
 	"ANTHROPIC_DEFAULT_FABLE_MODEL",
-	"ANTHROPIC_SMALL_FAST_MODEL", // 已废弃,一律 unset
+	"ANTHROPIC_SMALL_FAST_MODEL", // deprecated, always unset
 	"CLAUDE_CODE_SUBAGENT_MODEL",
 }
 
-// ClaudeEnv 计算 claude 供应商的环境变量方案。
-// variant 为空表示不使用变体;key 是已解析出的明文密钥。
+// ClaudeEnv computes the environment plan for a claude provider.
+// An empty variant means no variant; key is the resolved plaintext secret.
 func ClaudeEnv(name string, p config.Provider, variant string, key string) EnvPlan {
 	env := map[string]string{}
 
@@ -62,12 +67,13 @@ func ClaudeEnv(name string, p config.Provider, variant string, key string) EnvPl
 	setIf(env, "ANTHROPIC_DEFAULT_SONNET_MODEL", sonnet)
 	setIf(env, "ANTHROPIC_DEFAULT_OPUS_MODEL", opus)
 
-	// 长尾 env 最后合并,可覆盖上面的派生键。
+	// Extra env vars merge last and can override the derived keys above.
 	for k, v := range p.Env {
 		env[k] = v
 	}
 
-	// 变体覆盖模型。内置档位 opus/sonnet/haiku 直接改主模型。
+	// A variant overrides the model. The built-in opus/sonnet/haiku tiers
+	// replace the primary model directly.
 	if variant != "" {
 		switch variant {
 		case "opus":
@@ -93,12 +99,15 @@ func ClaudeEnv(name string, p config.Provider, variant string, key string) EnvPl
 	return EnvPlan{Set: sortedKV(env), Unset: unsetList(claudeProviderKeys, env)}
 }
 
-// normalizeModels 实现 cc-switch 的 small_fast 迁移语义
+// normalizeModels implements cc-switch's small_fast migration semantics
 // (normalize_claude_models_in_value, mod.rs:7341):
-// haiku  ← 现值 → small_fast → model
-// sonnet ← 现值 → model → small_fast
-// opus   ← 现值 → model → small_fast
-// 已显式指定的档位不被改写,ANTHROPIC_SMALL_FAST_MODEL 最终丢弃。
+//
+//	haiku  <- current value -> small_fast -> model
+//	sonnet <- current value -> model -> small_fast
+//	opus   <- current value -> model -> small_fast
+//
+// An explicitly set tier is never rewritten, and ANTHROPIC_SMALL_FAST_MODEL is
+// dropped in the end.
 func normalizeModels(p config.Provider) (model, haiku, sonnet, opus string) {
 	model = p.Model
 	smallFast := p.Env["ANTHROPIC_SMALL_FAST_MODEL"]
@@ -124,8 +133,9 @@ func setIf(m map[string]string, k, v string) {
 	}
 }
 
-// unsetList 返回 known 中未被 set 的键,排序后输出。
-// ANTHROPIC_SMALL_FAST_MODEL 已废弃,即使配置里写了也强制 unset。
+// unsetList returns the keys in known that are not in set, sorted.
+// ANTHROPIC_SMALL_FAST_MODEL is deprecated and is force-unset even when it is
+// configured.
 func unsetList(known []string, set map[string]string) []string {
 	var out []string
 	for _, k := range known {
@@ -144,7 +154,8 @@ func unsetList(known []string, set map[string]string) []string {
 func sortedKV(m map[string]string) []KV {
 	keys := make([]string, 0, len(m))
 	for k := range m {
-		// small_fast 已废弃,不进 set 列表(它只在 normalizeModels 里当输入)。
+		// small_fast is deprecated and never goes into the set list; it only
+		// feeds normalizeModels as input.
 		if k == "ANTHROPIC_SMALL_FAST_MODEL" {
 			continue
 		}
@@ -158,7 +169,8 @@ func sortedKV(m map[string]string) []KV {
 	return out
 }
 
-// ClaudeVariants 返回该供应商 shim 需要识别的全部变体名(内置档位 + 自定义),已排序。
+// ClaudeVariants returns every variant name the provider's shim must recognise
+// (built-in tiers plus custom ones), sorted.
 func ClaudeVariants(p config.Provider) []string {
 	seen := map[string]bool{}
 	var out []string

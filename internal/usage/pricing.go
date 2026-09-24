@@ -12,10 +12,10 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 )
 
-// modelsDevURL 是官方模型定价源,cc-switch 也用这个。
+// modelsDevURL is the official model pricing source, also used by cc-switch.
 const modelsDevURL = "https://models.dev/api.json"
 
-// modelPrice 是每百万 token 的价格,单位美元。
+// modelPrice is the price per million tokens, in USD.
 type modelPrice struct {
 	Input      float64 `json:"input"`
 	Output     float64 `json:"output"`
@@ -29,7 +29,7 @@ var (
 	priceMu    sync.RWMutex
 )
 
-// modelsDevCost 对应 models.dev 的 cost 结构。
+// modelsDevCost mirrors models.dev's cost structure.
 type modelsDevCost struct {
 	Input      *float64 `json:"input"`
 	Output     *float64 `json:"output"`
@@ -45,7 +45,8 @@ type modelsDevProvider struct {
 	Models map[string]modelsDevModel `json:"models"`
 }
 
-// loadPrices 载入定价表。优先用本地缓存(24h 内),否则拉 models.dev。
+// loadPrices loads the pricing table. It prefers the local cache (within 24h)
+// and otherwise fetches from models.dev.
 func loadPrices() {
 	priceOnce.Do(func() {
 		priceTable = map[string]modelPrice{}
@@ -106,7 +107,7 @@ func fetchPrices() (map[string]modelPrice, error) {
 		return nil, err
 	}
 
-	// models.dev 的 cost 单位已经是「美元每百万 token」,原样存即可。
+	// models.dev's cost unit is already USD per million tokens, so store it as-is.
 	out := map[string]modelPrice{}
 	for _, prov := range doc {
 		for id, m := range prov.Models {
@@ -131,19 +132,20 @@ func deref(f *float64) float64 {
 	return *f
 }
 
-// costOf 计算一行的成本。
-// 返回 priced=false 表示查不到定价 —— 调用方必须把它计入 unpricedTokens,
-// 绝不能当成 0 元,否则总成本会静默偏低。
+// costOf computes the cost of one row.
+// priced=false means no pricing data was found. The caller must count it into
+// unpricedTokens and must never treat it as zero, otherwise the total cost is
+// silently understated.
 func costOf(r Row, cfg *config.Config) (float64, bool) {
 	t := r.Tokens
 
-	// 1. 供应商显式覆盖优先。
+	// 1. An explicit provider override takes precedence.
 	if p, ok := cfg.Providers[r.Provider]; ok && p.Pricing != nil {
 		pr := *p.Pricing
 		if pr.Input > 0 || pr.Output > 0 || pr.CacheRead > 0 || pr.CacheWrite > 0 {
 			return calcCost(t, pr.Input, pr.Output, pr.CacheRead, pr.CacheWrite), true
 		}
-		// 折扣模式:在 models.dev 价格上打折。
+		// Discount mode: apply the factor on top of the models.dev price.
 		if pr.Discount > 0 {
 			base, ok := lookupPrice(r.Model)
 			if ok {
@@ -169,7 +171,8 @@ func calcCost(t Tokens, in, out, cacheRead, cacheWrite float64) float64 {
 		float64(t.CacheWrite)/1e6*cacheWrite
 }
 
-// lookupPrice 查模型定价。找不到时尝试几种常见的命名变体。
+// lookupPrice looks up a model's pricing. When not found it tries a few common
+// naming variants.
 func lookupPrice(model string) (modelPrice, bool) {
 	loadPrices()
 	priceMu.RLock()
@@ -178,7 +181,7 @@ func lookupPrice(model string) (modelPrice, bool) {
 	if p, ok := priceTable[model]; ok {
 		return p, true
 	}
-	// 中转站常给模型加后缀,剥掉再试一次。
+	// Relay services often append a suffix to model names; strip it and retry.
 	for _, suffix := range []string{"-latest", "-preview", "-thinking", "-code"} {
 		if strings.HasSuffix(model, suffix) {
 			trimmed := strings.TrimSuffix(model, suffix)

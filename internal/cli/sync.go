@@ -14,7 +14,7 @@ func newSyncCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "按配置重新生成所有命令,并回收不再需要的产物",
+		Short: "Regenerate all commands from the config and reclaim stale artifacts",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -23,7 +23,7 @@ func newSyncCmd() *cobra.Command {
 			return runSync(cfg, dryRun)
 		},
 	}
-	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "只显示将要做的改动,不落盘")
+	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Show the changes without writing anything")
 	return cmd
 }
 
@@ -38,19 +38,19 @@ func runSync(cfg *config.Config, dryRun bool) error {
 	return nil
 }
 
-// newSyncer 构造同步器。所有需要生成产物的调用方都用它。
+// newSyncer builds the syncer. Every caller that generates artifacts uses it.
 func newSyncer(cfg *config.Config) *shim.Syncer {
 	return &shim.Syncer{Cfg: cfg, Resolver: secrets.Default()}
 }
 
 func printReport(rep shim.Report) {
 	if rep.DryRun {
-		fmt.Println("(dry-run,未落盘)")
+		fmt.Println("(dry-run, nothing written)")
 	}
 	for _, r := range rep.Results {
 		switch r.Action {
 		case shim.ActionUnchanged:
-			continue // 不变的不打,输出保持安静
+			continue // Stay quiet about unchanged files.
 		case shim.ActionSkipped:
 			fmt.Printf("  %-9s %s  — %s\n", r.Action, filepath.Base(r.Path), r.Reason)
 		default:
@@ -58,7 +58,7 @@ func printReport(rep shim.Report) {
 		}
 	}
 	c := rep.Counts()
-	fmt.Printf("%d 新建, %d 更新, %d 未变, %d 删除, %d 跳过\n",
+	fmt.Printf("%d created, %d updated, %d unchanged, %d removed, %d skipped\n",
 		c[shim.ActionCreated], c[shim.ActionUpdated],
 		c[shim.ActionUnchanged], c[shim.ActionRemoved], c[shim.ActionSkipped])
 }

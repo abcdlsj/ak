@@ -11,17 +11,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// hookMarker 标识这条 hook 由 ak 管理,卸载时据此识别。
+// hookMarker marks a hook as managed by ak, so uninstall can find it.
 const hookMarker = "ak-session-attrib"
 
-// newHookCmd 管理 SessionStart hook。
+// newHookCmd manages the SessionStart hook.
 //
-// claude 的 session 日志不记录连的是哪个供应商,要靠这条 hook 把
-// session_id → AK_PROVIDER 记下来,用量统计才能归属到供应商。
+// Claude's session logs do not record which provider a session used, so this
+// hook writes session_id -> AK_PROVIDER; usage aggregation then joins on it to
+// attribute tokens to a provider.
 func newHookCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hook",
-		Short: "安装或卸载用量归属所需的 SessionStart hook",
+		Short: "Install or remove the SessionStart hook required for usage attribution",
 	}
 	cmd.AddCommand(newHookInstallCmd(), newHookUninstallCmd())
 	return cmd
@@ -30,7 +31,7 @@ func newHookCmd() *cobra.Command {
 func newHookInstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "安装 SessionStart hook(让 claude 用量能归到供应商)",
+		Short: "Install the SessionStart hook so claude usage is attributed to providers",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return installHook()
 		},
@@ -40,14 +41,15 @@ func newHookInstallCmd() *cobra.Command {
 func newHookUninstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "uninstall",
-		Short: "卸载 hook",
+		Short: "Remove the hook",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return uninstallHook()
 		},
 	}
 }
 
-// hookScript 是 hook 本体。只追加一行 jsonl,不做任何可能阻塞启动的事。
+// hookScript is the hook body. It appends a single JSON line and does
+// nothing that could delay startup.
 func hookScript() string {
 	bin, err := os.Executable()
 	if err != nil || bin == "" {
@@ -65,17 +67,17 @@ func installHook() error {
 	path := settingsPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("读取 %s: %w", path, err)
+		return fmt.Errorf("read %s: %w", path, err)
 	}
 
 	var settings map[string]json.RawMessage
 	if err := json.Unmarshal(data, &settings); err != nil {
-		return fmt.Errorf("解析 %s: %w", path, err)
+		return fmt.Errorf("parse %s: %w", path, err)
 	}
 
-	// 已有 hooks 则不重复装。
+	// Already installed: do not add a second copy.
 	if raw, ok := settings["hooks"]; ok && contains(string(raw), hookMarker) {
-		fmt.Println("hook 已安装。")
+		fmt.Println("hook already installed")
 		return nil
 	}
 
@@ -89,7 +91,7 @@ func installHook() error {
 	var hooks map[string][]map[string]any
 	if raw, ok := settings["hooks"]; ok {
 		if err := json.Unmarshal(raw, &hooks); err != nil {
-			return fmt.Errorf("解析现有 hooks: %w", err)
+			return fmt.Errorf("parse existing hooks: %w", err)
 		}
 	} else {
 		hooks = map[string][]map[string]any{}
@@ -109,8 +111,8 @@ func installHook() error {
 	if err := config.AtomicWrite(path, out, 0o600); err != nil {
 		return err
 	}
-	fmt.Println("已安装 SessionStart hook。")
-	fmt.Println("之后 claude 的用量就能按供应商归因了(之前的记录仍记为 unknown)。")
+	fmt.Println("installed SessionStart hook")
+	fmt.Println("claude usage is now attributed to providers; earlier records stay unknown")
 	return nil
 }
 
@@ -126,7 +128,7 @@ func uninstallHook() error {
 	}
 	raw, ok := settings["hooks"]
 	if !ok || !contains(string(raw), hookMarker) {
-		fmt.Println("没有 ak 装的 hook。")
+		fmt.Println("no ak-managed hook found")
 		return nil
 	}
 
@@ -176,10 +178,11 @@ func contains(s, sub string) bool {
 	return false
 }
 
-// newRecordSessionCmd 是隐藏命令,由 hook 调用,不给人手敲。
+// newRecordSessionCmd is a hidden command invoked by the hook, not by hand.
 //
-// claude 通过 stdin 传 JSON 给 hook(含 session_id),不是环境变量 ——
-// 第一次实现时按环境变量取,结果 session_id 全是空的。
+// Claude passes a JSON payload on stdin (including session_id) rather than an
+// environment variable; the first implementation read an env var and every
+// session_id came back empty.
 func newRecordSessionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "__record-session",
@@ -195,19 +198,20 @@ func newRecordSessionCmd() *cobra.Command {
 
 			sessionID := sessionIDFromStdin()
 			if sessionID == "" {
-				return nil // 拿不到 id 就放弃,不写无用的空记录
+				// Without an id the record is useless, so skip it rather
+				// than writing an empty entry.
 			}
 			return usage.RecordSession(sessionID, provider)
 		},
 	}
 }
 
-// sessionIDFromStdin 从 hook 的 stdin JSON 里取 session_id。
+// sessionIDFromStdin reads session_id from the hook's stdin JSON.
 func sessionIDFromStdin() string {
 	var payload struct {
 		SessionID string `json:"session_id"`
 	}
-	// 只读一次;空 stdin 时直接返回空。
+	// A single decode; empty stdin just yields an empty id.
 	dec := json.NewDecoder(os.Stdin)
 	if err := dec.Decode(&payload); err != nil {
 		return ""

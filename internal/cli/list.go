@@ -15,7 +15,7 @@ func newListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
-		Short:   "列出所有供应商",
+		Short:   "List all providers",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -28,7 +28,7 @@ func newListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "以 JSON 输出")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
@@ -62,11 +62,11 @@ func listRows(cfg *config.Config) []listRow {
 func printList(cfg *config.Config) {
 	rows := listRows(cfg)
 	if len(rows) == 0 {
-		fmt.Println("还没有配置供应商。用 `ak add` 添加,或 `ak import --from claude-settings` 从现有配置导入。")
+		fmt.Println("No providers yet. Add one with `ak add`, or `ak import --from claude-settings`.")
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "命令\t引擎\t模型\t端点\t说明")
+	fmt.Fprintln(w, "command\tengine\tmodel\tendpoint\tdisplay")
 	for _, r := range rows {
 		mark := ""
 		if r.Default {
@@ -77,7 +77,7 @@ func printList(cfg *config.Config) {
 	}
 	w.Flush()
 	if cfg.Settings.Default != "" {
-		fmt.Println("\n* 为默认供应商")
+		fmt.Println("\n* marks the default provider")
 	}
 }
 

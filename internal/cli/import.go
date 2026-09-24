@@ -14,11 +14,11 @@ func newImportCmd() *cobra.Command {
 	var from string
 	cmd := &cobra.Command{
 		Use:   "import",
-		Short: "从现有配置导入供应商",
-		Long: `从现有配置读取供应商,写进 ak。
+		Short: "Import providers from an existing configuration",
+		Long: `Read providers from an existing configuration into ak.
 
-  ak import --from claude-settings   # 读 ~/.claude/settings.json 的 env
-  ak import --from codexa            # 读 ~/.codex/profiles/*/`,
+  ak import --from claude-settings   # env block of ~/.claude/settings.json
+  ak import --from codexa            # ~/.codex/profiles/*/`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -30,40 +30,42 @@ func newImportCmd() *cobra.Command {
 			case "codexa":
 				return importCodexa(cfg)
 			default:
-				return fmt.Errorf("--from 只能是 claude-settings 或 codexa,当前是 %q", from)
+				return fmt.Errorf("--from must be claude-settings or codexa, got %q", from)
 			}
 		},
 	}
-	cmd.Flags().StringVar(&from, "from", "", "数据源:claude-settings 或 codexa")
+	cmd.Flags().StringVar(&from, "from", "", "Source: claude-settings or codexa")
 	cmd.MarkFlagRequired("from")
 	return cmd
 }
 
-// importClaudeSettings 把 settings.json 里的供应商键收进 ak。
+// importClaudeSettings moves the provider keys out of settings.json into ak.
 //
-// 只搬供应商专属键。全局偏好(NODE_EXTRA_CA_CERTS、
-// CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC 等)原地保留,因为它们对所有供应商都该生效。
-// 搬完后打印待删清单 —— 删除动作交给用户手动执行,ak 不写 settings.json 的供应商键。
+// Only provider-specific keys move. Global preferences (NODE_EXTRA_CA_CERTS,
+// CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC and the like) stay put, because they
+// should apply to every provider. Afterwards a list of keys to delete is
+// printed; the deletion is left to the user, ak never writes provider keys into
+// settings.json.
 func importClaudeSettings(cfg *config.Config) error {
 	path := claudeSettingsPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("读取 %s: %w", path, err)
+		return fmt.Errorf("read %s: %w", path, err)
 	}
 	var settings struct {
 		Env map[string]string `json:"env"`
 	}
 	if err := json.Unmarshal(data, &settings); err != nil {
-		return fmt.Errorf("解析 %s: %w", path, err)
+		return fmt.Errorf("parse %s: %w", path, err)
 	}
 	env := settings.Env
 
 	base := env["ANTHROPIC_BASE_URL"]
 	if base == "" {
-		return fmt.Errorf("%s 的 env 里没有 ANTHROPIC_BASE_URL,无从导入", path)
+		return fmt.Errorf("%s has no ANTHROPIC_BASE_URL in env, nothing to import", path)
 	}
 
-	// "default" 是 ak 的子命令名,不能用作供应商名。
+	// "default" is an ak subcommand name, so it cannot name a provider.
 	name := "imported"
 	if _, exists := cfg.Providers[name]; exists {
 		for i := 2; ; i++ {
@@ -89,10 +91,10 @@ func importClaudeSettings(cfg *config.Config) error {
 	} else if k := env["ANTHROPIC_AUTH_TOKEN"]; k != "" {
 		p.APIKey, p.KeyField = k, "auth_token"
 	}
-	// 其余长尾供应商键一并带走,不留在 settings.json 里。
-	// 注意只收供应商专属键;全局偏好(NODE_EXTRA_CA_CERTS、
-	// CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC、CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 等)
-	// 对所有供应商都该生效,必须留在 settings.json 里。
+	// Carry over the remaining provider-specific keys so they do not linger in
+	// settings.json. Only provider keys are collected; global preferences such
+	// as NODE_EXTRA_CA_CERTS, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC and
+	// CLAUDE_AUTOCOMPACT_PCT_OVERRIDE must stay in settings.json.
 	for _, k := range []string{
 		"CLAUDE_CODE_SUBAGENT_MODEL",
 		"CLAUDE_CODE_MAX_CONTEXT_TOKENS",
@@ -122,21 +124,26 @@ func importClaudeSettings(cfg *config.Config) error {
 		return err
 	}
 
-	fmt.Printf("\n已导入为供应商 %q。\n\n", name)
-	fmt.Println("接下来请手动从 settings.json 删除这些键(否则它们会覆盖 ak-* 的环境变量):")
+	fmt.Printf("\nimported as provider %q.\n\n", name)
+	fmt.Println("Now remove these keys from settings.json by hand, otherwise they")
+	fmt.Println("override the environment the ak-* commands inject:")
 	for _, k := range providerEnvKeys {
 		if _, ok := env[k]; ok {
 			fmt.Printf("    %s\n", k)
 		}
 	}
-	fmt.Printf("\n  文件: %s\n", path)
-	fmt.Println("  请保留其中的全局偏好键(NODE_EXTRA_CA_CERTS、CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 等)。")
-	fmt.Printf("\n删完后用 `ak-%s -p 'reply OK'` 验证。\n", name)
+	fmt.Printf("\n  file: %s\n", path)
+	fmt.Println("  Keep the global preference keys there (NODE_EXTRA_CA_CERTS,")
+	fmt.Println("  CLAUDE_AUTOCOMPACT_PCT_OVERRIDE and friends).")
+	fmt.Printf("\nThen verify with `ak-%s -p 'reply OK'`.\n", name)
 	return nil
 }
 
-// importCodexa 读 codexa 的 profile 并合并重复项。
-// 全程只读源数据:profile 目录里有 GB 级日志库和指回主 home 的 symlink,误删代价不可逆。
+// importCodexa reads codexa's profiles and merges duplicates.
+//
+// The source is only ever read: profile directories hold GB-sized log
+// databases, some symlinked back to the primary home, and deleting or
+// following those is irreversible.
 func importCodexa(cfg *config.Config) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -145,7 +152,7 @@ func importCodexa(cfg *config.Config) error {
 	root := filepath.Join(home, ".codex", "profiles")
 	entries, err := os.ReadDir(root)
 	if os.IsNotExist(err) {
-		return fmt.Errorf("没有 %s,可能没用过 codexa", root)
+		return fmt.Errorf("%s does not exist, codexa may never have been used", root)
 	}
 	if err != nil {
 		return err
@@ -156,7 +163,7 @@ func importCodexa(cfg *config.Config) error {
 		p    config.Provider
 	}
 	var got []imported
-	seen := map[string]string{} // (base_url,model,wire) -> 已用的供应商名
+	seen := map[string]string{} // (base_url, model, wire) -> provider name already used
 
 	for _, e := range entries {
 		if !e.IsDir() {
@@ -166,24 +173,25 @@ func importCodexa(cfg *config.Config) error {
 		cfgPath := filepath.Join(root, profile, "config.toml")
 		raw, err := os.ReadFile(cfgPath)
 		if err != nil || len(raw) == 0 {
-			fmt.Printf("  跳过 %s:无 config.toml 或为空\n", profile)
+			fmt.Printf("  skip %s: no config.toml or it is empty\n", profile)
 			continue
 		}
 
 		prof, err := parseCodexaProfile(raw)
 		if err != nil {
-			fmt.Printf("  跳过 %s:%v\n", profile, err)
+			fmt.Printf("  skip %s: %v\n", profile, err)
 			continue
 		}
 		if prof.BaseURL == "" {
-			fmt.Printf("  跳过 %s:解析不到 base_url\n", profile)
+			fmt.Printf("  skip %s: no base_url found\n", profile)
 			continue
 		}
 
-		// 去重:base_url+model+wire 相同的视为同一供应商,保留较短的名字。
+		// Deduplicate: profiles sharing base_url, model and wire_api are the
+		// same provider, and the first (shortest) name wins.
 		key := prof.BaseURL + "\x00" + prof.Model + "\x00" + prof.WireAPI
 		if prev, ok := seen[key]; ok {
-			fmt.Printf("  %s 与 %s 配置相同,已合并\n", profile, prev)
+			fmt.Printf("  %s has the same config as %s, merged\n", profile, prev)
 			continue
 		}
 
@@ -199,14 +207,14 @@ func importCodexa(cfg *config.Config) error {
 			Display:    profile,
 		}
 		if p.APIKey == "" {
-			fmt.Printf("  注意:%s 没读到 key,稍后可用 `ak edit %s` 补\n", profile, name)
+			fmt.Printf("  note: no key read for %s, fill it in later with `ak edit %s`\n", profile, name)
 		}
 		got = append(got, imported{name: name, p: p})
 		seen[key] = name
 	}
 
 	if len(got) == 0 {
-		return fmt.Errorf("没有可导入的 profile")
+		return fmt.Errorf("no profiles to import")
 	}
 
 	if cfg.Providers == nil {
@@ -225,12 +233,12 @@ func importCodexa(cfg *config.Config) error {
 		return err
 	}
 
-	fmt.Printf("\n已导入 %d 个供应商。旧的 ~/.codex/profiles/ 与 codex-* 命令未做任何改动。\n", len(got))
-	fmt.Println("确认 `ak-<name>` 行为符合预期后,可用 `ak prune-codexa` 清理旧命令(默认 dry-run)。")
+	fmt.Printf("\nimported %d provider(s). ~/.codex/profiles/ and the codex-* commands are untouched.\n", len(got))
+	fmt.Println("Once `ak-<name>` behaves as expected, `ak prune-codexa` removes the legacy commands (dry-run by default).")
 	return nil
 }
 
-// codexaProfile 是从 codexa profile 解析出的信息。
+// codexaProfile holds the settings extracted from a codexa profile.
 type codexaProfile struct {
 	ProviderID string
 	BaseURL    string
@@ -240,7 +248,7 @@ type codexaProfile struct {
 	EnvKey     string
 }
 
-// uniqueName 返回不与现有供应商冲突的名字。
+// uniqueName returns a name that does not collide with an existing provider.
 func uniqueName(cfg *config.Config, base string) string {
 	if _, ok := cfg.Providers[base]; !ok {
 		return base

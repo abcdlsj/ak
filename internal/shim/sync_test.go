@@ -10,8 +10,9 @@ import (
 	"github.com/abcdlsj/ak/internal/secrets"
 )
 
-// TestCheckRemovable_Safety 是最高优先级的测试:误删用户自有工具的代价极高。
-// ~/.local/bin 里有 warren、minions、agy、aicoding 等真实工具。
+// TestCheckRemovable_Safety is the highest-priority test: wrongly deleting a
+// user's own tool is extremely costly. ~/.local/bin holds real tools such as
+// warren, minions, agy and aicoding.
 func TestCheckRemovable_Safety(t *testing.T) {
 	dir := t.TempDir()
 	s := &Syncer{Cfg: config.Default()}
@@ -30,36 +31,36 @@ func TestCheckRemovable_Safety(t *testing.T) {
 		name    string
 		path    string
 		wantOK  bool
-		reasonC string // 期望 reason 包含的子串
+		reasonC string // Substring the reason is expected to contain
 	}{
 		{
-			name:   "带标记的生成物可删",
+			name:   "marked artifact can be deleted",
 			path:   write("ak-generated", generated, 0o700),
 			wantOK: true,
 		},
 		{
-			name:    "用户自己的同前缀脚本不可删",
+			name:    "user's own same-prefix script cannot be deleted",
 			path:    write("ak-mine", "#!/bin/bash\necho my own script\n", 0o755),
 			wantOK:  false,
-			reasonC: "没有 ak:generated 标记",
+			reasonC: "no ak:generated marker",
 		},
 		{
-			name:    "标记版本高于本程序时跳过",
+			name:    "marker version newer than this binary is skipped",
 			path:    write("ak-future", "#!/usr/bin/env bash\n# ak:generated v99 kind=claude provider=y hash=z\n", 0o700),
 			wantOK:  false,
-			reasonC: "标记版本",
+			reasonC: "newer than the supported",
 		},
 		{
-			name:    "空文件不可删",
+			name:    "empty file cannot be deleted",
 			path:    write("ak-empty", "", 0o700),
 			wantOK:  false,
-			reasonC: "标记",
+			reasonC: "marker",
 		},
 		{
-			name:    "标记出现得太靠后则不认",
+			name:    "marker appearing too late is not recognized",
 			path:    write("ak-late", strings.Repeat("# filler\n", 10)+"# ak:generated v1 kind=claude provider=z hash=q\n", 0o700),
 			wantOK:  false,
-			reasonC: "标记",
+			reasonC: "marker",
 		},
 	}
 
@@ -68,21 +69,23 @@ func TestCheckRemovable_Safety(t *testing.T) {
 			e := dirEntryOf(t, tt.path)
 			res, ok := s.checkRemovable(tt.path, e)
 			if ok != tt.wantOK {
-				t.Fatalf("ok = %v, 期望 %v (reason=%q)", ok, tt.wantOK, res.Reason)
+				t.Fatalf("ok = %v, want %v (reason=%q)", ok, tt.wantOK, res.Reason)
 			}
 			if !ok && tt.reasonC != "" && !strings.Contains(res.Reason, tt.reasonC) {
-				t.Errorf("reason = %q, 期望包含 %q", res.Reason, tt.reasonC)
+				t.Errorf("reason = %q, want it to contain %q", res.Reason, tt.reasonC)
 			}
 		})
 	}
 }
 
-// TestCheckRemovable_RefusesSymlink 确认不跟随 symlink —— 否则可能顺着链接删掉要害文件。
+// TestCheckRemovable_RefusesSymlink confirms symlinks are not followed,
+// otherwise a critical file could be deleted through the link.
 func TestCheckRemovable_RefusesSymlink(t *testing.T) {
 	dir := t.TempDir()
 	s := &Syncer{Cfg: config.Default()}
 
-	// 目标文件本身带合法标记,但通过 symlink 访问时仍必须拒绝。
+	// The target file carries a valid marker itself, but access via symlink
+	// must still be refused.
 	target := filepath.Join(dir, "real-target")
 	if err := os.WriteFile(target, []byte("# ak:generated v1 kind=claude provider=x hash=a\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -94,20 +97,21 @@ func TestCheckRemovable_RefusesSymlink(t *testing.T) {
 
 	res, ok := s.checkRemovable(link, dirEntryOf(t, link))
 	if ok {
-		t.Fatal("symlink 被判定为可删,这会导致误删链接目标")
+		t.Fatal("symlink was judged deletable, which would wrongly delete the link target")
 	}
 	if !strings.Contains(res.Reason, "symlink") {
-		t.Errorf("reason = %q, 期望提到 symlink", res.Reason)
+		t.Errorf("reason = %q, want it to mention symlink", res.Reason)
 	}
 	if _, err := os.Lstat(target); err != nil {
-		t.Errorf("链接目标不应受影响: %v", err)
+		t.Errorf("the link target should be unaffected: %v", err)
 	}
 }
 
-// TestCollectOrphans_SkipsForeignPrefix 确认前缀不匹配的文件永不进入候选。
+// TestCollectOrphans_SkipsForeignPrefix confirms files with a mismatched prefix
+// never enter the candidate set.
 func TestCollectOrphans_SkipsForeignPrefix(t *testing.T) {
 	dir := t.TempDir()
-	// 模拟 ~/.local/bin 里的真实用户工具。
+	// Simulate real user tools in ~/.local/bin.
 	for _, n := range []string{"warren", "minions", "agy", "aicoding", "codex-cpa"} {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/bash\n"), 0o755); err != nil {
 			t.Fatal(err)
@@ -115,25 +119,28 @@ func TestCollectOrphans_SkipsForeignPrefix(t *testing.T) {
 	}
 
 	cfg := config.Default()
-	s := &Syncer{Cfg: cfg, Resolver: secrets.Default(), DryRun: true}
+	// Point CodexHome at an empty dir so collectOrphans cannot sweep the real
+	// ~/.codex and leak ak's genuine artifacts into this test.
+	s := &Syncer{Cfg: cfg, Resolver: secrets.Default(), DryRun: true, CodexHome: t.TempDir()}
 
-	results, err := s.collectOrphans(dir, map[string]bool{})
+	results, err := s.collectOrphansIn(dir, cfg.Settings.Prefix, map[string]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range results {
-		t.Errorf("用户工具 %s 不应出现在结果里(action=%s)", r.Path, r.Action)
+		t.Errorf("user tool %s should not appear in the results (action=%s)", r.Path, r.Action)
 	}
 
-	// 全部文件必须还在。
+	// All files must still be present.
 	for _, n := range []string{"warren", "minions", "agy", "aicoding", "codex-cpa"} {
 		if _, err := os.Stat(filepath.Join(dir, n)); err != nil {
-			t.Errorf("%s 被删除了: %v", n, err)
+			t.Errorf("%s was deleted: %v", n, err)
 		}
 	}
 }
 
-// TestWriteFile_RefusesUnmarkedOverwrite 确认不覆盖用户自己的同名文件。
+// TestWriteFile_RefusesUnmarkedOverwrite confirms a user's own file with the same
+// name is not overwritten.
 func TestWriteFile_RefusesUnmarkedOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "ak-mine")
@@ -146,11 +153,11 @@ func TestWriteFile_RefusesUnmarkedOverwrite(t *testing.T) {
 	res := s.writeFile(p, "#!/usr/bin/env bash\n# ak:generated v1\n", 0o700)
 
 	if res.Action != ActionSkipped {
-		t.Fatalf("action = %s, 期望 skipped", res.Action)
+		t.Fatalf("action = %s, want skipped", res.Action)
 	}
 	got, _ := os.ReadFile(p)
 	if string(got) != original {
-		t.Error("用户文件被覆盖了")
+		t.Error("the user's file was overwritten")
 	}
 }
 
@@ -165,6 +172,51 @@ func dirEntryOf(t *testing.T, path string) os.DirEntry {
 			return e
 		}
 	}
-	t.Fatalf("找不到 %s", path)
+	t.Fatalf("cannot find %s", path)
 	return nil
+}
+
+// TestCollectOrphans_CodexHomeInjected confirms the codex directory can be injected.
+// collectOrphans scans the real ~/.codex by default, so a test must be able to
+// point it at a temp directory; otherwise results vary with whichever profiles
+// happen to exist on the dev machine.
+func TestCollectOrphans_CodexHomeInjected(t *testing.T) {
+	binDir := t.TempDir()
+	codexHome := t.TempDir()
+
+	// A stale ak profile that should be reclaimed.
+	stale := filepath.Join(codexHome, "ak-gone.config.toml")
+	if err := os.WriteFile(stale,
+		[]byte("# ak:generated v1 kind=codex provider=gone hash=x\nmodel = 'm'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	s := &Syncer{Cfg: cfg, Resolver: secrets.Default(), DryRun: true, CodexHome: codexHome}
+
+	results, err := s.collectOrphans(binDir, map[string]bool{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var removed []string
+	for _, r := range results {
+		if r.Action == ActionRemoved {
+			removed = append(removed, filepath.Base(r.Path))
+		}
+	}
+	if len(removed) != 1 || removed[0] != "ak-gone.config.toml" {
+		t.Fatalf("removed = %v, expected only ak-gone.config.toml", removed)
+	}
+}
+
+// TestCodexHome_DefaultsToRealDir confirms it falls back to ~/.codex when not injected.
+func TestCodexHome_DefaultsToRealDir(t *testing.T) {
+	s := &Syncer{Cfg: config.Default()}
+	got := s.codexHome()
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, ".codex")
+	if got != want {
+		t.Errorf("codexHome() = %q, expected %q", got, want)
+	}
 }
