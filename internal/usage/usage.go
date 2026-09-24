@@ -267,8 +267,9 @@ func parseFile(path, engine string, offset int64, parse lineParser) ([]Row, int6
 		return nil, offset, err
 	}
 
-	// codex 的 session_meta 在第一行,含 model_provider;先读出来供每行归属。
-	meta := ""
+	// codex 的 session_meta 在第一行,含 model_provider 与 model;
+	// token_count 事件里没有这两个字段,必须从这里补。
+	meta := sessionMeta{}
 	if engine == "codex" && offset == 0 {
 		meta = codexSessionMeta(f)
 		if _, err := f.Seek(offset, 0); err != nil {
@@ -287,8 +288,11 @@ func parseFile(path, engine string, offset int64, parse lineParser) ([]Row, int6
 				bytes.Contains(line, []byte(`"token_count"`)) {
 				var row Row
 				if parse(line, &row) {
-					if meta != "" && row.Provider == unknownProvider {
-						row.Provider = meta
+					if row.Provider == unknownProvider && meta.Provider != "" {
+						row.Provider = meta.Provider
+					}
+					if row.Model == unknownModel && meta.Model != "" {
+						row.Model = meta.Model
 					}
 					rows = append(rows, row)
 				}
@@ -301,38 +305,60 @@ func parseFile(path, engine string, offset int64, parse lineParser) ([]Row, int6
 	return rows, fiSizeOr(f, offset), nil
 }
 
-// codexSessionMeta 读 codex session 文件首行的 model_provider。
-func codexSessionMeta(f *os.File) string {
+// sessionMeta 是 codex session 文件的元信息。
+type sessionMeta struct {
+	Provider string
+	Model    string
+}
+
+// codexSessionMeta 读 codex session 文件,取 model_provider 与 model。
+// 两者出现在不同事件里:model_provider 在首行的 session_meta,
+// model 在 turn_context。token_count 事件里都没有,必须从这里补。
+func codexSessionMeta(f *os.File) sessionMeta {
+	out := sessionMeta{}
 	br := bufio.NewReader(f)
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 50; i++ {
 		line, err := br.ReadBytes('\n')
-		if !bytes.Contains(line, []byte(`"session_meta"`)) && !bytes.Contains(line, []byte(`"model_provider"`)) {
-			if err != nil {
-				break
+		if bytes.Contains(line, []byte(`"session_meta"`)) {
+			var d struct {
+				Payload struct {
+					ModelProvider string `json:"model_provider"`
+				} `json:"payload"`
 			}
-			continue
+			if json.Unmarshal(line, &d) == nil && d.Payload.ModelProvider != "" {
+				out.Provider = d.Payload.ModelProvider
+			}
 		}
-		var d struct {
-			Payload struct {
-				ModelProvider string `json:"model_provider"`
-			} `json:"payload"`
+		if bytes.Contains(line, []byte(`"turn_context"`)) {
+			var d struct {
+				Payload struct {
+					Model string `json:"model"`
+				} `json:"payload"`
+			}
+			if json.Unmarshal(line, &d) == nil && d.Payload.Model != "" {
+				out.Model = d.Payload.Model
+			}
 		}
-		if json.Unmarshal(line, &d) == nil && d.Payload.ModelProvider != "" {
-			return d.Payload.ModelProvider
-		}
-		if err != nil {
+		if err != nil || (out.Provider != "" && out.Model != "") {
 			break
 		}
 	}
-	return ""
+	return out
 }
 
-func fiSizeOr(f *os.File, def int64) int64 {
-	if fi, err := f.Stat(); err == nil {
-		return fi.Size()
+// dateOf 从 ISO 时间戳取日期部分。
+func dateOf(ts string) string {
+	if len(ts) >= 10 {
+		return ts[:10]
 	}
-	return def
+	return "unknown"
 }
+
+// unknownProvider / unknownModel 是归属或模型未知时的占位值。
+const (
+	unknownProvider = "unknown"
+	unknownModel    = "unknown"
+)
 
 // parseClaudeLine 解析 claude 的 assistant 消息。
 // 每条带完整 usage:input/output/cache_creation/cache_read/thinking。
@@ -341,7 +367,6 @@ func parseClaudeLine(line []byte, row *Row) bool {
 		Type      string `json:"type"`
 		Timestamp string `json:"timestamp"`
 		SessionID string `json:"sessionId"`
-		Cwd       string `json:"cwd"`
 		Message   struct {
 			Model string `json:"model"`
 			Usage struct {
@@ -364,6 +389,7 @@ func parseClaudeLine(line []byte, row *Row) bool {
 
 	row.Engine = "claude"
 	row.Model = d.Message.Model
+	// claude 的 jsonl 不记录供应商,靠 SessionStart hook 补的归属索引查。
 	row.Provider = providerForSession(d.SessionID)
 	row.Date = dateOf(d.Timestamp)
 	row.Sessions = 1
@@ -377,13 +403,32 @@ func parseClaudeLine(line []byte, row *Row) bool {
 	return true
 }
 
+// providerForSession 从 ak 自己的 session 归属索引查供应商。
+func providerForSession(sessionID string) string {
+	if sessionID == "" {
+		return unknownProvider
+	}
+	if p, ok := lookupSessionOwner(sessionID); ok {
+		return p
+	}
+	return unknownProvider
+}
+
+// fiSizeOr 取文件当前大小,失败时退回默认值。
+func fiSizeOr(f *os.File, def int64) int64 {
+	if fi, err := f.Stat(); err == nil {
+		return fi.Size()
+	}
+	return def
+}
+
 // parseCodexLine 解析 codex 的 token_count 事件。
 //
 // 注意:total_token_usage 是**累计值**,只能取 session 的末值;
 // last_token_usage 才是增量,可逐条累加。二者混用会算重 —— 这是本包最容易出错的地方。
+// model 与 model_provider 都不在这类事件里,由调用方从 session_meta / turn_context 填。
 func parseCodexLine(line []byte, row *Row) bool {
 	var d struct {
-		Type      string `json:"type"`
 		Timestamp string `json:"timestamp"`
 		Payload   struct {
 			Type string `json:"type"`
@@ -395,14 +440,13 @@ func parseCodexLine(line []byte, row *Row) bool {
 					CacheWrite   int64 `json:"cache_write_input_tokens"`
 					ReasoningOut int64 `json:"reasoning_output_tokens"`
 				} `json:"last_token_usage"`
-				Model string `json:"model"`
 			} `json:"info"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(line, &d); err != nil {
 		return false
 	}
-	if d.Type != "event_msg" || d.Payload.Type != "token_count" {
+	if d.Payload.Type != "token_count" {
 		return false
 	}
 	u := d.Payload.Info.LastTokenUsage
@@ -411,38 +455,16 @@ func parseCodexLine(line []byte, row *Row) bool {
 	}
 
 	row.Engine = "codex"
-	row.Model = d.Payload.Info.Model
-	// 供应商由调用方用 session_meta 里的 model_provider 填。
+	row.Model = unknownModel
 	row.Provider = unknownProvider
 	row.Date = dateOf(d.Timestamp)
 	row.Sessions = 1
 	row.Tokens = Tokens{
-		Input:     u.Input,
-		Output:    u.Output,
-		CacheRead: u.CacheRead,
-		Thinking:  u.ReasoningOut,
+		Input:      u.Input,
+		Output:     u.Output,
+		CacheRead:  u.CacheRead,
+		CacheWrite: u.CacheWrite,
+		Thinking:   u.ReasoningOut,
 	}
 	return true
-}
-
-// providerForSession 从 ak 自己的 session 归属索引查供应商。
-// claude 的 jsonl 不记录供应商,靠 SessionStart hook 补。
-func providerForSession(sessionID string) string {
-	if sessionID == "" {
-		return unknownProvider
-	}
-	if p, ok := lookupSessionOwner(sessionID); ok {
-		return p
-	}
-	return unknownProvider
-}
-
-const unknownProvider = "unknown"
-
-// dateOf 从 ISO 时间戳取日期部分。
-func dateOf(ts string) string {
-	if len(ts) >= 10 {
-		return ts[:10]
-	}
-	return "unknown"
 }

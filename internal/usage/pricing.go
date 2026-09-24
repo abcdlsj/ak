@@ -106,7 +106,7 @@ func fetchPrices() (map[string]modelPrice, error) {
 		return nil, err
 	}
 
-	// models.dev 的价格单位是美元每 token,这里转成每百万 token。
+	// models.dev 的 cost 单位已经是「美元每百万 token」,原样存即可。
 	out := map[string]modelPrice{}
 	for _, prov := range doc {
 		for id, m := range prov.Models {
@@ -114,10 +114,10 @@ func fetchPrices() (map[string]modelPrice, error) {
 				continue
 			}
 			out[id] = modelPrice{
-				Input:      deref(m.Cost.Input) * 1e6,
-				Output:     deref(m.Cost.Output) * 1e6,
-				CacheRead:  deref(m.Cost.CacheRead) * 1e6,
-				CacheWrite: deref(m.Cost.CacheWrite) * 1e6,
+				Input:      deref(m.Cost.Input),
+				Output:     deref(m.Cost.Output),
+				CacheRead:  deref(m.Cost.CacheRead),
+				CacheWrite: deref(m.Cost.CacheWrite),
 			}
 		}
 	}
