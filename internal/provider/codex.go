@@ -59,7 +59,7 @@ func (codexEngine) Launch(name string, p config.Provider, key Secret, ctx Contex
 	if ctx.CodexHome != "" {
 		l.Files = []File{{Path: filepath.Join(ctx.CodexHome, ProfileName(name)+".config.toml"), Body: body}}
 	}
-	for _, v := range mergeNames(config.ValidReasoning(), p.Variants) {
+	for _, v := range mergeNames(config.ReasoningLevels(), p.Variants) {
 		l.Variants = append(l.Variants, codexVariant(v, p))
 	}
 	return l, nil

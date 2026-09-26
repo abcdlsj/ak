@@ -13,6 +13,9 @@ var (
 	barColor    = lipgloss.AdaptiveColor{Light: "#2da44e", Dark: "#2ea043"}
 	lineColor   = lipgloss.AdaptiveColor{Light: "#d0d7de", Dark: "#3d444d"}
 	pickColor   = lipgloss.AdaptiveColor{Light: "#ddf4ff", Dark: "#253040"}
+	okColor     = lipgloss.AdaptiveColor{Light: "#1a7f37", Dark: "#3fb950"}
+	warnColor   = lipgloss.AdaptiveColor{Light: "#9a6700", Dark: "#d29922"}
+	errColor    = lipgloss.AdaptiveColor{Light: "#cf222e", Dark: "#f85149"}
 )
 
 var (
@@ -32,6 +35,20 @@ var (
 	pickStyle = lipgloss.NewStyle().Background(pickColor).Bold(true)
 
 	badgeStyle = lipgloss.NewStyle().Foreground(accentColor)
+	labelStyle = lipgloss.NewStyle().Faint(true)
+
+	okStyle   = lipgloss.NewStyle().Foreground(okColor)
+	warnStyle = lipgloss.NewStyle().Foreground(warnColor)
+	errStyle  = lipgloss.NewStyle().Foreground(errColor)
+
+	// Chips: a row of mutually exclusive choices, the active one filled.
+	chipStyle       = lipgloss.NewStyle().Faint(true).Padding(0, 1)
+	chipActiveStyle = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("231")).Background(accentColor)
+
+	panelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lineColor).
+			Padding(0, 1)
 
 	tileStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).

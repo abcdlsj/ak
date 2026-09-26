@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/ui"
@@ -89,7 +90,7 @@ func newAddCmd() *cobra.Command {
 			if name == "" {
 				return fmt.Errorf("a provider name is required")
 			}
-			if err := AddProvider(cfg, name, p); err != nil {
+			if err := core.Add(cfg, name, p); err != nil {
 				return err
 			}
 			return runSync(cfg, false)
@@ -125,7 +126,7 @@ func newEditCmd() *cobra.Command {
 				}
 				p = d.Provider()
 			}
-			if err := UpdateProvider(cfg, name, p); err != nil {
+			if err := core.Update(cfg, name, p); err != nil {
 				return err
 			}
 			return runSync(cfg, false)
@@ -143,43 +144,6 @@ func runForm(d *ui.Draft, cfg *config.Config) error {
 	return err
 }
 
-// AddProvider validates and saves a new provider.
-func AddProvider(cfg *config.Config, name string, p config.Provider) error {
-	if err := config.ValidateName(name); err != nil {
-		return err
-	}
-	if _, exists := cfg.Providers[name]; exists {
-		return fmt.Errorf("provider %q already exists, use `ak edit %s`", name, name)
-	}
-	return saveProvider(cfg, name, p)
-}
-
-// UpdateProvider validates and saves a change to an existing provider.
-func UpdateProvider(cfg *config.Config, name string, p config.Provider) error {
-	if _, ok := cfg.Providers[name]; !ok {
-		return fmt.Errorf("provider %q does not exist", name)
-	}
-	return saveProvider(cfg, name, p)
-}
-
-// saveProvider validates on a copy, so a rejected change leaves cfg untouched.
-func saveProvider(cfg *config.Config, name string, p config.Provider) error {
-	next := *cfg
-	next.Providers = make(map[string]config.Provider, len(cfg.Providers)+1)
-	for k, v := range cfg.Providers {
-		next.Providers[k] = v
-	}
-	next.Providers[name] = p
-	if err := config.Validate(&next); err != nil {
-		return err
-	}
-	if err := config.Save(&next); err != nil {
-		return err
-	}
-	*cfg = next
-	return nil
-}
-
 func newRemoveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "rm <name>",
@@ -191,15 +155,7 @@ func newRemoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			name := args[0]
-			if _, ok := cfg.Providers[name]; !ok {
-				return fmt.Errorf("provider %q does not exist", name)
-			}
-			delete(cfg.Providers, name)
-			if cfg.Settings.Default == name {
-				cfg.Settings.Default = ""
-			}
-			if err := config.Save(cfg); err != nil {
+			if err := core.Remove(cfg, args[0]); err != nil {
 				return err
 			}
 			return runSync(cfg, false)
@@ -224,15 +180,10 @@ func newDefaultCmd() *cobra.Command {
 				fmt.Printf("default provider: %s\n", cfg.Settings.Default)
 				return nil
 			}
-			name := args[0]
-			if _, ok := cfg.Providers[name]; !ok {
-				return fmt.Errorf("provider %q does not exist", name)
-			}
-			cfg.Settings.Default = name
-			if err := config.Save(cfg); err != nil {
+			if err := core.SetDefault(cfg, args[0]); err != nil {
 				return err
 			}
-			fmt.Printf("default provider set to %s\n", name)
+			fmt.Printf("default provider set to %s\n", args[0])
 			return nil
 		},
 	}

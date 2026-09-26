@@ -132,10 +132,8 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 
 func reasoningOptions() []huh.Option[string] {
 	opts := []huh.Option[string]{huh.NewOption("(codex default)", "")}
-	for _, r := range []string{"minimal", "low", "medium", "high", "xhigh", "max"} {
-		if config.ValidReasoning()[r] {
-			opts = append(opts, huh.NewOption(r, r))
-		}
+	for _, r := range config.ReasoningLevels() {
+		opts = append(opts, huh.NewOption(r, r))
 	}
 	return opts
 }

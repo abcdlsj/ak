@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/shim"
 	"github.com/spf13/cobra"
 )
@@ -209,9 +210,7 @@ func onPath(dir string) bool {
 // driftReport returns the paths of generated artifacts that no longer match
 // the config. DryRun is set so doctor only inspects and never writes.
 func driftReport(cfg *config.Config) ([]string, error) {
-	s := newSyncer(cfg)
-	s.DryRun = true
-	rep, err := s.Sync()
+	rep, err := core.Sync(cfg, true)
 	if err != nil {
 		return nil, err
 	}

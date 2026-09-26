@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/abcdlsj/ak/internal/config"
-	"github.com/abcdlsj/ak/internal/secrets"
+	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/shim"
 	"github.com/spf13/cobra"
 )
@@ -28,19 +28,12 @@ func newSyncCmd() *cobra.Command {
 }
 
 func runSync(cfg *config.Config, dryRun bool) error {
-	s := newSyncer(cfg)
-	s.DryRun = dryRun
-	rep, err := s.Sync()
+	rep, err := core.Sync(cfg, dryRun)
 	if err != nil {
 		return err
 	}
 	printReport(rep)
 	return nil
-}
-
-// newSyncer builds the syncer. Every caller that generates artifacts uses it.
-func newSyncer(cfg *config.Config) *shim.Syncer {
-	return &shim.Syncer{Cfg: cfg, Resolver: secrets.Default()}
 }
 
 func printReport(rep shim.Report) {

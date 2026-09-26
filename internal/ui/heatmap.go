@@ -203,22 +203,34 @@ func renderHeatmap(cells []heatCell, width int) string {
 // monthRow labels the first week of each month, left-aligned on that week's
 // column the way a calendar heading sits above its dates.
 func monthRow(cells []heatCell, weeks int) string {
-	row := strings.Repeat(" ", labelWide)
+	row := []byte(strings.Repeat(" ", labelWide+weeks*colWidth))
 	lastMonth := ""
+	free := 0 // first column not covered by the previous label
 	for w := 0; w < weeks; w++ {
-		label := "   "
 		// Judge by the last day of the week: a week that only clips the tail of
 		// a month should be labelled with the month that owns most of it.
-		if t := mustDate(cells[w*7+6].Date); !t.IsZero() {
-			if m := t.Format("Jan"); m != lastMonth {
-				// Only label when the column has room before the next label.
-				label = m
-				lastMonth = m
-			}
+		t := mustDate(cells[w*7+6].Date)
+		if t.IsZero() {
+			continue
 		}
-		row += label
+		m := t.Format("Jan")
+		if m == lastMonth {
+			continue
+		}
+		lastMonth = m
+		col := labelWide + w*colWidth
+		// Skip a label that would run into the previous one; the next
+		// month's label says enough.
+		if col < free {
+			continue
+		}
+		for len(row) < col+len(m) {
+			row = append(row, ' ')
+		}
+		copy(row[col:], m)
+		free = col + len(m) + 1
 	}
-	return dimStyle.Render(strings.TrimRight(row, " "))
+	return dimStyle.Render(strings.TrimRight(string(row), " "))
 }
 
 // weekdayRow draws one weekday across all weeks. Only alternate days are

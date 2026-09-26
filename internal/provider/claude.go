@@ -154,22 +154,23 @@ func unsetList(known []string, env *envBuilder) []string {
 // claudeVariantNames returns every variant name the provider's command may
 // recognise (built-in tiers plus custom ones), sorted.
 func claudeVariantNames(p config.Provider) []string {
-	return mergeNames(config.ImplicitClaudeVariants(), p.Variants)
+	return mergeNames(config.ClaudeTiers(), p.Variants)
 }
 
-func mergeNames[V any](builtin map[string]bool, custom map[string]V) []string {
+// mergeNames lists the built-in names in their given order, then the custom
+// ones sorted.
+func mergeNames[V any](builtin []string, custom map[string]V) []string {
 	seen := map[string]bool{}
-	var out []string
-	for v := range builtin {
+	out := append([]string(nil), builtin...)
+	for _, v := range builtin {
 		seen[v] = true
-		out = append(out, v)
 	}
+	var extra []string
 	for v := range custom {
 		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
+			extra = append(extra, v)
 		}
 	}
-	sort.Strings(out)
-	return out
+	sort.Strings(extra)
+	return append(out, extra...)
 }

@@ -164,6 +164,19 @@ var implicitClaudeVariants = map[string]bool{
 	"opus": true, "sonnet": true, "haiku": true,
 }
 
+// reasoningLevels and claudeTiers are the same sets in their natural order,
+// weakest first, for anything shown to a person.
+var (
+	reasoningLevels = []string{"minimal", "low", "medium", "high", "xhigh", "max"}
+	claudeTiers     = []string{"opus", "sonnet", "haiku"}
+)
+
+// ReasoningLevels lists codex reasoning efforts, weakest first.
+func ReasoningLevels() []string { return reasoningLevels }
+
+// ClaudeTiers lists the built-in claude model tiers.
+func ClaudeTiers() []string { return claudeTiers }
+
 // ValidReasoning is exposed for shim rendering.
 func ValidReasoning() map[string]bool { return validReasoning }
 

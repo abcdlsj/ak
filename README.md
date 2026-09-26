@@ -38,14 +38,32 @@ ak sync
 ```
 ak                          open the TUI (Providers / Usage, Tab to switch)
 ak list                     list providers
-ak add / rm / edit          manage providers
+ak add [name]               add a provider (flags, or a form with no --base-url)
+ak edit <name> [--model …]  change only the given fields, or open the form
+ak rm <name>                remove a provider and its commands
 ak import --from cc-switch  pick which cc-switch providers to copy over
 ak sync                     regenerate commands from the config
 ak doctor                   check for anything that would break the commands
 ak usage                    token usage by provider and model
 ak-bilicodex                run codex on that provider
 ak-bilicodex high           override reasoning effort for this run
+ak-stepfunclaude opus       use the opus-tier model for this run
 ak-stepfunclaude -p "..."   run claude on that provider
+```
+
+In the TUI, Providers shows each provider's health, details and last 30 days
+of usage: `enter` launches (asking for a variant when there are any), `/`
+filters, `a` / `e` / `d` add, edit and delete, `*` sets the default and `s`
+syncs. Usage switches between 7, 30, 90 days and all history with `[` `]`,
+and `enter` on a provider narrows the page to it.
+
+Custom variants go under the provider:
+
+```toml
+[providers.bilicodex.variants.fast]
+model = "gpt-5.6-luna"
+reasoning = "low"
+shim = true          # also generate ak-bilicodex-fast
 ```
 
 `ak` keeps one source of truth in `~/.config/ak/providers.toml` (mode `0600`)
@@ -75,12 +93,20 @@ base config. Your `projects`, `skills` and `hooks` keep working, and codex's
 `env_key` reads the key from the process environment — no per-provider
 `auth.json`, no isolated `CODEX_HOME`.
 
+**Referenced keys stay out of the commands.** With `api_key_ref`
+(`env:NAME`, `cmd:...`, `keychain:...`) the command asks `ak` for the key at
+launch, so no plaintext copy is written to `~/.local/bin`. A plain `api_key`
+is embedded, and the command is mode `0700`.
+
 **Usage is computed from local logs.** `~/.claude/projects` and
-`~/.codex/sessions` are scanned incrementally, so the first run takes a few
-seconds and later ones are near-instant. Claude's logs do not record which
-provider a session used, so `ak hook install` adds a `SessionStart` hook that
-records the mapping. Cost comes from models.dev; models it does not know are
-reported as unpriced rather than billed as zero.
+`~/.codex/sessions` are scanned incrementally: the first run reads the whole
+history, later ones only the bytes appended since. Each request counts once —
+Claude writes a message once per content block, Codex repeats token events,
+and resumed or forked sessions copy history into new files. Days split at
+local midnight. Claude's logs do not record which provider a session used, so
+`ak hook install` adds a `SessionStart` hook that records the mapping; Codex
+sessions are attributed by their `provider_id`. Cost comes from models.dev;
+models it does not know are reported as unpriced rather than billed as zero.
 
 **cc-switch import is selective.** `ak import --from cc-switch` reads
 `~/.cc-switch/cc-switch.db` read-only, prints what it found, then opens a picker

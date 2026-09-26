@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -53,16 +54,7 @@ Run with no arguments to open the TUI.`,
 }
 
 // loadConfig loads and validates the config.
-func loadConfig() (*config.Config, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, err
-	}
-	if err := config.Validate(cfg); err != nil {
-		return nil, err
-	}
-	return cfg, nil
-}
+func loadConfig() (*config.Config, error) { return core.Load() }
 
 // warnf writes a warning to stderr.
 func warnf(format string, a ...any) {
