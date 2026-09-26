@@ -3,28 +3,30 @@
 // The data source is local session logs, not proxy forwarding: cc-switch
 // accounts for usage through a self-hosted proxy. ak runs no proxy, so it
 // parses the jsonl files under ~/.claude/projects and ~/.codex/sessions.
+//
+// Scanning produces cached buckets keyed by session; attribution to an ak
+// provider and pricing happen afterwards, on every load, so a hook installed
+// later or a pricing change applies to history without rebuilding the cache.
 package usage
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
 	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/provider"
 )
 
-// Tokens is the token breakdown of a single request.
+// Tokens is a token breakdown. Input excludes cache reads and writes, so the
+// four billable fields never overlap.
 type Tokens struct {
 	Input      int64 `json:"input"`
 	Output     int64 `json:"output"`
 	CacheRead  int64 `json:"cache_read"`
 	CacheWrite int64 `json:"cache_write"`
-	Thinking   int64 `json:"thinking"`
+	// Thinking is informational: it is already part of Output.
+	Thinking int64 `json:"thinking"`
 }
 
 // Total is the billable amount: cache reads and writes are counted separately,
@@ -33,24 +35,39 @@ func (t Tokens) Total() int64 {
 	return t.Input + t.Output + t.CacheRead + t.CacheWrite
 }
 
-// Row is one aggregation result.
+func (t *Tokens) add(o Tokens) {
+	t.Input += o.Input
+	t.Output += o.Output
+	t.CacheRead += o.CacheRead
+	t.CacheWrite += o.CacheWrite
+	t.Thinking += o.Thinking
+}
+
+func (t *Tokens) sub(o Tokens) {
+	t.Input -= o.Input
+	t.Output -= o.Output
+	t.CacheRead -= o.CacheRead
+	t.CacheWrite -= o.CacheWrite
+	t.Thinking -= o.Thinking
+}
+
+// Row is usage for one (date, provider, model, engine), after attribution.
 type Row struct {
-	Date     string `json:"date"`     // YYYY-MM-DD
-	Provider string `json:"provider"` // Provider name; unknown means unattributable
+	Date     string `json:"date"`     // YYYY-MM-DD in local time
+	Provider string `json:"provider"` // ak provider name; unknown means unattributable
 	Model    string `json:"model"`
 	Engine   string `json:"engine"` // claude | codex
 	Tokens   Tokens `json:"tokens"`
-	Sessions int    `json:"sessions"`
+	Requests int    `json:"requests"`
 }
 
 // Summary is the aggregated view.
 type Summary struct {
 	TotalTokens int64         `json:"total_tokens"`
 	TotalCost   float64       `json:"total_cost"`
-	Rows        []Row         `json:"rows"`
+	Requests    int           `json:"requests"`
 	ByProvider  []ProviderRow `json:"by_provider"`
 	ByModel     []ModelRow    `json:"by_model"`
-	ByHour      [24]int64     `json:"by_hour"`
 	// ByDate is the heatmap data source, ascending by date.
 	ByDate []DateRow `json:"by_date"`
 	// UnpricedTokens is the token count with no pricing data, so the cost figure is an underestimate.
@@ -78,41 +95,145 @@ type DateRow struct {
 	Cost   float64 `json:"cost"`
 }
 
-// Aggregate counts everything. The first scan parses hundreds of MB of logs;
-// subsequent runs are incremental via the cache.
-func Aggregate(cfg *config.Config) (Summary, error) {
-	cache, err := loadCache()
-	if err != nil {
-		cache = newCache()
-	}
+// Filter narrows a summary. Zero values mean no restriction.
+type Filter struct {
+	Since    string // inclusive YYYY-MM-DD
+	Provider string
+}
 
-	rows, err := scanAll(cfg, &cache)
+// SinceDays returns the local date n-1 days before today, so n=7 covers the
+// last seven calendar days including today. n<=0 means no limit.
+func SinceDays(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return time.Now().AddDate(0, 0, -(n - 1)).Format(dateLayout)
+}
+
+// Load scans the logs (incrementally, via the cache) and returns attributed rows.
+// The first scan parses the whole history; later ones only read new bytes.
+func Load(cfg *config.Config) ([]Row, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	roots := map[Source][]string{}
+	for _, src := range sources {
+		roots[src] = src.Roots(cfg, home)
+	}
+	cache := loadCache()
+	buckets := scan(listFiles(roots), cache)
+	// A cache write failure does not affect the result.
+	_ = saveCache(cache)
+	return attribute(buckets, newAttribution(cfg)), nil
+}
+
+// Aggregate loads and summarizes everything.
+func Aggregate(cfg *config.Config) (Summary, error) {
+	rows, err := Load(cfg)
 	if err != nil {
 		return Summary{}, err
 	}
-	if err := saveCache(cache); err != nil {
-		// A cache write failure does not affect the result.
-		_ = err
-	}
-
-	return summarize(rows, cfg), nil
+	return Summarize(rows, cfg, Filter{}), nil
 }
 
-// summarize aggregates detail rows into the various views.
-func summarize(rows []Row, cfg *config.Config) Summary {
+// attribution is what sources consult to name a bucket's ak provider.
+type attribution struct {
+	sessions sessionIndex
+	// codexIDs maps a codex provider_id to the ak provider using it.
+	codexIDs map[string]string
+}
+
+func newAttribution(cfg *config.Config) *attribution {
+	return &attribution{sessions: loadSessionIndex(), codexIDs: codexProviderNames(cfg)}
+}
+
+// attribute resolves each bucket's ak provider and folds away session detail.
+func attribute(buckets []bucket, a *attribution) []Row {
+	type key struct{ date, provider, model, engine string }
+	acc := map[key]*Row{}
+	for _, b := range buckets {
+		prov := ""
+		if src := sourceFor(b.Engine); src != nil {
+			prov = src.Provider(b, a)
+		}
+		if prov == "" {
+			prov = unknownProvider
+		}
+		k := key{b.Date, prov, b.Model, b.Engine}
+		r := acc[k]
+		if r == nil {
+			r = &Row{Date: b.Date, Provider: prov, Model: b.Model, Engine: b.Engine}
+			acc[k] = r
+		}
+		r.Tokens.add(b.Tokens)
+		r.Requests += b.Requests
+	}
+
+	out := make([]Row, 0, len(acc))
+	for _, r := range acc {
+		out = append(out, *r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Date != b.Date {
+			return a.Date < b.Date
+		}
+		if a.Provider != b.Provider {
+			return a.Provider < b.Provider
+		}
+		if a.Model != b.Model {
+			return a.Model < b.Model
+		}
+		return a.Engine < b.Engine
+	})
+	return out
+}
+
+// codexProviderNames maps a codex provider_id to the ak provider using it.
+// An id shared by several ak providers is ambiguous and left unmapped.
+func codexProviderNames(cfg *config.Config) map[string]string {
+	out := map[string]string{}
+	ambiguous := map[string]bool{}
+	for _, name := range cfg.Names() {
+		p := cfg.Providers[name]
+		if p.Kind != config.KindCodex {
+			continue
+		}
+		id := provider.CodexProviderID(name, p)
+		if _, dup := out[id]; dup {
+			ambiguous[id] = true
+		}
+		out[id] = name
+	}
+	for id := range ambiguous {
+		delete(out, id)
+	}
+	return out
+}
+
+// Summarize aggregates rows into the various views.
+func Summarize(rows []Row, cfg *config.Config, f Filter) Summary {
 	var s Summary
 	byProvider := map[string]*ProviderRow{}
 	byModel := map[string]*ModelRow{}
 	byDate := map[string]*DateRow{}
 
 	for _, r := range rows {
-		t := r.Tokens
-		s.TotalTokens += t.Total()
+		if f.Since != "" && r.Date < f.Since {
+			continue
+		}
+		if f.Provider != "" && r.Provider != f.Provider {
+			continue
+		}
+		t := r.Tokens.Total()
+		s.TotalTokens += t
+		s.Requests += r.Requests
 		cost, priced := costOf(r, cfg)
 		if priced {
 			s.TotalCost += cost
 		} else {
-			s.UnpricedTokens += t.Total()
+			s.UnpricedTokens += t
 		}
 
 		pr := byProvider[r.Provider]
@@ -120,7 +241,7 @@ func summarize(rows []Row, cfg *config.Config) Summary {
 			pr = &ProviderRow{Name: r.Provider}
 			byProvider[r.Provider] = pr
 		}
-		pr.Tokens += t.Total()
+		pr.Tokens += t
 		pr.Cost += cost
 
 		mr := byModel[r.Model]
@@ -128,7 +249,7 @@ func summarize(rows []Row, cfg *config.Config) Summary {
 			mr = &ModelRow{Model: r.Model}
 			byModel[r.Model] = mr
 		}
-		mr.Tokens += t.Total()
+		mr.Tokens += t
 		mr.Cost += cost
 
 		dr := byDate[r.Date]
@@ -136,11 +257,10 @@ func summarize(rows []Row, cfg *config.Config) Summary {
 			dr = &DateRow{Date: r.Date}
 			byDate[r.Date] = dr
 		}
-		dr.Tokens += t.Total()
+		dr.Tokens += t
 		dr.Cost += cost
 	}
 
-	s.Rows = rows
 	s.ByProvider = sortedProviders(byProvider)
 	s.ByModel = sortedModels(byModel)
 	s.ByDate = sortedDates(byDate)
@@ -152,7 +272,12 @@ func sortedProviders(m map[string]*ProviderRow) []ProviderRow {
 	for _, v := range m {
 		out = append(out, *v)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Tokens > out[j].Tokens })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Tokens != out[j].Tokens {
+			return out[i].Tokens > out[j].Tokens
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out
 }
 
@@ -161,7 +286,12 @@ func sortedModels(m map[string]*ModelRow) []ModelRow {
 	for _, v := range m {
 		out = append(out, *v)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Tokens > out[j].Tokens })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Tokens != out[j].Tokens {
+			return out[i].Tokens > out[j].Tokens
+		}
+		return out[i].Model < out[j].Model
+	})
 	return out
 }
 
@@ -172,305 +302,4 @@ func sortedDates(m map[string]*DateRow) []DateRow {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
 	return out
-}
-
-// ---- scanning ----
-
-// fileFinger is a file's incremental fingerprint. The file is re-parsed only
-// when size or mtime changes.
-type fileFinger struct {
-	Size  int64     `json:"size"`
-	Mtime time.Time `json:"mtime"`
-	// Offset is the byte position already parsed, enabling new-bytes-only parsing.
-	Offset int64 `json:"offset"`
-}
-
-// scanAll scans the claude and codex log directories.
-func scanAll(cfg *config.Config, cache *Cache) ([]Row, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-
-	var rows []Row
-
-	claudeRoot := filepath.Join(home, ".claude", "projects")
-	r, err := scanTree(claudeRoot, "claude", cache, parseClaudeLine)
-	if err != nil {
-		return nil, err
-	}
-	rows = append(rows, r...)
-
-	codexRoot := filepath.Join(home, ".codex", "sessions")
-	r, err = scanTree(codexRoot, "codex", cache, parseCodexLine)
-	if err != nil {
-		return nil, err
-	}
-	rows = append(rows, r...)
-
-	return rows, nil
-}
-
-// lineParser extracts usage from one jsonl line; false means the line is irrelevant.
-type lineParser func(line []byte, row *Row) bool
-
-// scanTree recursively scans *.jsonl under a directory.
-func scanTree(root, engine string, cache *Cache, parse lineParser) ([]Row, error) {
-	var rows []Row
-
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-		fi, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		fp := fileFinger{Size: fi.Size(), Mtime: fi.ModTime()}
-
-		cached, ok := cache.Files[path]
-		if ok && cached.Size == fp.Size && cached.Mtime.Equal(fp.Mtime) {
-			// Unchanged: reuse the cached rows directly.
-			rows = append(rows, cache.Rows[path]...)
-			return nil
-		}
-
-		var fileRows []Row
-		offset := int64(0)
-		if ok && cached.Size <= fp.Size && cached.Mtime.Equal(fp.Mtime) {
-			offset = cached.Offset
-		}
-		fileRows, newOffset, err := parseFile(path, engine, offset, parse)
-		if err != nil {
-			return nil
-		}
-		fp.Offset = newOffset
-		cache.Files[path] = fp
-		cache.Rows[path] = fileRows
-		rows = append(rows, fileRows...)
-		return nil
-	})
-
-	return rows, nil
-}
-
-// parseFile parses the new portion of a single jsonl.
-// sessionMeta holds the metadata of the session owning this file
-// (absent on the claude side, present on the codex side).
-func parseFile(path, engine string, offset int64, parse lineParser) ([]Row, int64, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, offset, err
-	}
-	defer f.Close()
-
-	if _, err := f.Seek(offset, 0); err != nil {
-		return nil, offset, err
-	}
-
-	// codex's session_meta carries model_provider and model, neither of which
-	// appears in token_count events, so both must be filled in from here.
-	meta := sessionMeta{}
-	if engine == "codex" && offset == 0 {
-		meta = codexSessionMeta(f)
-		if _, err := f.Seek(offset, 0); err != nil {
-			return nil, offset, err
-		}
-	}
-
-	var rows []Row
-	br := bufio.NewReader(f)
-	for {
-		line, err := br.ReadBytes('\n')
-		if len(line) > 0 {
-			// Pre-filter: lines without usage / token_count are not worth a JSON decode.
-			// The vast majority of the hundreds of MB of logs are plain text, so
-			// this step saves most of the work.
-			if bytes.Contains(line, []byte(`"usage"`)) ||
-				bytes.Contains(line, []byte(`"token_count"`)) {
-				var row Row
-				if parse(line, &row) {
-					if row.Provider == unknownProvider && meta.Provider != "" {
-						row.Provider = meta.Provider
-					}
-					if row.Model == unknownModel && meta.Model != "" {
-						row.Model = meta.Model
-					}
-					rows = append(rows, row)
-				}
-			}
-		}
-		if err != nil {
-			break
-		}
-	}
-	return rows, fiSizeOr(f, offset), nil
-}
-
-// sessionMeta is the metadata of a codex session file.
-type sessionMeta struct {
-	Provider string
-	Model    string
-}
-
-// codexSessionMeta reads a codex session file for model_provider and model.
-// They appear in different events: model_provider in the first line's
-// session_meta, model in turn_context. Neither is present in token_count
-// events, so both must be filled in from here.
-func codexSessionMeta(f *os.File) sessionMeta {
-	out := sessionMeta{}
-	br := bufio.NewReader(f)
-	for i := 0; i < 50; i++ {
-		line, err := br.ReadBytes('\n')
-		if bytes.Contains(line, []byte(`"session_meta"`)) {
-			var d struct {
-				Payload struct {
-					ModelProvider string `json:"model_provider"`
-				} `json:"payload"`
-			}
-			if json.Unmarshal(line, &d) == nil && d.Payload.ModelProvider != "" {
-				out.Provider = d.Payload.ModelProvider
-			}
-		}
-		if bytes.Contains(line, []byte(`"turn_context"`)) {
-			var d struct {
-				Payload struct {
-					Model string `json:"model"`
-				} `json:"payload"`
-			}
-			if json.Unmarshal(line, &d) == nil && d.Payload.Model != "" {
-				out.Model = d.Payload.Model
-			}
-		}
-		if err != nil || (out.Provider != "" && out.Model != "") {
-			break
-		}
-	}
-	return out
-}
-
-// dateOf takes the date portion of an ISO timestamp.
-func dateOf(ts string) string {
-	if len(ts) >= 10 {
-		return ts[:10]
-	}
-	return "unknown"
-}
-
-// unknownProvider / unknownModel are placeholders for unknown attribution or model.
-const (
-	unknownProvider = "unknown"
-	unknownModel    = "unknown"
-)
-
-// parseClaudeLine parses claude's assistant messages.
-// Each carries full usage: input/output/cache_creation/cache_read/thinking.
-func parseClaudeLine(line []byte, row *Row) bool {
-	var d struct {
-		Type      string `json:"type"`
-		Timestamp string `json:"timestamp"`
-		SessionID string `json:"sessionId"`
-		Message   struct {
-			Model string `json:"model"`
-			Usage struct {
-				Input               int64 `json:"input_tokens"`
-				Output              int64 `json:"output_tokens"`
-				CacheCreation       int64 `json:"cache_creation_input_tokens"`
-				CacheRead           int64 `json:"cache_read_input_tokens"`
-				OutputTokensDetails struct {
-					Thinking int64 `json:"thinking_tokens"`
-				} `json:"output_tokens_details"`
-			} `json:"usage"`
-		} `json:"message"`
-	}
-	if err := json.Unmarshal(line, &d); err != nil {
-		return false
-	}
-	if d.Type != "assistant" || d.Message.Model == "" {
-		return false
-	}
-
-	row.Engine = "claude"
-	row.Model = d.Message.Model
-	// claude's jsonl records no provider; look it up in the attribution index
-	// maintained by the SessionStart hook.
-	row.Provider = providerForSession(d.SessionID)
-	row.Date = dateOf(d.Timestamp)
-	row.Sessions = 1
-	row.Tokens = Tokens{
-		Input:      d.Message.Usage.Input,
-		Output:     d.Message.Usage.Output,
-		CacheWrite: d.Message.Usage.CacheCreation,
-		CacheRead:  d.Message.Usage.CacheRead,
-		Thinking:   d.Message.Usage.OutputTokensDetails.Thinking,
-	}
-	return true
-}
-
-// providerForSession looks up the provider from ak's own session attribution index.
-func providerForSession(sessionID string) string {
-	if sessionID == "" {
-		return unknownProvider
-	}
-	if p, ok := lookupSessionOwner(sessionID); ok {
-		return p
-	}
-	return unknownProvider
-}
-
-// fiSizeOr takes the file's current size, falling back to the default on error.
-func fiSizeOr(f *os.File, def int64) int64 {
-	if fi, err := f.Stat(); err == nil {
-		return fi.Size()
-	}
-	return def
-}
-
-// parseCodexLine parses codex's token_count events.
-//
-// Note: total_token_usage is a CUMULATIVE value, valid only as the session's
-// last reading; last_token_usage is the increment and may be summed per event.
-// Mixing the two double-counts, and this is the easiest mistake to make in this
-// package. Neither model nor model_provider appears in these events; the caller
-// fills them from session_meta / turn_context.
-func parseCodexLine(line []byte, row *Row) bool {
-	var d struct {
-		Timestamp string `json:"timestamp"`
-		Payload   struct {
-			Type string `json:"type"`
-			Info struct {
-				LastTokenUsage struct {
-					Input        int64 `json:"input_tokens"`
-					Output       int64 `json:"output_tokens"`
-					CacheRead    int64 `json:"cached_input_tokens"`
-					CacheWrite   int64 `json:"cache_write_input_tokens"`
-					ReasoningOut int64 `json:"reasoning_output_tokens"`
-				} `json:"last_token_usage"`
-			} `json:"info"`
-		} `json:"payload"`
-	}
-	if err := json.Unmarshal(line, &d); err != nil {
-		return false
-	}
-	if d.Payload.Type != "token_count" {
-		return false
-	}
-	u := d.Payload.Info.LastTokenUsage
-	if u.Input == 0 && u.Output == 0 {
-		return false
-	}
-
-	row.Engine = "codex"
-	row.Model = unknownModel
-	row.Provider = unknownProvider
-	row.Date = dateOf(d.Timestamp)
-	row.Sessions = 1
-	row.Tokens = Tokens{
-		Input:      u.Input,
-		Output:     u.Output,
-		CacheRead:  u.CacheRead,
-		CacheWrite: u.CacheWrite,
-		Thinking:   u.ReasoningOut,
-	}
-	return true
 }

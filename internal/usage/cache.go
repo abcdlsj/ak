@@ -1,62 +1,69 @@
 package usage
 
 import (
-	"encoding/json"
+	"encoding/gob"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/abcdlsj/ak/internal/config"
 )
 
-// Cache holds incremental scan state. Fully parsing hundreds of MB of logs
-// takes seconds every time; this brings repeat runs down to near-instant.
+// Cache holds incremental scan state: per file, its pre-aggregated buckets and
+// how far it has been parsed. Repeat scans only read new bytes.
 type Cache struct {
-	// Files records each file's fingerprint and parsed offset.
-	Files map[string]fileFinger `json:"files"`
-	// Rows holds each file's parsed results, reused directly when unchanged.
-	Rows map[string][]Row `json:"rows"`
-	// Version invalidates the whole cache when it changes.
-	Version int `json:"version"`
+	// Version invalidates the whole cache when the format or parsing changes.
+	Version int
+	// Zone invalidates the cache when the local time zone changes, since
+	// buckets are keyed by local date.
+	Zone  string
+	Files map[string]*fileState
 }
 
-const cacheVersion = 1
+const cacheVersion = 2
 
-func newCache() Cache {
-	return Cache{
-		Files:   map[string]fileFinger{},
-		Rows:    map[string][]Row{},
-		Version: cacheVersion,
-	}
+func newCache() *Cache {
+	return &Cache{Version: cacheVersion, Zone: zoneID(), Files: map[string]*fileState{}}
+}
+
+func zoneID() string {
+	name, off := time.Now().Zone()
+	return fmt.Sprintf("%s%+d", name, off)
 }
 
 func cachePath() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := config.DataDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".local", "share", "ak")
-	return filepath.Join(dir, "usage-cache.json"), nil
+	return filepath.Join(dir, "usage-cache.gob"), nil
 }
 
-func loadCache() (Cache, error) {
+// loadCache returns the cache, or an empty one when it is missing, stale or
+// unreadable; a cache problem only costs a rescan.
+func loadCache() *Cache {
 	p, err := cachePath()
 	if err != nil {
-		return newCache(), err
+		return newCache()
 	}
-	data, err := os.ReadFile(p)
+	// The v1 cache stored every request as JSON and grew past 100 MB.
+	_ = os.Remove(filepath.Join(filepath.Dir(p), "usage-cache.json"))
+
+	f, err := os.Open(p)
 	if err != nil {
-		return newCache(), err
+		return newCache()
 	}
+	defer f.Close()
 	var c Cache
-	if err := json.Unmarshal(data, &c); err != nil {
-		return newCache(), err
+	if gob.NewDecoder(f).Decode(&c) != nil ||
+		c.Version != cacheVersion || c.Zone != zoneID() || c.Files == nil {
+		return newCache()
 	}
-	if c.Version != cacheVersion || c.Files == nil || c.Rows == nil {
-		return newCache(), nil
-	}
-	return c, nil
+	return &c
 }
 
-func saveCache(c Cache) error {
+func saveCache(c *Cache) error {
 	p, err := cachePath()
 	if err != nil {
 		return err
@@ -64,100 +71,17 @@ func saveCache(c Cache) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(c, "", " ")
+	f, err := os.CreateTemp(filepath.Dir(p), ".usage-cache-*")
 	if err != nil {
 		return err
 	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	defer os.Remove(f.Name())
+	if err := gob.NewEncoder(f).Encode(c); err != nil {
+		f.Close()
 		return err
 	}
-	return os.Rename(tmp, p)
-}
-
-// sessionIndex maps session_id to provider, maintained by the SessionStart hook.
-type sessionIndex struct {
-	Sessions map[string]string `json:"sessions"` // session_id -> provider
-}
-
-var sessionIdx sessionIndex
-
-// loadSessionIndex loads the attribution index.
-func loadSessionIndex() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	p := filepath.Join(home, ".local", "share", "ak", "sessions.jsonl")
-	data, err := os.ReadFile(p)
-	if err != nil {
-		sessionIdx.Sessions = map[string]string{}
-		return
-	}
-	sessionIdx.Sessions = map[string]string{}
-	for _, line := range splitLines(data) {
-		var e struct {
-			SessionID string `json:"session_id"`
-			Provider  string `json:"provider"`
-		}
-		if json.Unmarshal(line, &e) == nil && e.SessionID != "" && e.Provider != "" {
-			sessionIdx.Sessions[e.SessionID] = e.Provider
-		}
-	}
-}
-
-// lookupSessionOwner looks up the provider a session belongs to.
-func lookupSessionOwner(id string) (string, bool) {
-	if sessionIdx.Sessions == nil {
-		loadSessionIndex()
-	}
-	p, ok := sessionIdx.Sessions[id]
-	return p, ok
-}
-
-// RecordSession appends a session attribution record; called by the hook.
-func RecordSession(sessionID, provider string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	if err := f.Close(); err != nil {
 		return err
 	}
-	dir := filepath.Join(home, ".local", "share", "ak")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(filepath.Join(dir, "sessions.jsonl"),
-		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	rec := map[string]string{
-		"session_id": sessionID,
-		"provider":   provider,
-		"ts":         time.Now().UTC().Format(time.RFC3339),
-	}
-	data, err := json.Marshal(rec)
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(append(data, '\n'))
-	return err
-}
-
-func splitLines(b []byte) [][]byte {
-	var out [][]byte
-	start := 0
-	for i := 0; i < len(b); i++ {
-		if b[i] == '\n' {
-			if i > start {
-				out = append(out, b[start:i])
-			}
-			start = i + 1
-		}
-	}
-	if start < len(b) {
-		out = append(out, b[start:])
-	}
-	return out
+	return os.Rename(f.Name(), p)
 }

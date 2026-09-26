@@ -46,8 +46,8 @@ func CodexEnv(name string, p config.Provider, key string) EnvPlan {
 	return EnvPlan{Set: sortedKV(env)}
 }
 
-// codexProviderID returns the table name for [model_providers.<id>].
-func codexProviderID(name string, p config.Provider) string {
+// CodexProviderID returns the table name for [model_providers.<id>].
+func CodexProviderID(name string, p config.Provider) string {
 	if p.ProviderID != "" {
 		return p.ProviderID
 	}
@@ -78,7 +78,7 @@ type codexProviderTable struct {
 // CodexProfileTOML renders the profile file body, without the marker line,
 // which the shim package adds uniformly.
 func CodexProfileTOML(name string, p config.Provider) ([]byte, error) {
-	id := codexProviderID(name, p)
+	id := CodexProviderID(name, p)
 	wire := p.WireAPI
 	if wire == "" {
 		wire = "responses"
