@@ -111,3 +111,21 @@ func TestSecondaryPagesEscHome(t *testing.T) {
 		t.Fatal("esc on usage should go home")
 	}
 }
+
+// On the manage page enter edits; launching is the home page's job.
+func TestManageEnterEdits(t *testing.T) {
+	a := newApp(testConfig())
+	press(a, "m", "enter")
+	if _, ok := a.overlay.(*formOverlay); !ok || a.quitting {
+		t.Fatalf("overlay = %T, want the edit form", a.overlay)
+	}
+}
+
+// With nothing configured, a on the home page adds without a detour.
+func TestHomeAddWhenEmpty(t *testing.T) {
+	a := newApp(config.Default())
+	press(a, "a")
+	if _, ok := a.overlay.(*formOverlay); !ok {
+		t.Fatalf("overlay = %T, want the add form", a.overlay)
+	}
+}

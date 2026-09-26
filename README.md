@@ -57,9 +57,12 @@ asking for a variant first when there are any; `/` filters. The rest is a key
 away, and `esc` comes back:
 
 - `m` Manage shows each provider's health, details and last 30 days of usage;
-  `a` / `e` / `d` add, edit and delete, `*` sets the default and `s` syncs.
-- `u` Usage switches between 7, 30, 90 days and all history with `[` `]`, and
-  `enter` on a provider narrows the page to it.
+  `enter` edits, `a` / `d` add and delete, `*` sets the default and `s` syncs.
+- `u` Usage opens on all history and switches to 7, 30 or 90 days with `[`
+  `]`; `enter` on a provider narrows the page to it.
+
+A provider whose command would fail is marked red, and the launcher names the
+problem under the list before you run it.
 
 Custom variants go under the provider:
 

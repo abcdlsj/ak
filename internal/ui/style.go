@@ -73,6 +73,9 @@ func tile(label, value string) string {
 	return tileStyle.Render(dimStyle.Render(label) + "\n" + tileValueStyle.Render(value))
 }
 
+// barStyle colours a proportion bar.
+var barStyle = lipgloss.NewStyle().Foreground(barColor)
+
 // bar renders a proportion bar so relative magnitude reads at a glance.
 func bar(v, max int64, width int) string {
 	if max <= 0 || width <= 0 {
@@ -85,5 +88,5 @@ func bar(v, max int64, width int) string {
 	if n > width {
 		n = width
 	}
-	return lipgloss.NewStyle().Foreground(barColor).Render(strings.Repeat("▇", n))
+	return strings.Repeat("▇", n)
 }

@@ -46,9 +46,9 @@ func (p *providersPage) help() []string {
 		return []string{"enter keep filter", "esc clear"}
 	}
 	if !p.manage {
-		return []string{"enter launch", "1-9 launch", "/ filter", "m manage", "u usage"}
+		return []string{"enter/1-9 launch", "/ filter", "m manage", "u usage"}
 	}
-	return []string{"↑/↓ move", "enter launch", "/ filter", "a add", "e edit", "d delete", "* default", "s sync"}
+	return []string{"↑/↓ move", "enter edit", "/ filter", "a add", "d delete", "* default", "s sync"}
 }
 
 // focus puts the cursor on the named provider.
@@ -122,6 +122,9 @@ func (p *providersPage) update(a *app, msg tea.Msg) tea.Cmd {
 		p.filter.SetValue("")
 	}
 	if !p.manage {
+		if key.String() == "a" && len(a.cfg.Providers) == 0 {
+			return a.open(newFormOverlay(NewDraft(""), false))
+		}
 		return p.launcherKeys(a, key.String())
 	}
 	switch key.String() {
@@ -135,9 +138,7 @@ func (p *providersPage) update(a *app, msg tea.Msg) tea.Cmd {
 	}
 
 	switch key.String() {
-	case "enter":
-		return launchProvider(a, name)
-	case "e":
+	case "enter", "e":
 		return a.open(newFormOverlay(EditDraft(name, a.cfg.Providers[name]), true))
 	case "d":
 		return a.open(newConfirmOverlay(
@@ -211,7 +212,7 @@ func variantNames(cfg *config.Config, name string) []string {
 func (p *providersPage) view(a *app, width, height int) string {
 	if len(a.cfg.Providers) == 0 {
 		if !p.manage {
-			return dimStyle.Render("No providers yet. Press m, then a to add one, or run `ak import --from cc-switch`.")
+			return dimStyle.Render("No providers yet. Press a to add one, or run `ak import --from cc-switch`.")
 		}
 		return dimStyle.Render("No providers yet. Press a to add one, or run `ak import --from cc-switch`.")
 	}
@@ -225,7 +226,11 @@ func (p *providersPage) view(a *app, width, height int) string {
 	}
 	name, _ := p.selected(a.cfg)
 	if !p.manage {
-		return top + p.list(a, names, width, height-lipgloss.Height(top))
+		list := p.list(a, names, width, height-lipgloss.Height(top)-2)
+		if pr := problemLine(a, name); pr != "" {
+			list = strings.TrimRight(list, "\n") + "\n\n" + truncate(pr, width)
+		}
+		return top + list
 	}
 
 	// Side by side when there is room, detail below otherwise.
@@ -266,21 +271,24 @@ func (p *providersPage) list(a *app, names []string, width, height int) string {
 	for i := start; i < len(names) && i < start+rows; i++ {
 		n := names[i]
 		pr := cfg.Providers[n]
-		model := truncate(dash(pr.Model), modelW)
-		if cfg.Settings.Default == n {
-			model += badgeStyle.Render(" ★")
-		}
-		line := fmt.Sprintf("%s %-*s  %-*s  %s", statusMark(a, n), nameW, cfg.Settings.Prefix+n, kindW, pr.Kind, model)
-		if !p.manage {
-			line = rowNumber(i) + line
-		}
-		if i == p.cursor {
-			// A caret and a fill: the fill alone is invisible on terminals
-			// that ignore background colours.
-			b.WriteString(pickStyle.Width(width).MaxWidth(width).Render("▌ " + line))
+		r := row{picked: i == p.cursor}
+		// A caret and a fill: the fill alone is invisible on terminals that
+		// ignore background colours.
+		if r.picked {
+			r.add(rowStyle, "▌ ")
 		} else {
-			b.WriteString(rowStyle.Render("  " + line))
+			r.add(rowStyle, "  ")
 		}
+		if !p.manage {
+			r.add(badgeStyle, rowNumber(i))
+		}
+		st, mark := statusMark(a, n)
+		r.add(st, mark)
+		r.add(rowStyle, fmt.Sprintf(" %-*s  %-*s  %s", nameW, cfg.Settings.Prefix+n, kindW, pr.Kind, truncate(dash(pr.Model), modelW)))
+		if cfg.Settings.Default == n {
+			r.add(badgeStyle, " ★")
+		}
+		b.WriteString(r.render(width))
 		b.WriteString("\n")
 	}
 	if len(names) > start+rows {
@@ -294,22 +302,31 @@ func rowNumber(i int) string {
 	if i < 0 || i >= 9 {
 		return "   "
 	}
-	return badgeStyle.Render(fmt.Sprintf("%d", i+1)) + "  "
+	return fmt.Sprintf("%d  ", i+1)
 }
 
 // statusMark is a one-cell health indicator; unknown until checks finish.
-func statusMark(a *app, name string) string {
+func statusMark(a *app, name string) (lipgloss.Style, string) {
 	st, ok := a.statuses[name]
 	switch {
 	case !ok:
-		return dimStyle.Render("·")
+		return dimStyle, "·"
 	case st.OK():
-		return okStyle.Render("●")
+		return okStyle, "●"
 	case st.NoEngine || st.NoKey:
-		return errStyle.Render("●")
+		return errStyle, "●"
 	default:
-		return warnStyle.Render("●")
+		return warnStyle, "●"
 	}
+}
+
+// problemLine names what would make the provider's command fail, if anything.
+func problemLine(a *app, name string) string {
+	st, ok := a.statuses[name]
+	if !ok || st.OK() {
+		return ""
+	}
+	return errStyle.Render("✗ " + a.cfg.Settings.Prefix + name + ": " + strings.Join(st.Problems(), "; "))
 }
 
 // detailPanel shows everything about one provider at a glance.

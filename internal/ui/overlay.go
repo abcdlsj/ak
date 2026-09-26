@@ -60,6 +60,10 @@ func (o *formOverlay) save(a *app) tea.Cmd {
 	if err != nil {
 		return a.notify(err.Error(), true)
 	}
+	// Leave the cursor on what was just saved.
+	for _, i := range []int{pageHome, pageManage} {
+		a.pages[i].(*providersPage).focus(a.cfg, o.draft.Name)
+	}
 	return a.sync()
 }
 

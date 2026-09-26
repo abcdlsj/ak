@@ -2,6 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -45,4 +48,29 @@ func humanizeMoney(v float64) string {
 	default:
 		return fmt.Sprintf("%.2f", v)
 	}
+}
+
+// row assembles a table line from styled segments. Rendering the segments
+// inside one outer style would not work: each inner style ends with a reset,
+// which also clears the selection fill for the rest of the line. Instead every
+// segment carries the fill itself.
+type row struct {
+	picked bool
+	b      strings.Builder
+}
+
+func (r *row) add(s lipgloss.Style, text string) {
+	if r.picked {
+		s = s.Background(pickColor).Bold(true)
+	}
+	r.b.WriteString(s.Render(text))
+}
+
+// render pads the line to width so a selected row is filled edge to edge.
+func (r *row) render(width int) string {
+	line := truncate(r.b.String(), width)
+	if gap := width - lipgloss.Width(line); gap > 0 && r.picked {
+		line += pickStyle.Render(strings.Repeat(" ", gap))
+	}
+	return line
 }

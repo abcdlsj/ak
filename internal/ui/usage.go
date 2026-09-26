@@ -24,7 +24,7 @@ type usagePage struct {
 	provider string // drill-down filter; empty means every provider
 }
 
-func newUsagePage() *usagePage { return &usagePage{rng: 1} }
+func newUsagePage() *usagePage { return &usagePage{rng: len(usageRanges) - 1} }
 
 func (p *usagePage) title() string { return "Usage" }
 
@@ -184,13 +184,21 @@ func providerTable(rows []usage.ProviderRow, width, limit, cursor int) string {
 	}
 	for i := start; i < len(rows) && i < start+limit; i++ {
 		r := rows[i]
-		line := fmt.Sprintf("%-*s %8s %9s  %s", nameW, truncate(r.Name, nameW), humanize(r.Tokens), costCell(r.Cost),
-			bar(r.Tokens, rows[0].Tokens, barW))
-		if i == cursor {
-			b.WriteString(pickStyle.Render("▌ " + line))
+		ln := row{picked: i == cursor}
+		if ln.picked {
+			ln.add(rowStyle, "▌ ")
 		} else {
-			b.WriteString("  " + line)
+			ln.add(rowStyle, "  ")
 		}
+		ln.add(rowStyle, fmt.Sprintf("%-*s %8s ", nameW, truncate(r.Name, nameW), humanize(r.Tokens)))
+		if r.Cost > 0 {
+			ln.add(rowStyle, fmt.Sprintf("%9s", "$"+humanizeMoney(r.Cost)))
+		} else {
+			ln.add(dimStyle, fmt.Sprintf("%9s", "-"))
+		}
+		ln.add(rowStyle, "  ")
+		ln.add(barStyle, bar(r.Tokens, rows[0].Tokens, barW))
+		b.WriteString(ln.render(width))
 		b.WriteString("\n")
 	}
 	if more := len(rows) - start - limit; more > 0 {
