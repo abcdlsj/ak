@@ -1,20 +1,35 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 
-	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/provider"
 )
 
-// claudePlanFor computes the environment plan for a claude provider.
-func claudePlanFor(name string, p config.Provider, variant, key string) provider.EnvPlan {
-	return provider.ClaudeEnv(name, p, variant, key)
-}
-
-// codexPlanFor computes the environment plan for a codex provider.
-func codexPlanFor(name string, p config.Provider, key string) provider.EnvPlan {
-	return provider.CodexEnv(name, p, key)
+// launchView renders what a provider's command does, with variant applied
+// when non-empty. Secrets are masked.
+func launchView(l provider.Launch, variant string) (envPlanView, error) {
+	view := envPlanViewFrom(l.Env)
+	args := l.Args
+	if variant != "" {
+		found := false
+		for _, v := range l.Variants {
+			if v.Name != variant {
+				continue
+			}
+			found = true
+			view = append(view, envPlanViewFrom(provider.EnvPlan{Set: v.Env})...)
+			args = append(append([]string(nil), args...), v.Args...)
+		}
+		if !found {
+			return nil, fmt.Errorf("unknown variant %q", variant)
+		}
+	}
+	if len(args) > 0 {
+		view = append(view, "args "+strings.Join(args, " "))
+	}
+	return view, nil
 }
 
 // envPlanViewFrom converts an EnvPlan into masked display lines.

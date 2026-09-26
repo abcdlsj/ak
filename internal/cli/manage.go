@@ -1,26 +1,112 @@
 package cli
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/ui"
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 )
 
+// providerFlag maps a command-line flag onto a provider field.
+type providerFlag struct {
+	name, def, usage string
+	set              func(p *config.Provider, v string)
+}
+
+var providerFlags = []providerFlag{
+	{"kind", "claude", "Engine: claude or codex", func(p *config.Provider, v string) { p.Kind = config.Kind(v) }},
+	{"base-url", "", "API endpoint", func(p *config.Provider, v string) { p.BaseURL = v }},
+	{"key", "", "API key, or a reference: env:NAME, cmd:..., keychain:...", func(p *config.Provider, v string) { p.SetKey(v) }},
+	{"model", "", "Primary model", func(p *config.Provider, v string) { p.Model = v }},
+	{"haiku", "", "haiku-tier model (claude)", func(p *config.Provider, v string) { p.Haiku = v }},
+	{"sonnet", "", "sonnet-tier model (claude)", func(p *config.Provider, v string) { p.Sonnet = v }},
+	{"opus", "", "opus-tier model (claude)", func(p *config.Provider, v string) { p.Opus = v }},
+	{"key-field", "auth_token", "claude auth variable: auth_token or api_key", func(p *config.Provider, v string) { p.KeyField = v }},
+	{"wire-api", "responses", "codex wire API: responses or chat", func(p *config.Provider, v string) { p.WireAPI = v }},
+	{"reasoning", "", "codex default reasoning effort", func(p *config.Provider, v string) { p.Reasoning = v }},
+	{"display", "", "Name shown in listings", func(p *config.Provider, v string) { p.Display = v }},
+}
+
+func addProviderFlags(cmd *cobra.Command, withDefaults bool) {
+	for _, f := range providerFlags {
+		def := ""
+		if withDefaults {
+			def = f.def
+		}
+		cmd.Flags().String(f.name, def, f.usage)
+	}
+}
+
+// applyProviderFlags sets fields from flags; onlyChanged skips flags the user
+// did not pass, so an edit leaves every other field alone.
+func applyProviderFlags(cmd *cobra.Command, p *config.Provider, onlyChanged bool) (changed int) {
+	for _, f := range providerFlags {
+		if onlyChanged && !cmd.Flags().Changed(f.name) {
+			continue
+		}
+		v, _ := cmd.Flags().GetString(f.name)
+		f.set(p, strings.TrimSpace(v))
+		if cmd.Flags().Changed(f.name) {
+			changed++
+		}
+	}
+	return changed
+}
+
 func newAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "add <name>",
+		Use:   "add [name]",
 		Short: "Add a provider",
 		Long: `Add a provider and generate its command immediately.
 
-Two ways to use it:
   ak add kimi --kind claude --base-url https://api.moonshot.cn/anthropic --key sk-... --model kimi-k2.7-code
-  ak add kimi        # with no flags, prompts for each field`,
+  ak add        # with no --base-url, opens a form`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			name := ""
+			if len(args) > 0 {
+				name = args[0]
+			}
+			var p config.Provider
+			applyProviderFlags(cmd, &p, false)
+			if p.BaseURL == "" {
+				d := ui.NewDraft(name)
+				if err := runForm(d, cfg); err != nil {
+					return err
+				}
+				name, p = d.Name, d.Provider()
+			}
+			if name == "" {
+				return fmt.Errorf("a provider name is required")
+			}
+			if err := AddProvider(cfg, name, p); err != nil {
+				return err
+			}
+			return runSync(cfg, false)
+		},
+	}
+	addProviderFlags(cmd, true)
+	return cmd
+}
+
+func newEditCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "edit <name>",
+		Short: "Change a provider",
+		Long: `Change a provider and regenerate its command.
+
+  ak edit kimi --model kimi-k3    # change only the given fields
+  ak edit kimi                    # with no flags, opens a form`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
@@ -28,79 +114,70 @@ Two ways to use it:
 				return err
 			}
 			name := args[0]
-
-			p, err := buildProviderFromFlags(cmd)
-			if err != nil {
-				return err
+			p, ok := cfg.Providers[name]
+			if !ok {
+				return fmt.Errorf("provider %q does not exist", name)
 			}
-			// No substantive input given, so fall back to interactive entry.
-			if p.BaseURL == "" {
-				p, err = interactiveAdd(name)
-				if err != nil {
+			if applyProviderFlags(cmd, &p, true) == 0 {
+				d := ui.EditDraft(name, p)
+				if err := runForm(d, cfg); err != nil {
 					return err
 				}
+				p = d.Provider()
 			}
-			return doAdd(cfg, name, p)
+			if err := UpdateProvider(cfg, name, p); err != nil {
+				return err
+			}
+			return runSync(cfg, false)
 		},
 	}
-
-	f := cmd.Flags()
-	f.String("kind", "claude", "Engine: claude or codex")
-	f.String("base-url", "", "API endpoint")
-	f.String("key", "", "API key")
-	f.String("model", "", "Primary model")
-	f.String("haiku", "", "haiku-tier model (claude)")
-	f.String("sonnet", "", "sonnet-tier model (claude)")
-	f.String("opus", "", "opus-tier model (claude)")
-	f.String("key-field", "auth_token", "claude auth variable: auth_token or api_key")
-	f.String("wire-api", "responses", "codex wire API: responses or chat")
-	f.String("reasoning", "", "codex default reasoning effort")
-	f.String("display", "", "Name shown in listings")
+	addProviderFlags(cmd, false)
 	return cmd
 }
 
-func buildProviderFromFlags(cmd *cobra.Command) (config.Provider, error) {
-	f := cmd.Flags()
-	get := func(n string) string {
-		v, _ := f.GetString(n)
-		return strings.TrimSpace(v)
+func runForm(d *ui.Draft, cfg *config.Config) error {
+	err := d.Form(func(n string) bool { _, ok := cfg.Providers[n]; return ok }).Run()
+	if errors.Is(err, huh.ErrUserAborted) {
+		return fmt.Errorf("cancelled")
 	}
-	p := config.Provider{
-		Kind:      config.Kind(get("kind")),
-		BaseURL:   get("base-url"),
-		Model:     get("model"),
-		Display:   get("display"),
-		APIKey:    get("key"),
-		KeyField:  get("key-field"),
-		WireAPI:   get("wire-api"),
-		Reasoning: get("reasoning"),
-		Haiku:     get("haiku"),
-		Sonnet:    get("sonnet"),
-		Opus:      get("opus"),
-	}
-	return p, nil
+	return err
 }
 
-// doAdd writes the config, validates it, then syncs immediately.
-func doAdd(cfg *config.Config, name string, p config.Provider) error {
+// AddProvider validates and saves a new provider.
+func AddProvider(cfg *config.Config, name string, p config.Provider) error {
 	if err := config.ValidateName(name); err != nil {
 		return err
 	}
 	if _, exists := cfg.Providers[name]; exists {
-		return fmt.Errorf("provider %q already exists, run `ak rm %s` first", name, name)
+		return fmt.Errorf("provider %q already exists, use `ak edit %s`", name, name)
 	}
-	if cfg.Providers == nil {
-		cfg.Providers = map[string]config.Provider{}
-	}
-	cfg.Providers[name] = p
+	return saveProvider(cfg, name, p)
+}
 
-	if err := config.Validate(cfg); err != nil {
+// UpdateProvider validates and saves a change to an existing provider.
+func UpdateProvider(cfg *config.Config, name string, p config.Provider) error {
+	if _, ok := cfg.Providers[name]; !ok {
+		return fmt.Errorf("provider %q does not exist", name)
+	}
+	return saveProvider(cfg, name, p)
+}
+
+// saveProvider validates on a copy, so a rejected change leaves cfg untouched.
+func saveProvider(cfg *config.Config, name string, p config.Provider) error {
+	next := *cfg
+	next.Providers = make(map[string]config.Provider, len(cfg.Providers)+1)
+	for k, v := range cfg.Providers {
+		next.Providers[k] = v
+	}
+	next.Providers[name] = p
+	if err := config.Validate(&next); err != nil {
 		return err
 	}
-	if err := config.Save(cfg); err != nil {
+	if err := config.Save(&next); err != nil {
 		return err
 	}
-	return runSync(cfg, false)
+	*cfg = next
+	return nil
 }
 
 func newRemoveCmd() *cobra.Command {
@@ -188,46 +265,22 @@ func newEnvCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-
-			if p.Kind == config.KindClaude {
-				printEnvPlan(envPlanViewFrom(claudePlanFor(name, p, variant, key)), cfg.Settings.Prefix+name)
-				return nil
+			eng := provider.EngineFor(p.Kind)
+			if eng == nil {
+				return fmt.Errorf("provider %q has unsupported kind %q", name, p.Kind)
 			}
-			printEnvPlan(envPlanViewFrom(codexPlanFor(name, p, key)), cfg.Settings.Prefix+name)
-			fmt.Printf("  (a codex provider also generates ~/.codex/ak-%s.config.toml, applied via --profile)\n", name)
+			launch, err := eng.Launch(name, p, provider.Literal(key), provider.Context{})
+			if err != nil {
+				return err
+			}
+			view, err := launchView(launch, variant)
+			if err != nil {
+				return err
+			}
+			printEnvPlan(view, cfg.Settings.Prefix+name)
 			return nil
 		},
 	}
-}
-
-// interactiveAdd is a minimal stdin prompt. gum is preferred when available.
-func interactiveAdd(name string) (config.Provider, error) {
-	r := bufio.NewReader(os.Stdin)
-	ask := func(label, def string) string {
-		if def != "" {
-			fmt.Printf("%s [%s]: ", label, def)
-		} else {
-			fmt.Printf("%s: ", label)
-		}
-		line, _ := r.ReadString('\n')
-		line = strings.TrimSpace(line)
-		if line == "" {
-			return def
-		}
-		return line
-	}
-
-	kind := ask("engine (claude/codex)", "claude")
-	p := config.Provider{
-		Kind:     config.Kind(kind),
-		BaseURL:  ask("API endpoint", ""),
-		Model:    ask("primary model", ""),
-		APIKey:   ask("API key", ""),
-		Display:  ask("display name", name),
-		KeyField: ask("auth variable (auth_token/api_key)", "auth_token"),
-		WireAPI:  ask("codex wire API (responses/chat)", "responses"),
-	}
-	return p, nil
 }
 
 func printEnvPlan(plan envPlanView, cmd string) {
@@ -246,6 +299,32 @@ func newUICmd() *cobra.Command {
 		Short: "Open the TUI (same as running ak with no arguments)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return ui.RunUI()
+		},
+	}
+}
+
+// newKeyCmd prints a provider's resolved key. Commands for providers using
+// api_key_ref call it at launch so no plaintext copy is written to disk.
+func newKeyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "__key <name>",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			p, ok := cfg.Providers[args[0]]
+			if !ok {
+				return fmt.Errorf("provider %q does not exist", args[0])
+			}
+			key, err := secrets.Default().Resolve(p)
+			if err != nil {
+				return err
+			}
+			fmt.Print(key)
+			return nil
 		},
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/secrets"
 )
 
@@ -194,7 +195,7 @@ func TestCollectOrphans_CodexHomeInjected(t *testing.T) {
 	cfg := config.Default()
 	s := &Syncer{Cfg: cfg, Resolver: secrets.Default(), DryRun: true, CodexHome: codexHome}
 
-	results, err := s.collectOrphans(binDir, map[string]bool{})
+	results, err := s.collectOrphans(binDir, provider.Context{CodexHome: codexHome}, map[string]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}

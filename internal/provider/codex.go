@@ -2,7 +2,7 @@ package provider
 
 import (
 	"fmt"
-	"sort"
+	"path/filepath"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -31,22 +31,76 @@ func EnvKey(name string) string {
 // ~/.codex/<ProfileName>.config.toml.
 func ProfileName(name string) string { return "ak-" + name }
 
-// CodexEnv computes the environment plan for a codex provider.
-// The model and endpoint travel through the profile file; the environment only
-// carries the secret.
-func CodexEnv(name string, p config.Provider, key string) EnvPlan {
-	env := map[string]string{}
-	if key != "" {
-		env[EnvKey(name)] = key
+type codexEngine struct{}
+
+func (codexEngine) Kind() config.Kind                      { return config.KindCodex }
+func (codexEngine) BinName() string                        { return "codex" }
+func (codexEngine) BinEnvVar() string                      { return "AK_CODEX_BIN" }
+func (codexEngine) ConfiguredBin(s config.Settings) string { return s.CodexBin }
+
+func (codexEngine) ArtifactDirs(ctx Context) []string {
+	if ctx.CodexHome == "" {
+		return nil
 	}
-	env["AK_PROVIDER"] = name
-	if p.CodexHome != "" {
-		env["CODEX_HOME"] = config.ExpandHome(p.CodexHome)
-	}
-	return EnvPlan{Set: sortedKV(env)}
+	return []string{ctx.CodexHome}
 }
 
-// CodexProviderID returns the table name for [model_providers.<id>].
+// Launch layers a profile over the user's codex config; the model and endpoint
+// travel through the profile, the environment only carries the secret.
+func (codexEngine) Launch(name string, p config.Provider, key Secret, ctx Context) (Launch, error) {
+	body, err := CodexProfileTOML(name, p)
+	if err != nil {
+		return Launch{}, err
+	}
+	l := Launch{
+		Env:  CodexEnv(name, p, key),
+		Args: []string{"--profile", ProfileName(name)},
+	}
+	if ctx.CodexHome != "" {
+		l.Files = []File{{Path: filepath.Join(ctx.CodexHome, ProfileName(name)+".config.toml"), Body: body}}
+	}
+	for _, v := range mergeNames(config.ValidReasoning(), p.Variants) {
+		l.Variants = append(l.Variants, codexVariant(v, p))
+	}
+	return l, nil
+}
+
+// codexVariant turns a variant into -c overrides: a reasoning level sets the
+// effort, a custom variant sets its model and effort.
+func codexVariant(name string, p config.Provider) Variant {
+	custom, ok := p.Variants[name]
+	if !ok {
+		return Variant{Name: name, Args: codexOverride("model_reasoning_effort", name)}
+	}
+	v := Variant{Name: name, Env: sortedMap(custom.Env), Shim: custom.Shim}
+	if custom.Model != "" {
+		v.Args = append(v.Args, codexOverride("model", custom.Model)...)
+	}
+	if custom.Reasoning != "" {
+		v.Args = append(v.Args, codexOverride("model_reasoning_effort", custom.Reasoning)...)
+	}
+	return v
+}
+
+// codexOverride renders `-c key="value"`, the value as a TOML basic string.
+func codexOverride(key, value string) []string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return []string{"-c", fmt.Sprintf(`%s="%s"`, key, r.Replace(value))}
+}
+
+// CodexEnv computes the environment plan for a codex provider.
+func CodexEnv(name string, p config.Provider, key Secret) EnvPlan {
+	env := newEnv()
+	env.setSecret(EnvKey(name), key)
+	env.set("AK_PROVIDER", name)
+	if p.CodexHome != "" {
+		env.set("CODEX_HOME", config.ExpandHome(p.CodexHome))
+	}
+	return EnvPlan{Set: env.sorted()}
+}
+
+// CodexProviderID returns the table name for [model_providers.<id>], which
+// codex also records in its session logs.
 func CodexProviderID(name string, p config.Provider) string {
 	if p.ProviderID != "" {
 		return p.ProviderID
@@ -88,12 +142,7 @@ func CodexProfileTOML(name string, p config.Provider) ([]byte, error) {
 		Model:          p.Model,
 		ReasoningLevel: p.Reasoning,
 		ModelProviders: map[string]codexProviderTable{
-			id: {
-				Name:    id,
-				BaseURL: p.BaseURL,
-				WireAPI: wire,
-				EnvKey:  EnvKey(name),
-			},
+			id: {Name: id, BaseURL: p.BaseURL, WireAPI: wire, EnvKey: EnvKey(name)},
 		},
 	}
 	data, err := toml.Marshal(prof)
@@ -101,25 +150,4 @@ func CodexProfileTOML(name string, p config.Provider) ([]byte, error) {
 		return nil, fmt.Errorf("render codex profile %q: %w", name, err)
 	}
 	return data, nil
-}
-
-// CodexVariants returns the variant names a codex shim recognises: the
-// reasoning levels plus any custom variants.
-func CodexVariants(p config.Provider) []string {
-	seen := map[string]bool{}
-	var out []string
-	for v := range config.ValidReasoning() {
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	for v := range p.Variants {
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	sort.Strings(out)
-	return out
 }

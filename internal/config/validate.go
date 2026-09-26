@@ -60,9 +60,36 @@ func Validate(cfg *Config) error {
 			return err
 		}
 	}
+	if err := validateCommandNames(cfg); err != nil {
+		return err
+	}
 	if d := cfg.Settings.Default; d != "" {
 		if _, ok := cfg.Providers[d]; !ok {
 			return fmt.Errorf("settings.default points at unknown provider %q", d)
+		}
+	}
+	return nil
+}
+
+// validateCommandNames rejects a standalone variant command that would share
+// its name with another provider's command: ak-foo-bar is both provider
+// foo's variant bar and provider foo-bar.
+func validateCommandNames(cfg *Config) error {
+	owner := map[string]string{}
+	for _, name := range cfg.Names() {
+		owner[name] = "provider " + name
+	}
+	for _, name := range cfg.Names() {
+		for v, variant := range cfg.Providers[name].Variants {
+			if !variant.Shim {
+				continue
+			}
+			cmd := name + "-" + v
+			if o, taken := owner[cmd]; taken {
+				return fmt.Errorf("provider %q variant %q would generate %s%s, already used by %s",
+					name, v, cfg.Settings.Prefix, cmd, o)
+			}
+			owner[cmd] = fmt.Sprintf("provider %s variant %s", name, v)
 		}
 	}
 	return nil

@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // MarkerVersion is the current marker version of generated artifacts.
@@ -77,7 +78,7 @@ func readMarker(path string) (Marker, bool) {
 }
 
 func parseMarkerLine(line string) (Marker, bool) {
-	sub := markerRe.FindStringSubmatch(trimCR(line))
+	sub := markerRe.FindStringSubmatch(strings.TrimSuffix(line, "\r"))
 	if sub == nil {
 		return Marker{}, false
 	}
@@ -86,8 +87,8 @@ func parseMarkerLine(line string) (Marker, bool) {
 		return Marker{}, false
 	}
 	m := Marker{Version: v}
-	for _, kv := range splitFields(sub[2]) {
-		k, val, ok := cut(kv, '=')
+	for _, kv := range strings.Fields(sub[2]) {
+		k, val, ok := strings.Cut(kv, "=")
 		if !ok {
 			continue
 		}
@@ -101,39 +102,4 @@ func parseMarkerLine(line string) (Marker, bool) {
 		}
 	}
 	return m, true
-}
-
-func trimCR(s string) string {
-	if n := len(s); n > 0 && s[n-1] == '\r' {
-		return s[:n-1]
-	}
-	return s
-}
-
-func splitFields(s string) []string {
-	var out []string
-	cur := ""
-	for i := 0; i < len(s); i++ {
-		if s[i] == ' ' || s[i] == '\t' {
-			if cur != "" {
-				out = append(out, cur)
-				cur = ""
-			}
-			continue
-		}
-		cur += string(s[i])
-	}
-	if cur != "" {
-		out = append(out, cur)
-	}
-	return out
-}
-
-func cut(s string, sep byte) (before, after string, found bool) {
-	for i := 0; i < len(s); i++ {
-		if s[i] == sep {
-			return s[:i], s[i+1:], true
-		}
-	}
-	return s, "", false
 }

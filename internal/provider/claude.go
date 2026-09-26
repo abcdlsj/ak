@@ -1,5 +1,5 @@
 // Package provider translates the configured providers into the environment
-// variables and config files the shims need.
+// variables, arguments and config files their commands need.
 package provider
 
 import (
@@ -8,24 +8,12 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 )
 
-// KV is an ordered environment variable key-value pair.
-type KV struct {
-	Key   string
-	Value string
-}
-
-// EnvPlan is the full environment a shim injects: Set is exported, Unset is
-// unset.
-type EnvPlan struct {
-	Set   []KV
-	Unset []string
-}
-
 // claudeAuthKeys are the two mutually exclusive auth variables. Only one is
 // written; the other must be unset.
 const (
 	envAuthToken = "ANTHROPIC_AUTH_TOKEN"
 	envAPIKey    = "ANTHROPIC_API_KEY"
+	envSmallFast = "ANTHROPIC_SMALL_FAST_MODEL"
 )
 
 // claudeProviderKeys is the complete set of provider-specific environment
@@ -42,61 +30,92 @@ var claudeProviderKeys = []string{
 	"ANTHROPIC_DEFAULT_SONNET_MODEL",
 	"ANTHROPIC_DEFAULT_OPUS_MODEL",
 	"ANTHROPIC_DEFAULT_FABLE_MODEL",
-	"ANTHROPIC_SMALL_FAST_MODEL", // deprecated, always unset
+	envSmallFast, // deprecated, always unset
 	"CLAUDE_CODE_SUBAGENT_MODEL",
 }
 
-// ClaudeEnv computes the environment plan for a claude provider.
-// An empty variant means no variant; key is the resolved plaintext secret.
-func ClaudeEnv(name string, p config.Provider, variant string, key string) EnvPlan {
-	env := map[string]string{}
+type claudeEngine struct{}
 
-	env["ANTHROPIC_BASE_URL"] = p.BaseURL
+func (claudeEngine) Kind() config.Kind                      { return config.KindClaude }
+func (claudeEngine) BinName() string                        { return "claude" }
+func (claudeEngine) BinEnvVar() string                      { return "AK_CLAUDE_BIN" }
+func (claudeEngine) ConfiguredBin(s config.Settings) string { return s.ClaudeBin }
+func (claudeEngine) ArtifactDirs(Context) []string          { return nil }
+
+// Launch sets the environment; each variant carries only the variables that
+// differ from the base.
+func (claudeEngine) Launch(name string, p config.Provider, key Secret, _ Context) (Launch, error) {
+	base := ClaudeEnv(name, p, "", key)
+	baseVals := map[string]string{}
+	for _, kv := range base.Set {
+		baseVals[kv.Key] = kv.Value
+	}
+
+	var variants []Variant
+	for _, v := range claudeVariantNames(p) {
+		var delta []KV
+		for _, kv := range ClaudeEnv(name, p, v, key).Set {
+			if baseVals[kv.Key] != kv.Value {
+				delta = append(delta, kv)
+			}
+		}
+		custom, isCustom := p.Variants[v]
+		// A built-in tier that changes nothing need not be recognised.
+		if len(delta) == 0 && !isCustom {
+			continue
+		}
+		variants = append(variants, Variant{Name: v, Env: delta, Shim: custom.Shim})
+	}
+	return Launch{Env: base, Variants: variants}, nil
+}
+
+// ClaudeEnv computes the environment plan for a claude provider.
+// An empty variant means no variant.
+func ClaudeEnv(name string, p config.Provider, variant string, key Secret) EnvPlan {
+	env := newEnv()
+	env.set("ANTHROPIC_BASE_URL", p.BaseURL)
 
 	authKey := envAuthToken
 	if p.KeyField == "api_key" {
 		authKey = envAPIKey
 	}
-	if key != "" {
-		env[authKey] = key
-	}
+	env.setSecret(authKey, key)
 
 	model, haiku, sonnet, opus := normalizeModels(p)
-	setIf(env, "ANTHROPIC_MODEL", model)
-	setIf(env, "ANTHROPIC_DEFAULT_HAIKU_MODEL", haiku)
-	setIf(env, "ANTHROPIC_DEFAULT_SONNET_MODEL", sonnet)
-	setIf(env, "ANTHROPIC_DEFAULT_OPUS_MODEL", opus)
+	env.setIf("ANTHROPIC_MODEL", model)
+	env.setIf("ANTHROPIC_DEFAULT_HAIKU_MODEL", haiku)
+	env.setIf("ANTHROPIC_DEFAULT_SONNET_MODEL", sonnet)
+	env.setIf("ANTHROPIC_DEFAULT_OPUS_MODEL", opus)
 
 	// Extra env vars merge last and can override the derived keys above.
 	for k, v := range p.Env {
-		env[k] = v
+		env.set(k, v)
 	}
 
 	// A variant overrides the model. The built-in opus/sonnet/haiku tiers
 	// replace the primary model directly.
-	if variant != "" {
-		switch variant {
-		case "opus":
-			setIf(env, "ANTHROPIC_MODEL", opus)
-		case "sonnet":
-			setIf(env, "ANTHROPIC_MODEL", sonnet)
-		case "haiku":
-			setIf(env, "ANTHROPIC_MODEL", haiku)
-		}
-		if v, ok := p.Variants[variant]; ok {
-			setIf(env, "ANTHROPIC_MODEL", v.Model)
-			for k, val := range v.Env {
-				env[k] = val
-			}
+	switch variant {
+	case "opus":
+		env.setIf("ANTHROPIC_MODEL", opus)
+	case "sonnet":
+		env.setIf("ANTHROPIC_MODEL", sonnet)
+	case "haiku":
+		env.setIf("ANTHROPIC_MODEL", haiku)
+	}
+	if v, ok := p.Variants[variant]; ok && variant != "" {
+		env.setIf("ANTHROPIC_MODEL", v.Model)
+		for k, val := range v.Env {
+			env.set(k, val)
 		}
 	}
 
-	env["AK_PROVIDER"] = name
+	env.set("AK_PROVIDER", name)
 	if p.ConfigDir != "" {
-		env["CLAUDE_CONFIG_DIR"] = config.ExpandHome(p.ConfigDir)
+		env.set("CLAUDE_CONFIG_DIR", config.ExpandHome(p.ConfigDir))
 	}
 
-	return EnvPlan{Set: sortedKV(env), Unset: unsetList(claudeProviderKeys, env)}
+	// small_fast is deprecated: it only feeds normalizeModels and is always unset.
+	return EnvPlan{Set: env.sorted(envSmallFast), Unset: unsetList(claudeProviderKeys, env)}
 }
 
 // normalizeModels implements cc-switch's small_fast migration semantics
@@ -110,7 +129,7 @@ func ClaudeEnv(name string, p config.Provider, variant string, key string) EnvPl
 // dropped in the end.
 func normalizeModels(p config.Provider) (model, haiku, sonnet, opus string) {
 	model = p.Model
-	smallFast := p.Env["ANTHROPIC_SMALL_FAST_MODEL"]
+	smallFast := p.Env[envSmallFast]
 
 	haiku = firstNonEmpty(p.Haiku, smallFast, model)
 	sonnet = firstNonEmpty(p.Sonnet, model, smallFast)
@@ -118,32 +137,13 @@ func normalizeModels(p config.Provider) (model, haiku, sonnet, opus string) {
 	return
 }
 
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func setIf(m map[string]string, k, v string) {
-	if v != "" {
-		m[k] = v
-	}
-}
-
-// unsetList returns the keys in known that are not in set, sorted.
+// unsetList returns the keys in known that are not set, sorted.
 // ANTHROPIC_SMALL_FAST_MODEL is deprecated and is force-unset even when it is
 // configured.
-func unsetList(known []string, set map[string]string) []string {
+func unsetList(known []string, env *envBuilder) []string {
 	var out []string
 	for _, k := range known {
-		if k == "ANTHROPIC_SMALL_FAST_MODEL" {
-			out = append(out, k)
-			continue
-		}
-		if _, ok := set[k]; !ok {
+		if k == envSmallFast || !env.has(k) {
 			out = append(out, k)
 		}
 	}
@@ -151,36 +151,20 @@ func unsetList(known []string, set map[string]string) []string {
 	return out
 }
 
-func sortedKV(m map[string]string) []KV {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		// small_fast is deprecated and never goes into the set list; it only
-		// feeds normalizeModels as input.
-		if k == "ANTHROPIC_SMALL_FAST_MODEL" {
-			continue
-		}
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	out := make([]KV, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, KV{Key: k, Value: m[k]})
-	}
-	return out
+// claudeVariantNames returns every variant name the provider's command may
+// recognise (built-in tiers plus custom ones), sorted.
+func claudeVariantNames(p config.Provider) []string {
+	return mergeNames(config.ImplicitClaudeVariants(), p.Variants)
 }
 
-// ClaudeVariants returns every variant name the provider's shim must recognise
-// (built-in tiers plus custom ones), sorted.
-func ClaudeVariants(p config.Provider) []string {
+func mergeNames[V any](builtin map[string]bool, custom map[string]V) []string {
 	seen := map[string]bool{}
 	var out []string
-	for v := range config.ImplicitClaudeVariants() {
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
+	for v := range builtin {
+		seen[v] = true
+		out = append(out, v)
 	}
-	for v := range p.Variants {
+	for v := range custom {
 		if !seen[v] {
 			seen[v] = true
 			out = append(out, v)

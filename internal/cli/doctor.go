@@ -106,7 +106,16 @@ func runDoctor(cfg *config.Config) error {
 		}
 	}
 
-	// 5. Config file permissions.
+	// 5. Claude usage attribution needs the SessionStart hook.
+	if hasKind(cfg, config.KindClaude) {
+		if hookInstalled() {
+			fmt.Println("✓ usage attribution hook installed")
+		} else {
+			fmt.Println("! usage attribution hook missing; claude usage shows as unknown. Run `ak hook install`")
+		}
+	}
+
+	// 6. Config file permissions.
 	if path, err := config.Path(); err == nil {
 		if fi, err := os.Stat(path); err == nil {
 			if fi.Mode().Perm() != 0o600 {

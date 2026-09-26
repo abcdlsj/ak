@@ -35,6 +35,7 @@ Run with no arguments to open the TUI.`,
 	root.AddCommand(
 		newListCmd(),
 		newAddCmd(),
+		newEditCmd(),
 		newRemoveCmd(),
 		newSyncCmd(),
 		newDoctorCmd(),
@@ -46,6 +47,7 @@ Run with no arguments to open the TUI.`,
 		newPruneCodexaCmd(),
 		newHookCmd(),
 		newRecordSessionCmd(),
+		newKeyCmd(),
 	)
 	return root.Execute()
 }

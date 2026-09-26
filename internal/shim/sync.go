@@ -61,9 +61,12 @@ type Syncer struct {
 	// rather than a hardcoded ~/.codex so tests stay hermetic instead of reaching
 	// into the real home directory.
 	CodexHome string
+	// Self is ak's own path, embedded in commands that resolve their key at
+	// run time. Empty means the running executable.
+	Self string
 }
 
-// Sync generates all shims and codex profiles, then reclaims orphaned artifacts.
+// Sync generates every provider's artifacts, then reclaims orphaned ones.
 func (s *Syncer) Sync() (Report, error) {
 	rep := Report{DryRun: s.DryRun}
 
@@ -74,43 +77,51 @@ func (s *Syncer) Sync() (Report, error) {
 		}
 	}
 
-	claudeBin := s.resolveBin(s.Cfg.Settings.ClaudeBin, "claude")
-	codexBin := s.resolveBin(s.Cfg.Settings.CodexBin, "codex")
-
-	// Record the artifacts that should exist this run; any other marked file of
-	// the same kind is treated as an orphan.
+	ctx := provider.Context{CodexHome: s.codexHome()}
+	// Record the artifacts that should exist this run; any other marked file
+	// in the same directories is treated as an orphan.
 	want := map[string]bool{}
+	write := func(path, content string, mode os.FileMode) {
+		want[path] = true
+		rep.Results = append(rep.Results, s.writeFile(path, content, mode))
+	}
 
 	for _, name := range s.Cfg.Names() {
 		p := s.Cfg.Providers[name]
-		key, err := s.Resolver.Resolve(p)
+		eng := provider.EngineFor(p.Kind)
+		if eng == nil {
+			return rep, fmt.Errorf("provider %s: unsupported kind %q", name, p.Kind)
+		}
+		key, err := s.secret(p)
 		if err != nil {
 			return rep, fmt.Errorf("secret for provider %s: %w", name, err)
 		}
+		launch, err := eng.Launch(name, p, key, ctx)
+		if err != nil {
+			return rep, err
+		}
 
-		switch p.Kind {
-		case config.KindClaude:
-			spec := s.claudeSpec(name, p, key, claudeBin)
-			path := filepath.Join(binDir, s.Cfg.Settings.Prefix+name)
-			want[path] = true
-			rep.Results = append(rep.Results, s.writeFile(path, Render(spec), shimMode))
+		kind := string(p.Kind)
+		path := filepath.Join(binDir, s.Cfg.Settings.Prefix+name)
+		write(path, Render(Spec{
+			Name: name, Kind: kind,
+			Bin:     s.resolveBin(eng.ConfiguredBin(s.Cfg.Settings), eng.BinName()),
+			BinName: eng.BinName(), EnvVar: eng.BinEnvVar(),
+			Launch: launch, Self: s.self(),
+		}), shimMode)
 
-		case config.KindCodex:
-			spec := s.codexSpec(name, p, key, codexBin)
-			path := filepath.Join(binDir, s.Cfg.Settings.Prefix+name)
-			want[path] = true
-			rep.Results = append(rep.Results, s.writeFile(path, Render(spec), shimMode))
-
-			profPath, content, err := s.codexProfile(name, p)
-			if err != nil {
-				return rep, err
+		for _, f := range launch.Files {
+			write(f.Path, withMarker(kind, name, f.Body), 0o600)
+		}
+		for _, v := range launch.Variants {
+			if v.Shim {
+				alias := filepath.Join(binDir, s.Cfg.Settings.Prefix+name+"-"+v.Name)
+				write(alias, RenderAlias(kind, name, path, v.Name), shimMode)
 			}
-			want[profPath] = true
-			rep.Results = append(rep.Results, s.writeFile(profPath, content, 0o600))
 		}
 	}
 
-	orphans, err := s.collectOrphans(binDir, want)
+	orphans, err := s.collectOrphans(binDir, ctx, want)
 	if err != nil {
 		return rep, err
 	}
@@ -120,65 +131,24 @@ func (s *Syncer) Sync() (Report, error) {
 	return rep, nil
 }
 
-func (s *Syncer) claudeSpec(name string, p config.Provider, key, bin string) Spec {
-	base := provider.ClaudeEnv(name, p, "", key)
-	variants := provider.ClaudeVariants(p)
-
-	// Compute each variant's delta over the base environment so only genuinely
-	// changed keys are written.
-	plans := map[string][]provider.KV{}
-	baseMap := map[string]string{}
-	for _, kv := range base.Set {
-		baseMap[kv.Key] = kv.Value
+// secret resolves a plaintext key now, or defers an api_key_ref to run time
+// so the command never holds a plaintext copy.
+func (s *Syncer) secret(p config.Provider) (provider.Secret, error) {
+	if p.APIKeyRef != "" {
+		return provider.Secret{Deferred: true}, nil
 	}
-	for _, v := range variants {
-		vp := provider.ClaudeEnv(name, p, v, key)
-		var delta []provider.KV
-		for _, kv := range vp.Set {
-			if baseMap[kv.Key] != kv.Value {
-				delta = append(delta, kv)
-			}
-		}
-		if len(delta) > 0 {
-			plans[v] = delta
-		}
-	}
-	// Variants with no actual delta need not enter the dispatch.
-	var effective []string
-	for _, v := range variants {
-		if len(plans[v]) > 0 {
-			effective = append(effective, v)
-		}
-	}
-
-	return Spec{
-		Name: name, Kind: config.KindClaude,
-		Bin: bin, BinName: "claude", EnvVar: "AK_CLAUDE_BIN",
-		Plan: base, Variants: effective, VariantPlans: plans,
-	}
+	key, err := s.Resolver.Resolve(p)
+	return provider.Literal(key), err
 }
 
-func (s *Syncer) codexSpec(name string, p config.Provider, key, bin string) Spec {
-	return Spec{
-		Name: name, Kind: config.KindCodex,
-		Bin: bin, BinName: "codex", EnvVar: "AK_CODEX_BIN",
-		Plan:              provider.CodexEnv(name, p, key),
-		Variants:          provider.CodexVariants(p),
-		Profile:           provider.ProfileName(name),
-		ReasoningVariants: true,
+func (s *Syncer) self() string {
+	if s.Self != "" {
+		return s.Self
 	}
-}
-
-// codexProfile renders ~/.codex/ak-<name>.config.toml.
-func (s *Syncer) codexProfile(name string, p config.Provider) (string, string, error) {
-	body, err := provider.CodexProfileTOML(name, p)
-	if err != nil {
-		return "", "", err
+	if exe, err := os.Executable(); err == nil {
+		return exe
 	}
-	m := Marker{Kind: string(config.KindCodex), Provider: name, Hash: hashBody(string(body))}
-	content := m.Line() + "\n# DO NOT EDIT - generated by ak; changes are overwritten by the next `ak sync`.\n" + string(body)
-	path := filepath.Join(s.codexHome(), provider.ProfileName(name)+".config.toml")
-	return path, content, nil
+	return ""
 }
 
 // writeFile writes idempotently: unchanged content is not written to disk and mtime is untouched.
@@ -217,18 +187,13 @@ func (s *Syncer) writeFile(path, content string, mode os.FileMode) Result {
 	}
 }
 
-func (s *Syncer) collectOrphans(binDir string, want map[string]bool) ([]Result, error) {
-	dirs := []struct {
-		dir    string
-		prefix string
-	}{
-		{binDir, s.Cfg.Settings.Prefix},
-	}
-	if codexHome := s.codexHome(); codexHome != "" {
-		dirs = append(dirs, struct {
-			dir    string
-			prefix string
-		}{codexHome, "ak-"})
+func (s *Syncer) collectOrphans(binDir string, ctx provider.Context, want map[string]bool) ([]Result, error) {
+	type dirPrefix struct{ dir, prefix string }
+	dirs := []dirPrefix{{binDir, s.Cfg.Settings.Prefix}}
+	for _, eng := range provider.Engines() {
+		for _, d := range eng.ArtifactDirs(ctx) {
+			dirs = append(dirs, dirPrefix{d, "ak-"})
+		}
 	}
 
 	var out []Result

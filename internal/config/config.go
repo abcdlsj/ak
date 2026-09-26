@@ -236,3 +236,25 @@ func ExpandHome(p string) string {
 	}
 	return p
 }
+
+// keyRefPrefixes mark an api key value as a reference rather than a key.
+var keyRefPrefixes = []string{"env:", "cmd:", "keychain:"}
+
+// IsKeyRef reports whether s is an api_key_ref (env:NAME, cmd:..., keychain:...).
+func IsKeyRef(s string) bool {
+	for _, p := range keyRefPrefixes {
+		if len(s) > len(p) && s[:len(p)] == p {
+			return true
+		}
+	}
+	return false
+}
+
+// SetKey stores a key or a key reference, clearing the other.
+func (p *Provider) SetKey(v string) {
+	if IsKeyRef(v) {
+		p.APIKey, p.APIKeyRef = "", v
+	} else {
+		p.APIKey, p.APIKeyRef = v, ""
+	}
+}

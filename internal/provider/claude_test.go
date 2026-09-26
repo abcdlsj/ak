@@ -91,7 +91,7 @@ func TestClaudeEnv_SmallFastAlwaysUnset(t *testing.T) {
 		Kind: config.KindClaude, BaseURL: "https://x", Model: "m",
 		Env: map[string]string{"ANTHROPIC_SMALL_FAST_MODEL": "sf"},
 	}
-	plan := ClaudeEnv("x", p, "", "k")
+	plan := ClaudeEnv("x", p, "", Literal("k"))
 
 	if v, ok := envMap(plan)["ANTHROPIC_SMALL_FAST_MODEL"]; ok {
 		t.Errorf("deprecated variable was exported: %q", v)
@@ -121,7 +121,7 @@ func TestClaudeEnv_KeyFieldExclusive(t *testing.T) {
 				Kind: config.KindClaude, BaseURL: "https://x",
 				Model: "m", KeyField: tt.keyField,
 			}
-			plan := ClaudeEnv("x", p, "", "secret")
+			plan := ClaudeEnv("x", p, "", Literal("secret"))
 			env := envMap(plan)
 
 			if env[tt.wantSet] != "secret" {
@@ -147,7 +147,7 @@ func TestClaudeEnv_TailEnvOverrides(t *testing.T) {
 			"API_TIMEOUT_MS":  "600000",
 		},
 	}
-	env := envMap(ClaudeEnv("x", p, "", "k"))
+	env := envMap(ClaudeEnv("x", p, "", Literal("k")))
 
 	if env["ANTHROPIC_MODEL"] != "override" {
 		t.Errorf("ANTHROPIC_MODEL = %q, want the extra env to override it with \"override\"", env["ANTHROPIC_MODEL"])
@@ -162,7 +162,7 @@ func TestClaudeEnv_TailEnvOverrides(t *testing.T) {
 // leave them alone.
 func TestClaudeEnv_NoGlobalPreferences(t *testing.T) {
 	p := config.Provider{Kind: config.KindClaude, BaseURL: "https://x", Model: "m"}
-	plan := ClaudeEnv("x", p, "", "k")
+	plan := ClaudeEnv("x", p, "", Literal("k"))
 	env := envMap(plan)
 	unset := unsetSet(plan)
 
@@ -188,9 +188,9 @@ func TestClaudeEnv_Deterministic(t *testing.T) {
 		Kind: config.KindClaude, BaseURL: "https://x", Model: "m",
 		Env: map[string]string{"A": "1", "B": "2", "C": "3", "D": "4", "E": "5"},
 	}
-	first := ClaudeEnv("x", p, "", "k")
+	first := ClaudeEnv("x", p, "", Literal("k"))
 	for i := 0; i < 20; i++ {
-		got := ClaudeEnv("x", p, "", "k")
+		got := ClaudeEnv("x", p, "", Literal("k"))
 		if len(got.Set) != len(first.Set) {
 			t.Fatal("length is unstable")
 		}

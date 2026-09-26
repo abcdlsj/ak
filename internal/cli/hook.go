@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/usage"
@@ -50,12 +51,21 @@ func newHookUninstallCmd() *cobra.Command {
 
 // hookScript is the hook body. It appends a single JSON line and does
 // nothing that could delay startup.
+//
+// ak is looked up on PATH first and the path of this binary is only a
+// fallback: an absolute path alone breaks after `go install` to another
+// GOBIN or a package-manager upgrade.
 func hookScript() string {
-	bin, err := os.Executable()
-	if err != nil || bin == "" {
-		bin = "ak"
+	fallback := "ak"
+	if exe, err := os.Executable(); err == nil && exe != "" {
+		fallback = exe
 	}
-	return fmt.Sprintf(`%s __record-session "$AK_PROVIDER"`, bin)
+	return fmt.Sprintf(`"$(command -v ak || echo %s)" __record-session "${AK_PROVIDER:-}" # %s`,
+		shellQuote(fallback), hookMarker)
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func settingsPath() string {
@@ -75,27 +85,22 @@ func installHook() error {
 		return fmt.Errorf("parse %s: %w", path, err)
 	}
 
-	// Already installed: do not add a second copy.
-	if raw, ok := settings["hooks"]; ok && contains(string(raw), hookMarker) {
-		fmt.Println("hook already installed")
-		return nil
-	}
-
 	entry := map[string]any{
 		"matcher": "startup|resume",
 		"hooks": []map[string]string{
-			{"type": "command", "command": hookScript() + " # " + hookMarker},
+			{"type": "command", "command": hookScript()},
 		},
 	}
 
-	var hooks map[string][]map[string]any
+	hooks := map[string][]map[string]any{}
 	if raw, ok := settings["hooks"]; ok {
 		if err := json.Unmarshal(raw, &hooks); err != nil {
 			return fmt.Errorf("parse existing hooks: %w", err)
 		}
-	} else {
-		hooks = map[string][]map[string]any{}
 	}
+	// Re-installing replaces an older ak entry, which is how a stale
+	// command line gets upgraded.
+	removeMarked(hooks)
 	hooks["SessionStart"] = append(hooks["SessionStart"], entry)
 
 	hooksRaw, err := json.Marshal(hooks)
@@ -127,7 +132,7 @@ func uninstallHook() error {
 		return err
 	}
 	raw, ok := settings["hooks"]
-	if !ok || !contains(string(raw), hookMarker) {
+	if !ok || !strings.Contains(string(raw), hookMarker) {
 		fmt.Println("no ak-managed hook found")
 		return nil
 	}
@@ -136,20 +141,7 @@ func uninstallHook() error {
 	if err := json.Unmarshal(raw, &hooks); err != nil {
 		return err
 	}
-	for event, list := range hooks {
-		var kept []map[string]any
-		for _, e := range list {
-			if contains(mustJSON(e), hookMarker) {
-				continue
-			}
-			kept = append(kept, e)
-		}
-		if len(kept) == 0 {
-			delete(hooks, event)
-		} else {
-			hooks[event] = kept
-		}
-	}
+	removeMarked(hooks)
 	if len(hooks) == 0 {
 		delete(settings, "hooks")
 	} else {
@@ -164,18 +156,28 @@ func uninstallHook() error {
 	return config.AtomicWrite(path, out, 0o600)
 }
 
-func mustJSON(v any) string {
-	b, _ := json.Marshal(v)
-	return string(b)
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
+// removeMarked drops every hook entry carrying the ak marker.
+func removeMarked(hooks map[string][]map[string]any) {
+	for event, list := range hooks {
+		var kept []map[string]any
+		for _, e := range list {
+			if b, _ := json.Marshal(e); strings.Contains(string(b), hookMarker) {
+				continue
+			}
+			kept = append(kept, e)
+		}
+		if len(kept) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = kept
 		}
 	}
-	return false
+}
+
+// hookInstalled reports whether settings.json carries the ak hook.
+func hookInstalled() bool {
+	data, err := os.ReadFile(settingsPath())
+	return err == nil && strings.Contains(string(data), hookMarker)
 }
 
 // newRecordSessionCmd is a hidden command invoked by the hook, not by hand.
@@ -196,12 +198,8 @@ func newRecordSessionCmd() *cobra.Command {
 				return nil
 			}
 
-			sessionID := sessionIDFromStdin()
-			if sessionID == "" {
-				// Without an id the record is useless, so skip it rather
-				// than writing an empty entry.
-			}
-			return usage.RecordSession(sessionID, provider)
+			// Without an id the record is useless; RecordSession skips it.
+			return usage.RecordSession(sessionIDFromStdin(), provider)
 		},
 	}
 }
