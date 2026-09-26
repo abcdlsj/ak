@@ -20,8 +20,8 @@ const heatSteps = 4
 // heatLevels is a single-hue sequential ramp, light to dark on a light terminal
 // and dark to light on a dark one. Index 0 is "no record".
 //
-// Colours are applied as backgrounds, so the ramp must be legible against
-// either terminal background; AdaptiveColor picks the matching set.
+// Colours are drawn as foregrounds on the terminal background, so the ramp
+// must be legible against either; AdaptiveColor picks the matching set.
 var heatLevels = []lipgloss.TerminalColor{
 	lipgloss.AdaptiveColor{Light: "#ebedf0", Dark: "#232830"}, // 0: no record
 	lipgloss.AdaptiveColor{Light: "#aceebb", Dark: "#0e4429"},
@@ -30,8 +30,11 @@ var heatLevels = []lipgloss.TerminalColor{
 	lipgloss.AdaptiveColor{Light: "#116329", Dark: "#4ae168"},
 }
 
-// heatShades is the fallback for a terminal with no colour: a background-only
-// cell would render as blank space there and the whole grid would disappear.
+// heatPixel is the glyph a day is drawn with; see the grid geometry below.
+const heatPixel = "▇"
+
+// heatShades is the fallback for a terminal with no colour, where every level
+// would otherwise draw the same solid block.
 var heatShades = []string{" ", "░", "▒", "▓", "█"}
 
 // heatCell is a single day in the grid.
@@ -158,10 +161,12 @@ func startOfWeek(t time.Time) time.Time {
 	return t.AddDate(0, 0, -int(t.Weekday()))
 }
 
-// Grid geometry. A cell is two columns of background colour with a one-column
-// gap, so each day reads as a discrete square (a terminal cell is about twice
-// as tall as it is wide). Every column is exactly colWidth wide, which is what
-// keeps the month labels above their weeks.
+// Grid geometry. A day is two lower-seven-eighths blocks with a one-column
+// gap: two columns by seven eighths of a row is close to square on a normal
+// terminal font, and the eighth left at the top separates the rows, so each
+// day reads as a discrete pixel instead of the weeks merging into stripes.
+// Every column is exactly colWidth wide, which is what keeps the month labels
+// above their weeks.
 const (
 	cellWidth = 2
 	gapWidth  = 1
@@ -250,15 +255,14 @@ func weekdayRow(cells []heatCell, weeks, wd int) string {
 	return b.String()
 }
 
-// heatCellStyle renders one cell as a block of background colour, which is what
-// makes a day read as a discrete square rather than a smudge of glyphs.
+// heatCellStyle renders one day as a coloured pixel.
 func heatCellStyle(level int) string {
 	if lipgloss.ColorProfile() == termenv.Ascii {
 		return strings.Repeat(heatShades[level], cellWidth)
 	}
 	return lipgloss.NewStyle().
-		Background(heatLevels[level]).
-		Render(strings.Repeat(" ", cellWidth))
+		Foreground(heatLevels[level]).
+		Render(strings.Repeat(heatPixel, cellWidth))
 }
 
 // heatFooter is the legend plus a one-line caption: the range on show, the peak

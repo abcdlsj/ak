@@ -9,7 +9,7 @@ import (
 // Palette. Adaptive pairs so the TUI stays legible on a light or a dark
 // terminal without a theme switch.
 var (
-	accentColor = lipgloss.AdaptiveColor{Light: "#8250df", Dark: "#d2a8ff"}
+	accentColor = lipgloss.AdaptiveColor{Light: "#0969da", Dark: "#58a6ff"}
 	barColor    = lipgloss.AdaptiveColor{Light: "#2da44e", Dark: "#2ea043"}
 	lineColor   = lipgloss.AdaptiveColor{Light: "#d0d7de", Dark: "#3d444d"}
 	pickColor   = lipgloss.AdaptiveColor{Light: "#ddf4ff", Dark: "#253040"}
@@ -25,9 +25,8 @@ var (
 
 	appStyle = lipgloss.NewStyle().Padding(1, 2)
 
-	// Tabs: the active one is filled, the rest recede.
-	tabActiveStyle   = lipgloss.NewStyle().Bold(true).Padding(0, 2).Foreground(lipgloss.Color("231")).Background(accentColor)
-	tabInactiveStyle = lipgloss.NewStyle().Faint(true).Padding(0, 2)
+	// The current page's name in the header, filled.
+	pageTitleStyle = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("231")).Background(accentColor)
 
 	// Tables.
 	headStyle = lipgloss.NewStyle().Faint(true).Bold(true)

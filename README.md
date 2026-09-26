@@ -36,7 +36,7 @@ ak sync
 ## Usage
 
 ```
-ak                          open the TUI (Providers / Usage, Tab to switch)
+ak                          open the launcher (enter or 1-9 runs a provider)
 ak list                     list providers
 ak add [name]               add a provider (flags, or a form with no --base-url)
 ak edit <name> [--model …]  change only the given fields, or open the form
@@ -51,11 +51,15 @@ ak-stepfunclaude opus       use the opus-tier model for this run
 ak-stepfunclaude -p "..."   run claude on that provider
 ```
 
-In the TUI, Providers shows each provider's health, details and last 30 days
-of usage: `enter` launches (asking for a variant when there are any), `/`
-filters, `a` / `e` / `d` add, edit and delete, `*` sets the default and `s`
-syncs. Usage switches between 7, 30, 90 days and all history with `[` `]`,
-and `enter` on a provider narrows the page to it.
+The TUI opens on a launcher: the providers in a list, the cursor on the
+default. `enter` launches the selected one and `1`-`9` launch a row directly,
+asking for a variant first when there are any; `/` filters. The rest is a key
+away, and `esc` comes back:
+
+- `m` Manage shows each provider's health, details and last 30 days of usage;
+  `a` / `e` / `d` add, edit and delete, `*` sets the default and `s` syncs.
+- `u` Usage switches between 7, 30, 90 days and all history with `[` `]`, and
+  `enter` on a provider narrows the page to it.
 
 Custom variants go under the provider:
 

@@ -13,30 +13,51 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// providersPage lists providers, shows the selected one in detail, and hosts
-// the actions that change them.
+// providersPage lists providers. As the home page it is only a launcher: the
+// list, a number per row and enter. As the manage page it also shows the
+// selected provider in detail and hosts the actions that change them.
 type providersPage struct {
+	manage    bool
 	cursor    int
 	filter    textinput.Model
 	filtering bool
 }
 
-func newProvidersPage() *providersPage {
+func newProvidersPage(manage bool) *providersPage {
 	ti := textinput.New()
 	ti.Prompt = "/ "
 	ti.Placeholder = "filter by name, model or endpoint"
-	return &providersPage{filter: ti}
+	return &providersPage{manage: manage, filter: ti}
 }
 
-func (p *providersPage) title() string { return "Providers" }
+func (p *providersPage) title() string {
+	if p.manage {
+		return "Manage"
+	}
+	return ""
+}
 
 func (p *providersPage) capturing() bool { return p.filtering }
+
+func (p *providersPage) consumesEsc() bool { return p.filter.Value() != "" }
 
 func (p *providersPage) help() []string {
 	if p.filtering {
 		return []string{"enter keep filter", "esc clear"}
 	}
+	if !p.manage {
+		return []string{"enter launch", "1-9 launch", "/ filter", "m manage", "u usage"}
+	}
 	return []string{"↑/↓ move", "enter launch", "/ filter", "a add", "e edit", "d delete", "* default", "s sync"}
+}
+
+// focus puts the cursor on the named provider.
+func (p *providersPage) focus(cfg *config.Config, name string) {
+	for i, n := range p.visible(cfg) {
+		if n == name {
+			p.cursor = i
+		}
+	}
 }
 
 // visible returns the provider names matching the filter.
@@ -99,6 +120,11 @@ func (p *providersPage) update(a *app, msg tea.Msg) tea.Cmd {
 		return p.filter.Focus()
 	case "esc":
 		p.filter.SetValue("")
+	}
+	if !p.manage {
+		return p.launcherKeys(a, key.String())
+	}
+	switch key.String() {
 	case "a":
 		return a.open(newFormOverlay(NewDraft(""), false))
 	case "s":
@@ -110,11 +136,7 @@ func (p *providersPage) update(a *app, msg tea.Msg) tea.Cmd {
 
 	switch key.String() {
 	case "enter":
-		variants := variantNames(a.cfg, name)
-		if len(variants) == 0 {
-			return a.launch(Selection{Provider: name})
-		}
-		return a.open(newPickOverlay(name, variants))
+		return launchProvider(a, name)
 	case "e":
 		return a.open(newFormOverlay(EditDraft(name, a.cfg.Providers[name]), true))
 	case "d":
@@ -142,6 +164,32 @@ func (p *providersPage) update(a *app, msg tea.Msg) tea.Cmd {
 	return nil
 }
 
+// launcherKeys handles the home page: enter launches the selected provider, a
+// digit launches the provider on that row, so a known provider is one key away.
+func (p *providersPage) launcherKeys(a *app, key string) tea.Cmd {
+	names := p.visible(a.cfg)
+	switch {
+	case key == "enter" && len(names) > 0:
+		name, _ := p.selected(a.cfg)
+		return launchProvider(a, name)
+	case len(key) == 1 && key[0] >= '1' && key[0] <= '9':
+		if i := int(key[0] - '1'); i < len(names) {
+			p.cursor = i
+			return launchProvider(a, names[i])
+		}
+	}
+	return nil
+}
+
+// launchProvider launches name, asking for a variant first when it has any.
+func launchProvider(a *app, name string) tea.Cmd {
+	variants := variantNames(a.cfg, name)
+	if len(variants) == 0 {
+		return a.launch(Selection{Provider: name})
+	}
+	return a.open(newPickOverlay(name, variants))
+}
+
 // variantNames lists the variants a provider's command recognises.
 func variantNames(cfg *config.Config, name string) []string {
 	p := cfg.Providers[name]
@@ -162,6 +210,9 @@ func variantNames(cfg *config.Config, name string) []string {
 
 func (p *providersPage) view(a *app, width, height int) string {
 	if len(a.cfg.Providers) == 0 {
+		if !p.manage {
+			return dimStyle.Render("No providers yet. Press m, then a to add one, or run `ak import --from cc-switch`.")
+		}
 		return dimStyle.Render("No providers yet. Press a to add one, or run `ak import --from cc-switch`.")
 	}
 	var top string
@@ -173,6 +224,9 @@ func (p *providersPage) view(a *app, width, height int) string {
 		return top + dimStyle.Render("No provider matches the filter.")
 	}
 	name, _ := p.selected(a.cfg)
+	if !p.manage {
+		return top + p.list(a, names, width, height-lipgloss.Height(top))
+	}
 
 	// Side by side when there is room, detail below otherwise.
 	if width >= 100 {
@@ -196,7 +250,11 @@ func (p *providersPage) list(a *app, names []string, width, height int) string {
 	modelW := max(width-nameW-kindW-10, 8)
 
 	var b strings.Builder
-	b.WriteString(headStyle.Render(fmt.Sprintf("    %-*s  %-*s  %s", nameW, "PROVIDER", kindW, "KIND", "MODEL")))
+	head := fmt.Sprintf("    %-*s  %-*s  %s", nameW, "PROVIDER", kindW, "KIND", "MODEL")
+	if !p.manage {
+		head = rowNumber(-1) + head
+	}
+	b.WriteString(headStyle.Render(head))
 	b.WriteString("\n")
 
 	// Keep the cursor in view when the list is taller than the page.
@@ -213,6 +271,9 @@ func (p *providersPage) list(a *app, names []string, width, height int) string {
 			model += badgeStyle.Render(" ★")
 		}
 		line := fmt.Sprintf("%s %-*s  %-*s  %s", statusMark(a, n), nameW, cfg.Settings.Prefix+n, kindW, pr.Kind, model)
+		if !p.manage {
+			line = rowNumber(i) + line
+		}
 		if i == p.cursor {
 			// A caret and a fill: the fill alone is invisible on terminals
 			// that ignore background colours.
@@ -226,6 +287,14 @@ func (p *providersPage) list(a *app, names []string, width, height int) string {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more", len(names)-start-rows)))
 	}
 	return b.String()
+}
+
+// rowNumber is the launch digit for row i, blank past nine or for the header.
+func rowNumber(i int) string {
+	if i < 0 || i >= 9 {
+		return "   "
+	}
+	return badgeStyle.Render(fmt.Sprintf("%d", i+1)) + "  "
 }
 
 // statusMark is a one-cell health indicator; unknown until checks finish.

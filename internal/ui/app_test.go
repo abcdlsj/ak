@@ -66,3 +66,48 @@ func TestFilterCapturesKeys(t *testing.T) {
 		t.Fatalf("overlay = %T, want the variant picker", a.overlay)
 	}
 }
+
+// A digit on the home page launches that row directly.
+func TestDigitLaunches(t *testing.T) {
+	cfg := testConfig()
+	cfg.Providers["gamma"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://g"}
+	a := newApp(cfg)
+	press(a, "3")
+	if a.selection.Provider != "gamma" || !a.quitting {
+		t.Fatalf("selection = %+v, want gamma", a.selection)
+	}
+}
+
+// Home opens on the default provider, so enter alone launches it.
+func TestHomeFocusesDefault(t *testing.T) {
+	cfg := testConfig()
+	cfg.Providers["gamma"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://g"}
+	cfg.Settings.Default = "gamma"
+	a := newApp(cfg)
+	press(a, "enter")
+	if a.selection.Provider != "gamma" {
+		t.Fatalf("selection = %+v, want gamma", a.selection)
+	}
+}
+
+// m and u open the secondary pages; esc returns home, but first clears what
+// the page itself holds.
+func TestSecondaryPagesEscHome(t *testing.T) {
+	a := newApp(testConfig())
+	press(a, "m", "/", "x", "enter")
+	if a.active != pageManage {
+		t.Fatalf("active = %d, want manage", a.active)
+	}
+	press(a, "esc")
+	if a.active != pageManage || a.pages[pageManage].consumesEsc() {
+		t.Fatal("first esc should clear the manage filter")
+	}
+	press(a, "esc")
+	if a.active != pageHome {
+		t.Fatalf("active = %d, want home", a.active)
+	}
+	press(a, "u", "esc")
+	if a.active != pageHome || a.quitting {
+		t.Fatal("esc on usage should go home")
+	}
+}

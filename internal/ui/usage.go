@@ -30,6 +30,8 @@ func (p *usagePage) title() string { return "Usage" }
 
 func (p *usagePage) capturing() bool { return false }
 
+func (p *usagePage) consumesEsc() bool { return p.provider != "" }
+
 func (p *usagePage) help() []string {
 	h := []string{"[/] range", "r rescan"}
 	if p.provider != "" {

@@ -1,5 +1,5 @@
-// Package ui is ak's TUI: an app shell hosting pages (Providers, Usage) and
-// modal overlays (forms, confirmations, pickers).
+// Package ui is ak's TUI: a launcher home page, the Manage and Usage pages a
+// key away from it, and modal overlays (forms, confirmations, pickers).
 package ui
 
 import (
@@ -48,8 +48,9 @@ func RunUI() error {
 	return syscall.Exec(bin, argv, os.Environ())
 }
 
-// page is one tab of the app.
+// page is one screen of the app.
 type page interface {
+	// title names the page in the header; the home page has none.
 	title() string
 	update(a *app, msg tea.Msg) tea.Cmd
 	view(a *app, width, height int) string
@@ -58,7 +59,17 @@ type page interface {
 	// capturing reports whether the page is taking raw text input, which
 	// suspends the global keys.
 	capturing() bool
+	// consumesEsc reports whether esc clears something on the page rather
+	// than going back home.
+	consumesEsc() bool
 }
+
+// The home page is the launcher; the rest are reached from it.
+const (
+	pageHome = iota
+	pageManage
+	pageUsage
+)
 
 // overlay is a modal on top of the active page.
 type overlay interface {
@@ -113,9 +124,12 @@ func newApp(cfg *config.Config) *app {
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
 	sp.Style = lipgloss.NewStyle().Foreground(accentColor)
+	home := newProvidersPage(false)
+	// Open on the default provider so enter alone launches it.
+	home.focus(cfg, cfg.Settings.Default)
 	return &app{
 		cfg:     cfg,
-		pages:   []page{newProvidersPage(), newUsagePage()},
+		pages:   []page{home, newProvidersPage(true), newUsagePage()},
 		spinner: sp,
 	}
 }
@@ -199,17 +213,17 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key.String() {
 		case "ctrl+c", "q":
 			return a.quit()
-		case "tab":
-			a.active = (a.active + 1) % len(a.pages)
+		case "m":
+			a.active = pageManage
 			return a, nil
-		case "shift+tab":
-			a.active = (a.active + len(a.pages) - 1) % len(a.pages)
+		case "u":
+			a.active = pageUsage
 			return a, nil
-		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-			if i := int(key.String()[0] - '1'); i < len(a.pages) {
-				a.active = i
+		case "esc":
+			if a.active != pageHome && !a.pages[a.active].consumesEsc() {
+				a.active = pageHome
+				return a, nil
 			}
-			return a, nil
 		}
 	}
 	return a, a.pages[a.active].update(a, msg)
@@ -232,7 +246,7 @@ func (a *app) View() string {
 		return ""
 	}
 	w := a.contentWidth()
-	header := a.tabBar(w)
+	header := a.header(w)
 	footer := a.footer(w)
 	bodyH := a.height - appStyle.GetVerticalPadding() - lipgloss.Height(header) - lipgloss.Height(footer) - 2
 
@@ -247,19 +261,14 @@ func (a *app) View() string {
 	return appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, header, "", body, "", footer))
 }
 
-// tabBar shows the product name and the pages, with a rule under them.
-func (a *app) tabBar(width int) string {
-	parts := []string{titleStyle.Render("ak"), "  "}
-	for i, p := range a.pages {
-		label := fmt.Sprintf("%d %s", i+1, p.title())
-		if i == a.active {
-			parts = append(parts, tabActiveStyle.Render(label))
-		} else {
-			parts = append(parts, tabInactiveStyle.Render(label))
-		}
+// header shows the product name and, off the home page, where the user is,
+// with a rule under them.
+func (a *app) header(width int) string {
+	row := titleStyle.Render("ak")
+	if t := a.pages[a.active].title(); t != "" {
+		row += dimStyle.Render(" › ") + pageTitleStyle.Render(t)
 	}
-	row := lipgloss.JoinHorizontal(lipgloss.Bottom, parts...)
-	if a.usage.loading {
+	if a.usage.loading && a.active != pageHome {
 		row += "  " + a.spinner.View() + dimStyle.Render(" scanning logs")
 	}
 	return row + "\n" + ruleStyle.Render(strings.Repeat("─", max(width, 1)))
@@ -276,7 +285,11 @@ func (a *app) footer(width int) string {
 	}
 	var keys []string
 	if a.overlay == nil {
-		keys = append(a.pages[a.active].help(), "tab page", "q quit")
+		keys = a.pages[a.active].help()
+		if a.active != pageHome {
+			keys = append(keys, "esc back")
+		}
+		keys = append(keys, "q quit")
 	}
 	return dimStyle.Render(truncate(strings.Join(keys, "  ·  "), width))
 }
