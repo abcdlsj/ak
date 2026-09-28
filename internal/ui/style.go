@@ -25,9 +25,6 @@ var (
 
 	appStyle = lipgloss.NewStyle().Padding(1, 2)
 
-	// The current page's name in the header, filled.
-	pageTitleStyle = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("231")).Background(accentColor)
-
 	// Tables.
 	headStyle = lipgloss.NewStyle().Faint(true).Bold(true)
 	rowStyle  = lipgloss.NewStyle()

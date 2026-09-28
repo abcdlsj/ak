@@ -50,7 +50,7 @@ func RunUI() error {
 
 // page is one screen of the app.
 type page interface {
-	// title names the page in the header; the home page has none.
+	// title names the page's tab in the header.
 	title() string
 	update(a *app, msg tea.Msg) tea.Cmd
 	view(a *app, width, height int) string
@@ -64,7 +64,7 @@ type page interface {
 	consumesEsc() bool
 }
 
-// The home page is the launcher; the rest are reached from it.
+// The pages are tabs in this order; the launcher opens first.
 const (
 	pageHome = iota
 	pageManage
@@ -213,6 +213,12 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key.String() {
 		case "ctrl+c", "q":
 			return a.quit()
+		case "tab":
+			a.active = (a.active + 1) % len(a.pages)
+			return a, nil
+		case "shift+tab":
+			a.active = (a.active + len(a.pages) - 1) % len(a.pages)
+			return a, nil
 		case "m":
 			a.active = pageManage
 			return a, nil
@@ -261,12 +267,16 @@ func (a *app) View() string {
 	return appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, header, "", body, "", footer))
 }
 
-// header shows the product name and, off the home page, where the user is,
+// header shows the product name and the page tabs, the active one filled,
 // with a rule under them.
 func (a *app) header(width int) string {
-	row := titleStyle.Render("ak")
-	if t := a.pages[a.active].title(); t != "" {
-		row += dimStyle.Render(" › ") + pageTitleStyle.Render(t)
+	row := titleStyle.Render("ak") + " "
+	for i, p := range a.pages {
+		style := chipStyle
+		if i == a.active {
+			style = chipActiveStyle
+		}
+		row += " " + style.Render(p.title())
 	}
 	if a.usage.loading && a.active != pageHome {
 		row += "  " + a.spinner.View() + dimStyle.Render(" scanning logs")
@@ -286,10 +296,7 @@ func (a *app) footer(width int) string {
 	var keys []string
 	if a.overlay == nil {
 		keys = a.pages[a.active].help()
-		if a.active != pageHome {
-			keys = append(keys, "esc back")
-		}
-		keys = append(keys, "q quit")
+		keys = append(keys, "tab switch", "q quit")
 	}
 	return dimStyle.Render(truncate(strings.Join(keys, "  ·  "), width))
 }

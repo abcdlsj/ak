@@ -53,8 +53,9 @@ ak-stepfunclaude -p "..."   run claude on that provider
 
 The TUI opens on a launcher: the providers in a list, the cursor on the
 default. `enter` launches the selected one and `1`-`9` launch a row directly,
-asking for a variant first when there are any; `/` filters. The rest is a key
-away, and `esc` comes back:
+asking for a variant first when there are any; `/` filters. Launch, Manage
+and Usage are tabs: `tab` / `shift+tab` cycle them, `m` and `u` jump straight
+to one, and `esc` comes back to Launch:
 
 - `m` Manage shows each provider's health, details and last 30 days of usage;
   `enter` edits, `a` / `d` add and delete, `*` sets the default and `s` syncs.

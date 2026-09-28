@@ -34,7 +34,7 @@ func (p *providersPage) title() string {
 	if p.manage {
 		return "Manage"
 	}
-	return ""
+	return "Launch"
 }
 
 func (p *providersPage) capturing() bool { return p.filtering }
@@ -46,7 +46,7 @@ func (p *providersPage) help() []string {
 		return []string{"enter keep filter", "esc clear"}
 	}
 	if !p.manage {
-		return []string{"enter/1-9 launch", "/ filter", "m manage", "u usage"}
+		return []string{"enter/1-9 launch", "/ filter"}
 	}
 	return []string{"↑/↓ move", "enter edit", "/ filter", "a add", "d delete", "* default", "s sync"}
 }

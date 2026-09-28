@@ -22,6 +22,10 @@ func press(a *app, keys ...string) {
 			msg = tea.KeyMsg{Type: tea.KeyEnter}
 		case "esc":
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
+		case "tab":
+			msg = tea.KeyMsg{Type: tea.KeyTab}
+		case "shift+tab":
+			msg = tea.KeyMsg{Type: tea.KeyShiftTab}
 		case "down":
 			msg = tea.KeyMsg{Type: tea.KeyDown}
 		default:
@@ -109,6 +113,21 @@ func TestSecondaryPagesEscHome(t *testing.T) {
 	press(a, "u", "esc")
 	if a.active != pageHome || a.quitting {
 		t.Fatal("esc on usage should go home")
+	}
+}
+
+// tab and shift+tab cycle the pages, wrapping at either end.
+func TestTabCyclesPages(t *testing.T) {
+	a := newApp(testConfig())
+	for _, want := range []int{pageManage, pageUsage, pageHome} {
+		press(a, "tab")
+		if a.active != want {
+			t.Fatalf("active = %d, want %d", a.active, want)
+		}
+	}
+	press(a, "shift+tab")
+	if a.active != pageUsage {
+		t.Fatalf("active = %d, want usage", a.active)
 	}
 }
 
