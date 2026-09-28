@@ -12,6 +12,7 @@ package usage
 import (
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -120,6 +121,16 @@ func Load(cfg *config.Config) ([]Row, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The session index and the price table (a network fetch when stale)
+	// load alongside the scan, so summarizing afterwards never waits.
+	var (
+		wg       sync.WaitGroup
+		sessions sessionIndex
+	)
+	wg.Add(2)
+	go func() { defer wg.Done(); sessions = loadSessionIndex() }()
+	go func() { defer wg.Done(); defaultPrices() }()
+
 	roots := map[Source][]string{}
 	for _, src := range sources {
 		roots[src] = src.Roots(cfg, home)
@@ -128,7 +139,8 @@ func Load(cfg *config.Config) ([]Row, error) {
 	buckets := scan(listFiles(roots), cache)
 	// A cache write failure does not affect the result.
 	_ = saveCache(cache)
-	return attribute(buckets, newAttribution(cfg)), nil
+	wg.Wait()
+	return attribute(buckets, &attribution{sessions: sessions, codexIDs: codexProviderNames(cfg)}), nil
 }
 
 // Aggregate loads and summarizes everything.
@@ -145,10 +157,6 @@ type attribution struct {
 	sessions sessionIndex
 	// codexIDs maps a codex provider_id to the ak provider using it.
 	codexIDs map[string]string
-}
-
-func newAttribution(cfg *config.Config) *attribution {
-	return &attribution{sessions: loadSessionIndex(), codexIDs: codexProviderNames(cfg)}
 }
 
 // attribute resolves each bucket's ak provider and folds away session detail.

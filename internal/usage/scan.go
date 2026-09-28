@@ -7,8 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -84,6 +86,10 @@ type scanner struct {
 
 // scan updates cache from the files under every source's roots and returns
 // all buckets.
+//
+// Changed files are read and parsed in parallel, a bounded window ahead of
+// the main goroutine, which applies the results in file order: dedupe gives a
+// request to the oldest file holding it.
 func scan(files []logFile, cache *Cache) []bucket {
 	s := &scanner{cache: cache, owners: map[uint64]string{}}
 	s.prune(files)
@@ -93,19 +99,66 @@ func scan(files []logFile, cache *Cache) []bucket {
 		}
 	}
 
+	// Workers get copies of what they need and never touch the cache.
+	reads := make([]chan fileRead, len(files))
+	prevs := make([]*resumePoint, len(files))
+	for i, f := range files {
+		st := cache.Files[f.path]
+		if st != nil && st.Engine == f.src.Engine() && st.Size == f.size && st.Mtime.Equal(f.mtime) {
+			continue
+		}
+		reads[i] = make(chan fileRead, 1)
+		if st != nil {
+			prevs[i] = &resumePoint{st.Engine, st.Size, st.Offset, st.Head, st.State}
+		}
+	}
+	// Reading dominates, so the pool is twice the cores to keep the disk and
+	// every core busy. The window lets it run ahead of a large file at the
+	// head of the order while bounding the records held.
+	workers := 2 * runtime.GOMAXPROCS(0)
+	window := make(chan struct{}, 8*workers)
+	jobs := make(chan int)
+	go func() {
+		defer close(jobs)
+		for i := range files {
+			if reads[i] != nil {
+				window <- struct{}{}
+				jobs <- i
+			}
+		}
+	}()
+	for range workers {
+		go func() {
+			for i := range jobs {
+				reads[i] <- readFile(files[i], prevs[i])
+			}
+		}()
+	}
+
 	var out []bucket
-	for _, f := range files {
-		if st := s.update(f); st != nil {
+	for i, f := range files {
+		if reads[i] == nil {
+			out = append(out, cache.Files[f.path].Buckets...)
+			continue
+		}
+		r := <-reads[i]
+		<-window
+		if st := s.apply(f, r); st != nil {
 			out = append(out, st.Buckets...)
 		}
 	}
 	return out
 }
 
-// listFiles walks every source's roots. Files come oldest first, so the
-// original session owns a request rather than a later fork that copied it.
+// listFiles walks every source's roots in parallel. Files come oldest first,
+// so the original session owns a request rather than a later fork that
+// copied it.
 func listFiles(roots map[Source][]string) []logFile {
-	var files []logFile
+	var (
+		mu    sync.Mutex
+		wg    sync.WaitGroup
+		files []logFile
+	)
 	seen := map[string]bool{}
 	for _, src := range sources {
 		for _, dir := range roots[src] {
@@ -113,17 +166,26 @@ func listFiles(roots map[Source][]string) []logFile {
 				continue
 			}
 			seen[dir] = true
-			_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-				if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var found []logFile
+				_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+					if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+						return nil
+					}
+					if fi, err := d.Info(); err == nil {
+						found = append(found, logFile{path, src, fi.Size(), fi.ModTime()})
+					}
 					return nil
-				}
-				if fi, err := d.Info(); err == nil {
-					files = append(files, logFile{path, src, fi.Size(), fi.ModTime()})
-				}
-				return nil
-			})
+				})
+				mu.Lock()
+				files = append(files, found...)
+				mu.Unlock()
+			}()
 		}
 	}
+	wg.Wait()
 	sort.Slice(files, func(i, j int) bool {
 		if !files[i].mtime.Equal(files[j].mtime) {
 			return files[i].mtime.Before(files[j].mtime)
@@ -146,22 +208,99 @@ func (s *scanner) prune(files []logFile) {
 	}
 }
 
-// update returns the file's current state, parsing only what changed.
-func (s *scanner) update(f logFile) *fileState {
-	st := s.cache.Files[f.path]
-	if st != nil && st.Engine == f.src.Engine() && st.Size == f.size && st.Mtime.Equal(f.mtime) {
-		return st
+// resumePoint is a copy of a file's cached progress.
+type resumePoint struct {
+	Engine string
+	Size   int64
+	Offset int64
+	Head   uint64
+	State  []byte
+}
+
+// fileRead is a changed file's new records, parsed off the main goroutine.
+type fileRead struct {
+	resume bool // appended to what was parsed; otherwise parsed from the start
+	head   uint64
+	recs   []Record
+	offset int64 // end of the last complete line
+	state  []byte
+	err    error
+}
+
+// readFile parses a changed file, from where prev stopped if it only grew.
+func readFile(f logFile, prev *resumePoint) fileRead {
+	r := fileRead{head: headHash(f.path)}
+	var state []byte
+	if prev != nil && prev.Engine == f.src.Engine() && f.size >= prev.Size && f.size >= prev.Offset &&
+		prev.Head == r.head {
+		r.resume, r.offset, state = true, prev.Offset, prev.State
 	}
-	if st == nil || !canResume(st, f) {
+	fh, err := os.Open(f.path)
+	if err != nil {
+		r.err = err
+		return r
+	}
+	defer fh.Close()
+	if _, err := fh.Seek(r.offset, io.SeekStart); err != nil {
+		r.err = err
+		return r
+	}
+
+	lp := f.src.NewParser(state)
+	br := bufio.NewReaderSize(fh, 256*1024)
+	var long []byte // reused for lines longer than the read buffer
+	for {
+		line, err := br.ReadSlice('\n')
+		if err == bufio.ErrBufferFull {
+			long = append(long[:0], line...)
+			for err == bufio.ErrBufferFull {
+				line, err = br.ReadSlice('\n')
+				long = append(long, line...)
+			}
+			line = long
+		}
+		// A line without its newline is still being written; leave it for
+		// the next scan rather than parsing half a record.
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			r.offset += int64(len(line))
+			if rec, ok := lp.Parse(line); ok {
+				r.recs = append(r.recs, rec)
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	r.state = lp.State()
+	return r
+}
+
+// apply folds a file's new records into its cached state.
+func (s *scanner) apply(f logFile, r fileRead) *fileState {
+	st := s.cache.Files[f.path]
+	if st == nil || !r.resume {
 		if st != nil {
 			s.release(f.path, st)
 		}
-		st = &fileState{Engine: f.src.Engine(), Head: headHash(f.path)}
+		st = &fileState{Engine: f.src.Engine(), Head: r.head}
 	}
-	if err := s.parse(f, st); err != nil {
+	if r.err != nil {
 		s.release(f.path, st)
 		delete(s.cache.Files, f.path)
 		return nil
+	}
+
+	a := newAccumulator(st, func(k uint64) bool {
+		o, ok := s.owners[k]
+		return ok && o != f.path
+	})
+	for _, rec := range r.recs {
+		a.add(rec)
+	}
+	st.Offset, st.State = r.offset, r.state
+	a.flush()
+	for _, k := range st.Keys {
+		s.owners[k] = f.path
 	}
 	st.Size, st.Mtime = f.size, f.mtime
 	s.cache.Files[f.path] = st
@@ -174,53 +313,6 @@ func (s *scanner) release(path string, st *fileState) {
 			delete(s.owners, k)
 		}
 	}
-}
-
-// canResume reports whether a changed file is an append to what was parsed.
-func canResume(st *fileState, f logFile) bool {
-	return st.Engine == f.src.Engine() && f.size >= st.Size && f.size >= st.Offset &&
-		st.Head == headHash(f.path)
-}
-
-// parse reads a file from st.Offset and folds its records into st.
-func (s *scanner) parse(f logFile, st *fileState) error {
-	fh, err := os.Open(f.path)
-	if err != nil {
-		return err
-	}
-	defer fh.Close()
-	if _, err := fh.Seek(st.Offset, io.SeekStart); err != nil {
-		return err
-	}
-
-	a := newAccumulator(st, func(k uint64) bool {
-		o, ok := s.owners[k]
-		return ok && o != f.path
-	})
-	lp := f.src.NewParser(st.State)
-	br := bufio.NewReaderSize(fh, 64*1024)
-	offset := st.Offset
-	for {
-		line, err := br.ReadBytes('\n')
-		// A line without its newline is still being written; leave it for
-		// the next scan rather than parsing half a record.
-		if len(line) > 0 && line[len(line)-1] == '\n' {
-			offset += int64(len(line))
-			if r, ok := lp.Parse(line); ok {
-				a.add(r)
-			}
-		}
-		if err != nil {
-			break
-		}
-	}
-	st.Offset = offset
-	st.State = lp.State()
-	a.flush()
-	for _, k := range st.Keys {
-		s.owners[k] = f.path
-	}
-	return nil
 }
 
 // accumulator folds records into a file's buckets, applying dedupe.
