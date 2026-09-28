@@ -206,6 +206,30 @@ func TestIncrementalClaudeSupersede(t *testing.T) {
 	}
 }
 
+// The timeline sums each 5-minute slot, a superseded line counting once.
+func TestTimelineSlots(t *testing.T) {
+	withZone(t, time.UTC)
+	f := newFixture(t)
+	writeFile(t, filepath.Join(f.claude, "p", "s.jsonl"),
+		claudeLine("m1", "s1", "2026-09-01T10:00:00Z", 100, 0, 0)+
+			claudeLine("m1", "s1", "2026-09-01T10:00:01Z", 100, 30, 0)+
+			claudeLine("m2", "s1", "2026-09-01T10:07:00Z", 10, 5, 0))
+	rows := attribute(f.scan(), &attribution{sessions: sessionIndex{}})
+	got := Timeline(rows, Filter{})
+	want := []Point{
+		{time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC), 130},
+		{time.Date(2026, 9, 1, 10, 5, 0, 0, time.UTC), 15},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("timeline = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if !got[i].Time.Equal(want[i].Time) || got[i].Tokens != want[i].Tokens {
+			t.Fatalf("timeline = %+v, want %+v", got, want)
+		}
+	}
+}
+
 // Days split at local midnight, not UTC midnight.
 func TestDatesAreLocal(t *testing.T) {
 	withZone(t, time.FixedZone("CST", 8*3600))

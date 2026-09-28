@@ -22,6 +22,28 @@ type usagePage struct {
 	rng      int
 	cursor   int    // row in the provider table
 	provider string // drill-down filter; empty means every provider
+
+	// The drill-down timeline, kept until its inputs change: the page is
+	// redrawn on every spinner tick.
+	tlKey timelineKey
+	tl    []usage.Point
+}
+
+type timelineKey struct {
+	filter usage.Filter
+	rows   *usage.Row
+	n      int
+}
+
+func (p *usagePage) timeline(rows []usage.Row) []usage.Point {
+	k := timelineKey{filter: p.filter(), n: len(rows)}
+	if len(rows) > 0 {
+		k.rows = &rows[0]
+	}
+	if k != p.tlKey {
+		p.tlKey, p.tl = k, usage.Timeline(rows, k.filter)
+	}
+	return p.tl
 }
 
 func newUsagePage() *usagePage { return &usagePage{rng: len(usageRanges) - 1} }
@@ -92,10 +114,17 @@ func (p *usagePage) view(a *app, width, height int) string {
 
 	b.WriteString(statTiles(sum))
 	b.WriteString("\n\n")
-	b.WriteString(section("Daily tokens", width))
-	b.WriteString("\n")
-	b.WriteString(renderHeatmap(buildHeatmap(sum.ByDate), width))
-	b.WriteString("\n")
+	heat := section("Daily tokens", width) + "\n" + renderHeatmap(buildHeatmap(sum.ByDate), width) + "\n"
+	if p.provider != "" {
+		// Room left after the heatmap and a few model rows, minus the
+		// chart's heading and axis.
+		chartH := clamp(height-lipgloss.Height(b.String())-lipgloss.Height(heat)-8, 3, 8)
+		if c := timelineChart(p.timeline(a.usage.rows), p.filter().Since, width, chartH); c != "" {
+			b.WriteString(c)
+			b.WriteString("\n\n")
+		}
+	}
+	b.WriteString(heat)
 
 	used := lipgloss.Height(b.String())
 	limit := clamp(height-used-3, 3, 12)

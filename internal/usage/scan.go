@@ -19,6 +19,9 @@ const (
 	unknownProvider = "unknown"
 	unknownModel    = "unknown"
 
+	// slotLen is the resolution of the usage timeline.
+	slotLen = 5 * time.Minute
+
 	// headLen is how much of a file's start is fingerprinted, to tell an
 	// appended file from a rewritten one of equal or larger size.
 	headLen = 1024
@@ -35,6 +38,9 @@ type bucket struct {
 	Tokens      Tokens
 	Requests    int
 	Last        time.Time // latest request, used to pick the session record in effect
+	// Slots is the day's timeline: total tokens per slotLen slot, keyed by
+	// the slot's index from local midnight.
+	Slots map[uint16]int64
 }
 
 type bucketKey struct{ Date, Model, RawProvider, Session string }
@@ -59,6 +65,7 @@ type fileState struct {
 	LastKey    uint64
 	LastTokens Tokens
 	LastBucket bucketKey
+	LastSlot   uint16
 }
 
 type logFile struct {
@@ -228,6 +235,9 @@ func newAccumulator(st *fileState, taken func(uint64) bool) *accumulator {
 	a := &accumulator{st: st, idx: map[bucketKey]*bucket{}, own: map[uint64]bool{}, taken: taken}
 	for i := range st.Buckets {
 		b := st.Buckets[i]
+		if b.Slots == nil {
+			b.Slots = map[uint16]int64{}
+		}
 		a.idx[b.key()] = &b
 	}
 	for _, k := range st.Keys {
@@ -242,6 +252,7 @@ func (a *accumulator) add(r Record) {
 		if b := a.idx[st.LastBucket]; b != nil {
 			b.Tokens.sub(st.LastTokens)
 			b.Tokens.add(r.Tokens)
+			b.Slots[st.LastSlot] += r.Tokens.Total() - st.LastTokens.Total()
 			b.touch(r.Time)
 		}
 		st.LastTokens = r.Tokens
@@ -254,16 +265,24 @@ func (a *accumulator) add(r Record) {
 	k := bucketKey{r.Time.Format(dateLayout), r.Model, r.RawProvider, r.Session}
 	b := a.idx[k]
 	if b == nil {
-		b = &bucket{Date: k.Date, Engine: st.Engine, Model: k.Model, RawProvider: k.RawProvider, Session: k.Session}
+		b = &bucket{Date: k.Date, Engine: st.Engine, Model: k.Model, RawProvider: k.RawProvider, Session: k.Session,
+			Slots: map[uint16]int64{}}
 		a.idx[k] = b
 	}
+	slot := slotOf(r.Time)
 	b.Tokens.add(r.Tokens)
+	b.Slots[slot] += r.Tokens.Total()
 	b.Requests++
 	b.touch(r.Time)
 	if r.Key != 0 {
 		a.own[r.Key] = true
 	}
-	st.LastKey, st.LastTokens, st.LastBucket = r.Key, r.Tokens, k
+	st.LastKey, st.LastTokens, st.LastBucket, st.LastSlot = r.Key, r.Tokens, k, slot
+}
+
+// slotOf is t's slot index from its local midnight.
+func slotOf(t time.Time) uint16 {
+	return uint16((t.Hour()*60 + t.Minute()) / int(slotLen/time.Minute))
 }
 
 func (b *bucket) touch(t time.Time) {

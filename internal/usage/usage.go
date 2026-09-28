@@ -59,6 +59,9 @@ type Row struct {
 	Engine   string `json:"engine"` // claude | codex
 	Tokens   Tokens `json:"tokens"`
 	Requests int    `json:"requests"`
+	// Slots is the day's timeline: total tokens per 5-minute slot, keyed by
+	// the slot's index from local midnight.
+	Slots map[uint16]int64 `json:"-"`
 }
 
 // Summary is the aggregated view.
@@ -167,8 +170,11 @@ func attribute(buckets []bucket, a *attribution) []Row {
 		k := key{b.Date, prov, b.Model, b.Engine}
 		r := acc[k]
 		if r == nil {
-			r = &Row{Date: b.Date, Provider: prov, Model: b.Model, Engine: b.Engine}
+			r = &Row{Date: b.Date, Provider: prov, Model: b.Model, Engine: b.Engine, Slots: map[uint16]int64{}}
 			acc[k] = r
+		}
+		for s, v := range b.Slots {
+			r.Slots[s] += v
 		}
 		r.Tokens.add(b.Tokens)
 		r.Requests += b.Requests
@@ -269,6 +275,39 @@ func Summarize(rows []Row, cfg *config.Config, f Filter) Summary {
 	s.ByModel = sortedModels(byModel)
 	s.ByDate = sortedDates(byDate)
 	return s
+}
+
+// Point is the total tokens of one 5-minute slot.
+type Point struct {
+	Time   time.Time
+	Tokens int64
+}
+
+// SlotLen is the resolution of Timeline.
+const SlotLen = slotLen
+
+// Timeline returns the rows' usage per 5-minute slot, ascending by time.
+// Slots with no usage are left out.
+func Timeline(rows []Row, f Filter) []Point {
+	acc := map[time.Time]int64{}
+	for _, r := range rows {
+		if (f.Since != "" && r.Date < f.Since) || (f.Provider != "" && r.Provider != f.Provider) {
+			continue
+		}
+		day, err := time.ParseInLocation(dateLayout, r.Date, time.Local)
+		if err != nil {
+			continue
+		}
+		for s, v := range r.Slots {
+			acc[day.Add(time.Duration(s)*slotLen)] += v
+		}
+	}
+	out := make([]Point, 0, len(acc))
+	for t, v := range acc {
+		out = append(out, Point{t, v})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Time.Before(out[j].Time) })
+	return out
 }
 
 func sortedProviders(m map[string]*ProviderRow) []ProviderRow {

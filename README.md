@@ -60,7 +60,8 @@ to one, and `esc` comes back to Launch:
 - `m` Manage shows each provider's health, details and last 30 days of usage;
   `enter` edits, `a` / `d` add and delete, `*` sets the default and `s` syncs.
 - `u` Usage opens on all history and switches to 7, 30 or 90 days with `[`
-  `]`; `enter` on a provider narrows the page to it.
+  `]`; `enter` on a provider narrows the page to it and adds a tokens-over-time
+  curve for the range, 5-minute points merged into round intervals to fit.
 
 A provider whose command would fail is marked red, and the launcher names the
 problem under the list before you run it.
