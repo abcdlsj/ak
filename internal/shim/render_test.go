@@ -151,3 +151,20 @@ func TestDeferredKeyResolvedAtLaunch(t *testing.T) {
 		t.Fatalf("key not resolved at launch:\n%s", out)
 	}
 }
+
+// A tier variant is consumed even when it changes nothing, so it never reaches
+// claude as a prompt; with no model configured the alias passes through.
+func TestTierVariantAlwaysConsumed(t *testing.T) {
+	f := newSyncFixture(t)
+	f.cfg.Providers["same"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://x", APIKey: "k", Model: "m"}
+	f.cfg.Providers["bare"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://x", APIKey: "k"}
+	f.sync(t, "")
+	out := run(t, filepath.Join(f.bin, "ak-same"), nil, "opus")
+	if !strings.Contains(out, "ANTHROPIC_MODEL=m\n") || strings.Contains(out, "args=opus") {
+		t.Fatalf("opus not consumed:\n%s", out)
+	}
+	out = run(t, filepath.Join(f.bin, "ak-bare"), nil, "haiku")
+	if !strings.Contains(out, "ANTHROPIC_MODEL=haiku\n") {
+		t.Fatalf("alias not passed through:\n%s", out)
+	}
+}

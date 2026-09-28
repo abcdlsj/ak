@@ -45,7 +45,7 @@ func newDoctorCmd() *cobra.Command {
 }
 
 func runDoctor(cfg *config.Config) error {
-	problems := 0
+	problems, warnings := 0, 0
 
 	// 1. Provider keys left in settings.json. This is the worst case: no error
 	// is raised, requests just silently go to the wrong provider.
@@ -112,6 +112,7 @@ func runDoctor(cfg *config.Config) error {
 		if hookInstalled() {
 			fmt.Println("✓ usage attribution hook installed")
 		} else {
+			warnings++
 			fmt.Println("! usage attribution hook missing; claude usage shows as unknown. Run `ak hook install`")
 		}
 	}
@@ -128,6 +129,15 @@ func runDoctor(cfg *config.Config) error {
 		}
 	}
 
+	// 7. Keys ak does not know are ignored, usually a misspelt field.
+	if keys, err := config.UnknownKeys(); err == nil && len(keys) > 0 {
+		warnings++
+		fmt.Println("! providers.toml has keys ak ignores (misspelt?); the next save drops them:")
+		for _, k := range keys {
+			fmt.Printf("    %s\n", k)
+		}
+	}
+
 	if len(cfg.Providers) == 0 {
 		fmt.Println("\nNo providers configured yet. Use `ak add` or `ak import --from claude-settings`.")
 		return nil
@@ -136,6 +146,10 @@ func runDoctor(cfg *config.Config) error {
 	if problems > 0 {
 		fmt.Printf("\nFound %d problem(s).\n", problems)
 		return fmt.Errorf("%d problem(s) need attention", problems)
+	}
+	if warnings > 0 {
+		fmt.Printf("\nNo problems, %d warning(s).\n", warnings)
+		return nil
 	}
 	fmt.Println("\nAll checks passed.")
 	return nil

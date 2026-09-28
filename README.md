@@ -41,6 +41,7 @@ ak list                     list providers
 ak add [name]               add a provider (flags, or a form with no --base-url)
 ak edit <name> [--model …]  change only the given fields, or open the form
 ak rm <name>                remove a provider and its commands
+ak rename <name> <new>      rename a provider; its command follows
 ak import --from cc-switch  pick which cc-switch providers to copy over
 ak sync                     regenerate commands from the config
 ak doctor                   check for anything that would break the commands
@@ -58,7 +59,9 @@ and Usage are tabs: `tab` / `shift+tab` cycle them, `m` and `u` jump straight
 to one, and `esc` comes back to Launch:
 
 - `m` Manage shows each provider's health, details and last 30 days of usage;
-  `enter` edits, `a` / `d` add and delete, `*` sets the default and `s` syncs.
+  `enter` edits (the name too, which renames the command), `a` / `d` add and
+  delete, `*` sets the default and `s` syncs. In the form `ctrl+s` saves from
+  any field.
 - `u` Usage opens on all history and switches to 7, 30 or 90 days with `[`
   `]`; `enter` on a provider narrows the page to it and adds a tokens-over-time
   curve for the range, 5-minute points merged into round intervals to fit.

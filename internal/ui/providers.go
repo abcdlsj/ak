@@ -191,7 +191,7 @@ func launchProvider(a *app, name string) tea.Cmd {
 	return a.open(newPickOverlay(name, variants))
 }
 
-// variantNames lists the variants a provider's command recognises.
+// variantNames lists the variants the launcher offers for a provider.
 func variantNames(cfg *config.Config, name string) []string {
 	p := cfg.Providers[name]
 	eng := provider.EngineFor(p.Kind)
@@ -202,9 +202,11 @@ func variantNames(cfg *config.Config, name string) []string {
 	if err != nil {
 		return nil
 	}
-	out := make([]string, len(l.Variants))
-	for i, v := range l.Variants {
-		out[i] = v.Name
+	var out []string
+	for _, v := range l.Variants {
+		if !v.Quiet {
+			out = append(out, v.Name)
+		}
 	}
 	return out
 }

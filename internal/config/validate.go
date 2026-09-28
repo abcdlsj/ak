@@ -15,7 +15,7 @@ var Reserved = map[string]bool{
 	"rm": true, "remove": true, "edit": true, "sync": true, "doctor": true,
 	"import": true, "default": true, "env": true, "usage": true,
 	"completion": true, "help": true, "version": true, "run": true,
-	"prune-codexa": true,
+	"prune-codexa": true, "rename": true, "mv": true,
 }
 
 // claudeSubcommands and codexSubcommands are the banned variant names.

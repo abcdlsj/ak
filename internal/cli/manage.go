@@ -28,8 +28,8 @@ var providerFlags = []providerFlag{
 	{"haiku", "", "haiku-tier model (claude)", func(p *config.Provider, v string) { p.Haiku = v }},
 	{"sonnet", "", "sonnet-tier model (claude)", func(p *config.Provider, v string) { p.Sonnet = v }},
 	{"opus", "", "opus-tier model (claude)", func(p *config.Provider, v string) { p.Opus = v }},
-	{"key-field", "auth_token", "claude auth variable: auth_token or api_key", func(p *config.Provider, v string) { p.KeyField = v }},
-	{"wire-api", "responses", "codex wire API: responses or chat", func(p *config.Provider, v string) { p.WireAPI = v }},
+	{"key-field", "", "claude auth variable: auth_token or api_key", func(p *config.Provider, v string) { p.KeyField = v }},
+	{"wire-api", "", "codex wire API: responses or chat", func(p *config.Provider, v string) { p.WireAPI = v }},
 	{"reasoning", "", "codex default reasoning effort", func(p *config.Provider, v string) { p.Reasoning = v }},
 	{"display", "", "Name shown in listings", func(p *config.Provider, v string) { p.Display = v }},
 }
@@ -119,14 +119,15 @@ func newEditCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("provider %q does not exist", name)
 			}
+			newName := name
 			if applyProviderFlags(cmd, &p, true) == 0 {
 				d := ui.EditDraft(name, p)
 				if err := runForm(d, cfg); err != nil {
 					return err
 				}
-				p = d.Provider()
+				newName, p = d.Name, d.Provider()
 			}
-			if err := core.Update(cfg, name, p); err != nil {
+			if err := core.Edit(cfg, name, newName, p); err != nil {
 				return err
 			}
 			return runSync(cfg, false)
@@ -156,6 +157,27 @@ func newRemoveCmd() *cobra.Command {
 				return err
 			}
 			if err := core.Remove(cfg, args[0]); err != nil {
+				return err
+			}
+			return runSync(cfg, false)
+		},
+	}
+}
+
+func newRenameCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "rename <name> <new-name>",
+		Aliases: []string{"mv"},
+		Short:   "Rename a provider, and so its command",
+		Long: `Rename a provider. Its command becomes ak-<new-name> and the old one is
+removed; the default and usage history follow the new name.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			if err := core.Rename(cfg, args[0], args[1]); err != nil {
 				return err
 			}
 			return runSync(cfg, false)

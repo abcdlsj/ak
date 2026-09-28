@@ -12,6 +12,7 @@ import (
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/shim"
+	"github.com/abcdlsj/ak/internal/usage"
 )
 
 // Load reads and validates the config.
@@ -56,6 +57,48 @@ func Remove(cfg *config.Config, name string) error {
 			c.Settings.Default = ""
 		}
 	})
+}
+
+// Edit saves a change to a provider, renaming it when name differs from orig.
+func Edit(cfg *config.Config, orig, name string, p config.Provider) error {
+	if err := Update(cfg, orig, p); err != nil {
+		return err
+	}
+	return Rename(cfg, orig, name)
+}
+
+// Rename moves a provider to a new name, and so its command to
+// <prefix><to>; the next sync reclaims the old command. Usage history follows:
+// a codex provider keeps its provider_id, and claude session records are
+// rewritten to the new name.
+func Rename(cfg *config.Config, from, to string) error {
+	p, ok := cfg.Providers[from]
+	if !ok {
+		return fmt.Errorf("provider %q does not exist", from)
+	}
+	if from == to {
+		return nil
+	}
+	if err := config.ValidateName(to); err != nil {
+		return err
+	}
+	if _, exists := cfg.Providers[to]; exists {
+		return fmt.Errorf("provider %q already exists", to)
+	}
+	if p.Kind == config.KindCodex {
+		p.ProviderID = provider.CodexProviderID(from, p)
+	}
+	err := mutate(cfg, func(c *config.Config) {
+		delete(c.Providers, from)
+		c.Providers[to] = p
+		if c.Settings.Default == from {
+			c.Settings.Default = to
+		}
+	})
+	if err != nil {
+		return err
+	}
+	return usage.RenameProvider(from, to)
 }
 
 // SetDefault marks a provider as the default; an empty name clears it.

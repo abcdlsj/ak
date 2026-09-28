@@ -2,6 +2,7 @@ package usage
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -94,4 +95,37 @@ func RecordSession(sessionID, provider string) error {
 	}
 	_, err = f.Write(append(data, '\n'))
 	return err
+}
+
+// RenameProvider rewrites the session records of a renamed provider, so its
+// claude usage keeps showing under the new name.
+func RenameProvider(from, to string) error {
+	p, err := sessionsPath()
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(p)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	lines := bytes.Split(data, []byte("\n"))
+	changed := false
+	for i, line := range lines {
+		var r sessionRecord
+		if json.Unmarshal(line, &r) != nil || r.Provider != from {
+			continue
+		}
+		r.Provider = to
+		if lines[i], err = json.Marshal(r); err != nil {
+			return err
+		}
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return config.AtomicWrite(p, bytes.Join(lines, []byte("\n")), 0o600)
 }

@@ -33,8 +33,14 @@ func (o *formOverlay) build(a *app) *huh.Form {
 
 func (o *formOverlay) update(a *app, msg tea.Msg) (bool, tea.Cmd) {
 	f := o.build(a)
-	if k, ok := msg.(tea.KeyMsg); ok && (k.String() == "esc" || k.String() == "ctrl+c") {
-		return true, a.notify("cancelled", false)
+	if k, ok := msg.(tea.KeyMsg); ok {
+		switch k.String() {
+		case "esc", "ctrl+c":
+			return true, a.notify("cancelled", false)
+		case "ctrl+s":
+			// Save from any field, without stepping through the rest.
+			return o.save(a)
+		}
 	}
 	m, cmd := f.Update(msg)
 	if nf, ok := m.(*huh.Form); ok {
@@ -44,27 +50,34 @@ func (o *formOverlay) update(a *app, msg tea.Msg) (bool, tea.Cmd) {
 	case huh.StateAborted:
 		return true, a.notify("cancelled", false)
 	case huh.StateCompleted:
-		return true, o.save(a)
+		return o.save(a)
 	}
 	return false, cmd
 }
 
-func (o *formOverlay) save(a *app) tea.Cmd {
+// save stores the draft; on a rejected change the form stays open so nothing
+// typed is lost.
+func (o *formOverlay) save(a *app) (bool, tea.Cmd) {
 	p := o.draft.Provider()
 	var err error
 	if o.editing {
-		err = core.Update(a.cfg, o.draft.Name, p)
+		err = core.Edit(a.cfg, o.draft.Orig(), o.draft.Name, p)
 	} else {
 		err = core.Add(a.cfg, o.draft.Name, p)
 	}
 	if err != nil {
-		return a.notify(err.Error(), true)
+		if o.form.State != huh.StateNormal {
+			// A finished huh form ignores input; rebuild it from the draft.
+			o.form = nil
+			return false, tea.Batch(o.init(a), a.notify(err.Error(), true))
+		}
+		return false, a.notify(err.Error(), true)
 	}
 	// Leave the cursor on what was just saved.
 	for _, i := range []int{pageHome, pageManage} {
 		a.pages[i].(*providersPage).focus(a.cfg, o.draft.Name)
 	}
-	return a.sync()
+	return true, a.sync()
 }
 
 func (o *formOverlay) view(a *app, width int) string {
@@ -72,7 +85,7 @@ func (o *formOverlay) view(a *app, width int) string {
 	if o.editing {
 		head = "Edit " + o.draft.Name
 	}
-	return section(head, width) + "\n\n" + o.build(a).View() + "\n" + dimStyle.Render("esc cancel")
+	return section(head, width) + "\n\n" + o.build(a).View() + "\n" + dimStyle.Render("ctrl+s save  ·  esc cancel")
 }
 
 // confirmOverlay asks a yes/no question before a destructive action.

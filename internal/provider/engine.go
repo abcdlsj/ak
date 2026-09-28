@@ -60,6 +60,9 @@ type Variant struct {
 	Args []string
 	// Shim also generates a standalone command <prefix><provider>-<variant>.
 	Shim bool
+	// Quiet variants are recognised by the command but not offered in the
+	// launcher.
+	Quiet bool
 }
 
 // File is an extra artifact. The shim package adds the marker line.

@@ -148,3 +148,17 @@ func TestHomeAddWhenEmpty(t *testing.T) {
 		t.Fatalf("overlay = %T, want the add form", a.overlay)
 	}
 }
+
+// ctrl+s saves the edit form from any field.
+func TestFormCtrlSSaves(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	a := newApp(testConfig())
+	press(a, "m", "enter")
+	if _, ok := a.overlay.(*formOverlay); !ok {
+		t.Fatalf("overlay = %T, want the form", a.overlay)
+	}
+	a.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if a.overlay != nil {
+		t.Fatalf("ctrl+s left the form open")
+	}
+}

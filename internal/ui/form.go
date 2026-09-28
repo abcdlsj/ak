@@ -26,7 +26,9 @@ type Draft struct {
 	Reasoning string
 
 	existing bool
-	base     config.Provider
+	// orig is the name being edited; Name may differ after a rename.
+	orig string
+	base config.Provider
 }
 
 // NewDraft starts a draft for a new provider.
@@ -40,7 +42,13 @@ func EditDraft(name string, p config.Provider) *Draft {
 		Name: name, Kind: string(p.Kind), Display: p.Display, BaseURL: p.BaseURL,
 		Model: p.Model, Haiku: p.Haiku, Sonnet: p.Sonnet, Opus: p.Opus,
 		KeyField: p.KeyField, WireAPI: p.WireAPI, Reasoning: p.Reasoning,
-		existing: true, base: p,
+		existing: true, orig: name, base: p,
+	}
+	if d.KeyField == "" {
+		d.KeyField = "auth_token"
+	}
+	if d.WireAPI == "" {
+		d.WireAPI = "responses"
 	}
 	if p.APIKeyRef != "" {
 		d.Key = p.APIKeyRef
@@ -59,15 +67,29 @@ func (d *Draft) Provider() config.Provider {
 	p.Haiku = strings.TrimSpace(d.Haiku)
 	p.Sonnet = strings.TrimSpace(d.Sonnet)
 	p.Opus = strings.TrimSpace(d.Opus)
-	p.KeyField = d.KeyField
-	p.WireAPI = d.WireAPI
-	p.Reasoning = d.Reasoning
+	// Fields of the other engine are cleared, not carried along; a default
+	// value is left unset.
+	p.KeyField, p.WireAPI, p.Reasoning = "", "", ""
+	switch p.Kind {
+	case config.KindClaude:
+		if d.KeyField != "auth_token" {
+			p.KeyField = d.KeyField
+		}
+	case config.KindCodex:
+		if d.WireAPI != "responses" {
+			p.WireAPI = d.WireAPI
+		}
+		p.Reasoning = d.Reasoning
+	}
 	// A blank key keeps whatever the provider had.
 	if key := strings.TrimSpace(d.Key); key != "" {
 		p.SetKey(key)
 	}
 	return p
 }
+
+// Orig is the name the draft started from, empty for a new provider.
+func (d *Draft) Orig() string { return d.orig }
 
 // Form builds the provider form. taken reports names already in use.
 func (d *Draft) Form(taken func(string) bool) *huh.Form {
@@ -80,20 +102,21 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 		keyDesc = "Blank keeps the current key. " + keyDesc
 	}
 
-	var basics []huh.Field
+	basics := []huh.Field{
+		huh.NewInput().Title("Name").Value(&d.Name).
+			Description("The command becomes ak-<name>").
+			Validate(func(s string) error {
+				if err := config.ValidateName(s); err != nil {
+					return err
+				}
+				if taken(s) && !(d.existing && s == d.orig) {
+					return fmt.Errorf("provider %q already exists", s)
+				}
+				return nil
+			}),
+	}
 	if !d.existing {
 		basics = append(basics,
-			huh.NewInput().Title("Name").Value(&d.Name).
-				Description("The command becomes ak-<name>").
-				Validate(func(s string) error {
-					if err := config.ValidateName(s); err != nil {
-						return err
-					}
-					if taken(s) {
-						return fmt.Errorf("provider %q already exists", s)
-					}
-					return nil
-				}),
 			huh.NewSelect[string]().Title("Engine").Value(&d.Kind).
 				Options(huh.NewOption("claude", string(config.KindClaude)), huh.NewOption("codex", string(config.KindCodex))),
 		)

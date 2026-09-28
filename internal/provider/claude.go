@@ -60,11 +60,11 @@ func (claudeEngine) Launch(name string, p config.Provider, key Secret, _ Context
 			}
 		}
 		custom, isCustom := p.Variants[v]
-		// A built-in tier that changes nothing need not be recognised.
-		if len(delta) == 0 && !isCustom {
-			continue
-		}
-		variants = append(variants, Variant{Name: v, Env: delta, Shim: custom.Shim})
+		// Built-in tiers are always recognised, so `ak-x opus` never reaches
+		// claude as a prompt, but one that changes nothing or only passes the
+		// alias through is not worth offering.
+		quiet := !isCustom && (len(delta) == 0 || p.Model == "")
+		variants = append(variants, Variant{Name: v, Env: delta, Shim: custom.Shim, Quiet: quiet})
 	}
 	return Launch{Env: base, Variants: variants}, nil
 }
@@ -93,14 +93,15 @@ func ClaudeEnv(name string, p config.Provider, variant string, key Secret) EnvPl
 	}
 
 	// A variant overrides the model. The built-in opus/sonnet/haiku tiers
-	// replace the primary model directly.
+	// replace the primary model directly; with no model configured, the tier
+	// alias itself is passed and claude resolves it.
 	switch variant {
 	case "opus":
-		env.setIf("ANTHROPIC_MODEL", opus)
+		env.set("ANTHROPIC_MODEL", firstNonEmpty(opus, "opus"))
 	case "sonnet":
-		env.setIf("ANTHROPIC_MODEL", sonnet)
+		env.set("ANTHROPIC_MODEL", firstNonEmpty(sonnet, "sonnet"))
 	case "haiku":
-		env.setIf("ANTHROPIC_MODEL", haiku)
+		env.set("ANTHROPIC_MODEL", firstNonEmpty(haiku, "haiku"))
 	}
 	if v, ok := p.Variants[variant]; ok && variant != "" {
 		env.setIf("ANTHROPIC_MODEL", v.Model)

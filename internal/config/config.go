@@ -3,10 +3,13 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -172,6 +175,33 @@ func Load() (*Config, error) {
 		cfg.Settings.Prefix = "ak-"
 	}
 	return cfg, nil
+}
+
+// UnknownKeys lists the keys in providers.toml that ak does not know, such as
+// a misspelt field. Load ignores them, and the next save drops them.
+func UnknownKeys() ([]string, error) {
+	path, err := Path()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	dec := toml.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var strict *toml.StrictMissingError
+	if err := dec.Decode(Default()); !errors.As(err, &strict) {
+		return nil, nil
+	}
+	var keys []string
+	for _, e := range strict.Errors {
+		keys = append(keys, strings.Join(e.Key(), "."))
+	}
+	return keys, nil
 }
 
 // Save writes the config back atomically with mode 0600.
