@@ -157,6 +157,10 @@ func attribute(buckets []bucket, a *attribution) []Row {
 		if src := sourceFor(b.Engine); src != nil {
 			prov = src.Provider(b, a)
 		}
+		// Unattributed usage ran on the engine's own default login.
+		if prov == "" {
+			prov = b.Engine
+		}
 		if prov == "" {
 			prov = unknownProvider
 		}

@@ -245,7 +245,7 @@ func TestAttributeCodexProviderID(t *testing.T) {
 	for _, r := range rows {
 		got[r.Provider] = true
 	}
-	for _, want := range []string{"mine", "other", unknownProvider} {
+	for _, want := range []string{"mine", "other", "claude"} {
 		if !got[want] {
 			t.Errorf("missing provider %q in %v", want, got)
 		}
