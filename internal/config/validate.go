@@ -15,7 +15,7 @@ var Reserved = map[string]bool{
 	"rm": true, "remove": true, "edit": true, "sync": true, "doctor": true,
 	"import": true, "default": true, "env": true, "usage": true,
 	"completion": true, "help": true, "version": true, "run": true,
-	"prune-codexa": true, "rename": true, "mv": true,
+	"prune-codexa": true, "rename": true, "mv": true, "serve": true,
 }
 
 // claudeSubcommands and codexSubcommands are the banned variant names.
@@ -56,7 +56,7 @@ func Validate(cfg *Config) error {
 			return err
 		}
 		p := cfg.Providers[name]
-		if err := validateProvider(name, p); err != nil {
+		if err := validateProvider(cfg, name, p); err != nil {
 			return err
 		}
 	}
@@ -95,13 +95,16 @@ func validateCommandNames(cfg *Config) error {
 	return nil
 }
 
-func validateProvider(name string, p Provider) error {
+func validateProvider(cfg *Config, name string, p Provider) error {
 	switch p.Kind {
 	case KindClaude, KindCodex:
 	case "":
 		return fmt.Errorf("provider %q is missing kind (claude or codex)", name)
 	default:
 		return fmt.Errorf("provider %q has invalid kind %q; must be claude or codex", name, p.Kind)
+	}
+	if p.IsPool() {
+		return validatePool(cfg, name, p)
 	}
 	if p.BaseURL == "" {
 		return fmt.Errorf("provider %q is missing base_url", name)
@@ -124,6 +127,43 @@ func validateProvider(name string, p Provider) error {
 		}
 		if r := p.Reasoning; r != "" && !validReasoning[r] {
 			return fmt.Errorf("provider %q has invalid reasoning %q", name, r)
+		}
+	}
+	return validateVariants(name, p)
+}
+
+// validatePool checks a routing pool: its members exist, share its kind, are
+// not itself and are not other pools (one level only for now), and its
+// strategy and model mapping name members.
+func validatePool(cfg *Config, name string, p Provider) error {
+	switch p.Strategy {
+	case "", StrategyOrder, StrategyRotate, StrategyLeastUsed:
+	default:
+		return fmt.Errorf("provider %q has invalid strategy %q; must be order, rotate or least-used", name, p.Strategy)
+	}
+	seen := map[string]bool{}
+	for _, m := range p.Members {
+		if m == name {
+			return fmt.Errorf("pool %q lists itself as a member", name)
+		}
+		if seen[m] {
+			return fmt.Errorf("pool %q lists member %q twice", name, m)
+		}
+		seen[m] = true
+		mp, ok := cfg.Providers[m]
+		if !ok {
+			return fmt.Errorf("pool %q names unknown member %q", name, m)
+		}
+		if mp.IsPool() {
+			return fmt.Errorf("pool %q names %q, which is itself a pool; pools may not nest", name, m)
+		}
+		if mp.Kind != p.Kind {
+			return fmt.Errorf("pool %q is %s but member %q is %s; a pool's members must share its kind", name, p.Kind, m, mp.Kind)
+		}
+	}
+	for m := range p.MemberModels {
+		if !seen[m] {
+			return fmt.Errorf("pool %q maps a model for %q, which is not one of its members", name, m)
 		}
 	}
 	return validateVariants(name, p)

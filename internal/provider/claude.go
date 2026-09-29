@@ -44,7 +44,13 @@ func (claudeEngine) ArtifactDirs(Context) []string          { return nil }
 
 // Launch sets the environment; each variant carries only the variables that
 // differ from the base.
-func (claudeEngine) Launch(name string, p config.Provider, key Secret, _ Context) (Launch, error) {
+func (claudeEngine) Launch(name string, p config.Provider, key Secret, ctx Context) (Launch, error) {
+	// A pool talks to ak's own gateway; the members' keys stay on the gateway
+	// side and never reach the command.
+	if p.IsPool() && ctx.Gateway != "" {
+		p = poolTarget(p, name, ctx.Gateway)
+		key = Literal(poolKey)
+	}
 	base := ClaudeEnv(name, p, "", key)
 	baseVals := map[string]string{}
 	for _, kv := range base.Set {

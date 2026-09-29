@@ -24,6 +24,10 @@ type Draft struct {
 	KeyField  string
 	WireAPI   string
 	Reasoning string
+	// Members is the comma-separated member list of a pool; empty makes the
+	// provider a normal upstream.
+	Members  string
+	Strategy string
 
 	existing bool
 	// orig is the name being edited; Name may differ after a rename.
@@ -42,6 +46,7 @@ func EditDraft(name string, p config.Provider) *Draft {
 		Name: name, Kind: string(p.Kind), Display: p.Display, BaseURL: p.BaseURL,
 		Model: p.Model, Haiku: p.Haiku, Sonnet: p.Sonnet, Opus: p.Opus,
 		KeyField: p.KeyField, WireAPI: p.WireAPI, Reasoning: p.Reasoning,
+		Members: strings.Join(p.Members, ", "), Strategy: p.Strategy,
 		existing: true, orig: name, base: p,
 	}
 	if d.KeyField == "" {
@@ -85,7 +90,44 @@ func (d *Draft) Provider() config.Provider {
 	if key := strings.TrimSpace(d.Key); key != "" {
 		p.SetKey(key)
 	}
+
+	// A member list turns the provider into a pool. A pool has no upstream of
+	// its own, so any endpoint typed in the form is dropped.
+	members := splitMembers(d.Members)
+	if len(members) > 0 {
+		p.Members = members
+		p.Strategy = strings.TrimSpace(d.Strategy)
+		p.BaseURL = ""
+		if len(p.MemberModels) > 0 {
+			keep := map[string]bool{}
+			for _, m := range members {
+				keep[m] = true
+			}
+			kept := map[string]string{}
+			for k, v := range p.MemberModels {
+				if keep[k] {
+					kept[k] = v
+				}
+			}
+			p.MemberModels = kept
+		}
+	} else {
+		p.Members = nil
+		p.Strategy = ""
+		p.MemberModels = nil
+	}
 	return p
+}
+
+// splitMembers parses a comma-separated member list, dropping blanks.
+func splitMembers(s string) []string {
+	var out []string
+	for _, m := range strings.Split(s, ",") {
+		if m = strings.TrimSpace(m); m != "" {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // Orig is the name the draft started from, empty for a new provider.
@@ -122,10 +164,12 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 		)
 	}
 	basics = append(basics,
+		huh.NewInput().Title("Pool members").Value(&d.Members).
+			Description("Comma-separated provider names; blank for a normal provider"),
 		huh.NewInput().Title("API endpoint").Value(&d.BaseURL).
 			Validate(func(s string) error {
-				if strings.TrimSpace(s) == "" {
-					return errors.New("required")
+				if strings.TrimSpace(s) == "" && len(splitMembers(d.Members)) == 0 {
+					return errors.New("required unless the provider is a pool")
 				}
 				return nil
 			}),
@@ -141,6 +185,8 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 		huh.NewInput().Title("Haiku-tier model").Value(&d.Haiku),
 		huh.NewSelect[string]().Title("Auth variable").Value(&d.KeyField).
 			Options(huh.NewOption("ANTHROPIC_AUTH_TOKEN", "auth_token"), huh.NewOption("ANTHROPIC_API_KEY", "api_key")),
+		huh.NewSelect[string]().Title("Pool strategy").Value(&d.Strategy).
+			Options(huh.NewOption("order (failover)", config.StrategyOrder), huh.NewOption("rotate", config.StrategyRotate), huh.NewOption("least-used", config.StrategyLeastUsed)),
 	).WithHideFunc(isKind(config.KindClaude))
 
 	codex := huh.NewGroup(

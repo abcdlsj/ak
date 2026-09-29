@@ -3,9 +3,11 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
@@ -152,6 +154,20 @@ func runDoctor(cfg *config.Config) error {
 		}
 	}
 
+	// 9. Pools route through the local gateway, which must be running.
+	if pools := poolNames(cfg); len(pools) > 0 {
+		addr := cfg.Settings.GatewayAddr
+		if addr == "" {
+			addr = config.DefaultGatewayAddr
+		}
+		if gatewayUp(addr) {
+			fmt.Printf("✓ pool gateway reachable at %s\n", addr)
+		} else {
+			warnings++
+			fmt.Printf("! %d pool(s) configured but nothing is listening on %s; run `ak serve`\n", len(pools), addr)
+		}
+	}
+
 	if len(cfg.Providers) == 0 {
 		fmt.Println("\nNo providers configured yet. Use `ak add` or `ak import --from claude-settings`.")
 		return nil
@@ -187,6 +203,27 @@ func codexIDCollisions(cfg *config.Config) []string {
 		}
 	}
 	return out
+}
+
+// poolNames lists the configured pool providers.
+func poolNames(cfg *config.Config) []string {
+	var out []string
+	for _, name := range cfg.Names() {
+		if cfg.Providers[name].IsPool() {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// gatewayUp reports whether something is listening on the gateway address.
+func gatewayUp(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, 400*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func hasKind(cfg *config.Config, k config.Kind) bool {

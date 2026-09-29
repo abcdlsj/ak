@@ -77,7 +77,7 @@ func (s *Syncer) Sync() (Report, error) {
 		}
 	}
 
-	ctx := provider.Context{CodexHome: s.codexHome()}
+	ctx := provider.Context{CodexHome: s.codexHome(), Gateway: s.Cfg.Settings.GatewayURL()}
 	// Record the artifacts that should exist this run; any other marked file
 	// in the same directories is treated as an orphan.
 	want := map[string]bool{}

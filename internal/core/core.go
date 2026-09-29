@@ -46,17 +46,102 @@ func Update(cfg *config.Config, name string, p config.Provider) error {
 	return mutate(cfg, func(c *config.Config) { c.Providers[name] = p })
 }
 
-// Remove deletes a provider, clearing the default if it pointed there.
+// Remove deletes a provider, clearing the default if it pointed there. A
+// provider that is a pool's only member cannot be removed until the pool is.
 func Remove(cfg *config.Config, name string) error {
 	if _, ok := cfg.Providers[name]; !ok {
 		return fmt.Errorf("provider %q does not exist", name)
+	}
+	if pool, ok := onlyMemberOf(cfg, name); ok {
+		return fmt.Errorf("provider %q is the only member of pool %q; remove the pool first", name, pool)
 	}
 	return mutate(cfg, func(c *config.Config) {
 		delete(c.Providers, name)
 		if c.Settings.Default == name {
 			c.Settings.Default = ""
 		}
+		dropMember(c, name)
 	})
+}
+
+// onlyMemberOf reports the pool that names provider as its only member.
+func onlyMemberOf(cfg *config.Config, name string) (string, bool) {
+	for _, poolName := range cfg.Names() {
+		p := cfg.Providers[poolName]
+		if p.IsPool() && len(p.Members) == 1 && p.Members[0] == name {
+			return poolName, true
+		}
+	}
+	return "", false
+}
+
+// dropMember removes a provider from every pool that lists it. The member
+// slice and mapping are cloned before use: mutate shares them with the original
+// config, so in-place edits would corrupt it if validation later rejects.
+func dropMember(c *config.Config, name string) {
+	for poolName, p := range c.Providers {
+		if !p.IsPool() || !containsMember(p.Members, name) {
+			continue
+		}
+		kept := make([]string, 0, len(p.Members))
+		for _, m := range p.Members {
+			if m != name {
+				kept = append(kept, m)
+			}
+		}
+		p.Members = kept
+		p.MemberModels = cloneModels(p.MemberModels)
+		delete(p.MemberModels, name)
+		c.Providers[poolName] = p
+	}
+}
+
+// renameMember rewrites pool references when a member is renamed, cloning the
+// slices and maps it touches for the same reason as dropMember.
+func renameMember(c *config.Config, from, to string) {
+	for poolName, p := range c.Providers {
+		if !p.IsPool() {
+			continue
+		}
+		changed := false
+		if containsMember(p.Members, from) {
+			ms := make([]string, len(p.Members))
+			copy(ms, p.Members)
+			for i := range ms {
+				if ms[i] == from {
+					ms[i] = to
+				}
+			}
+			p.Members = ms
+			changed = true
+		}
+		if v, ok := p.MemberModels[from]; ok {
+			p.MemberModels = cloneModels(p.MemberModels)
+			delete(p.MemberModels, from)
+			p.MemberModels[to] = v
+			changed = true
+		}
+		if changed {
+			c.Providers[poolName] = p
+		}
+	}
+}
+
+func containsMember(members []string, name string) bool {
+	for _, m := range members {
+		if m == name {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneModels(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m)+1)
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 // Edit saves a change to a provider, renaming it when name differs from orig.
@@ -94,6 +179,7 @@ func Rename(cfg *config.Config, from, to string) error {
 		if c.Settings.Default == from {
 			c.Settings.Default = to
 		}
+		renameMember(c, from, to)
 	})
 	if err != nil {
 		return err
@@ -193,11 +279,26 @@ func Statuses(cfg *config.Config) map[string]Status {
 		p := cfg.Providers[name]
 		out[name] = Status{
 			Drift:    drift[CommandPath(cfg, name)],
-			NoKey:    p.APIKey == "" && p.APIKeyRef == "",
+			NoKey:    noKey(cfg, p),
 			NoEngine: !engineFound[p.Kind],
 		}
 	}
 	return out
+}
+
+// noKey reports whether a provider cannot authenticate. A pool holds no key of
+// its own; it is missing one only when a member is.
+func noKey(cfg *config.Config, p config.Provider) bool {
+	if p.IsPool() {
+		for _, m := range p.Members {
+			mp := cfg.Providers[m]
+			if mp.APIKey == "" && mp.APIKeyRef == "" {
+				return true
+			}
+		}
+		return false
+	}
+	return p.APIKey == "" && p.APIKeyRef == ""
 }
 
 // findEngine returns the engine binary the commands would run, or "".

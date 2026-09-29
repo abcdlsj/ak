@@ -60,6 +60,71 @@ func applyProviderFlags(cmd *cobra.Command, p *config.Provider, onlyChanged bool
 	return changed
 }
 
+// addPoolFlags adds the flags that turn a provider into a routing pool.
+func addPoolFlags(cmd *cobra.Command) {
+	cmd.Flags().StringArray("member", nil, "pool member provider name (repeatable)")
+	cmd.Flags().String("strategy", "", "pool strategy: order, rotate or least-used")
+	cmd.Flags().StringArray("map", nil, "pool model mapping member=model (repeatable)")
+}
+
+// applyPoolFlags sets the pool fields; onlyChanged skips flags the user did not
+// pass, so an edit leaves every other field alone. Passing --member replaces
+// the whole member list.
+func applyPoolFlags(cmd *cobra.Command, p *config.Provider, onlyChanged bool) (changed int, err error) {
+	if cmd.Flags().Changed("member") || !onlyChanged {
+		v, _ := cmd.Flags().GetStringArray("member")
+		p.Members = parseMemberList(v)
+		if cmd.Flags().Changed("member") {
+			changed++
+		}
+	}
+	if cmd.Flags().Changed("strategy") || !onlyChanged {
+		p.Strategy, _ = cmd.Flags().GetString("strategy")
+		if cmd.Flags().Changed("strategy") {
+			changed++
+		}
+	}
+	if cmd.Flags().Changed("map") || !onlyChanged {
+		v, _ := cmd.Flags().GetStringArray("map")
+		m, perr := parseMemberModels(v)
+		if perr != nil {
+			return changed, perr
+		}
+		p.MemberModels = m
+		if cmd.Flags().Changed("map") {
+			changed++
+		}
+	}
+	return changed, nil
+}
+
+// parseMemberList trims and drops empty member names.
+func parseMemberList(in []string) []string {
+	var out []string
+	for _, m := range in {
+		if m = strings.TrimSpace(m); m != "" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// parseMemberModels parses repeated member=model flags.
+func parseMemberModels(in []string) (map[string]string, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := map[string]string{}
+	for _, s := range in {
+		m, model, ok := strings.Cut(s, "=")
+		if !ok || strings.TrimSpace(m) == "" || strings.TrimSpace(model) == "" {
+			return nil, fmt.Errorf("invalid --map %q, expected member=model", s)
+		}
+		out[strings.TrimSpace(m)] = strings.TrimSpace(model)
+	}
+	return out, nil
+}
+
 func newAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add [name]",
@@ -67,7 +132,8 @@ func newAddCmd() *cobra.Command {
 		Long: `Add a provider and generate its command immediately.
 
   ak add kimi --kind claude --base-url https://api.moonshot.cn/anthropic --key sk-... --model kimi-k2.7-code
-  ak add        # with no --base-url, opens a form`,
+  ak add pool --kind claude --member kimi --member cpa --strategy rotate
+  ak add        # with no --base-url or --member, opens a form`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
@@ -80,7 +146,10 @@ func newAddCmd() *cobra.Command {
 			}
 			var p config.Provider
 			applyProviderFlags(cmd, &p, false)
-			if p.BaseURL == "" {
+			if _, err := applyPoolFlags(cmd, &p, false); err != nil {
+				return err
+			}
+			if p.BaseURL == "" && !p.IsPool() {
 				d := ui.NewDraft(name)
 				if err := runForm(d, cfg); err != nil {
 					return err
@@ -97,6 +166,7 @@ func newAddCmd() *cobra.Command {
 		},
 	}
 	addProviderFlags(cmd, true)
+	addPoolFlags(cmd)
 	return cmd
 }
 
@@ -120,7 +190,13 @@ func newEditCmd() *cobra.Command {
 				return fmt.Errorf("provider %q does not exist", name)
 			}
 			newName := name
-			if applyProviderFlags(cmd, &p, true) == 0 {
+			changed := applyProviderFlags(cmd, &p, true)
+			n, err := applyPoolFlags(cmd, &p, true)
+			if err != nil {
+				return err
+			}
+			changed += n
+			if changed == 0 {
 				d := ui.EditDraft(name, p)
 				if err := runForm(d, cfg); err != nil {
 					return err
@@ -134,6 +210,7 @@ func newEditCmd() *cobra.Command {
 		},
 	}
 	addProviderFlags(cmd, false)
+	addPoolFlags(cmd)
 	return cmd
 }
 

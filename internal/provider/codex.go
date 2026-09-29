@@ -48,6 +48,10 @@ func (codexEngine) ArtifactDirs(ctx Context) []string {
 // Launch layers a profile over the user's codex config; the model and endpoint
 // travel through the profile, the environment only carries the secret.
 func (codexEngine) Launch(name string, p config.Provider, key Secret, ctx Context) (Launch, error) {
+	if p.IsPool() && ctx.Gateway != "" {
+		p = poolTarget(p, name, ctx.Gateway)
+		key = Literal(poolKey)
+	}
 	body, err := CodexProfileTOML(name, p)
 	if err != nil {
 		return Launch{}, err

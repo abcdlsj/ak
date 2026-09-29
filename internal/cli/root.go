@@ -50,6 +50,7 @@ Run with no arguments to open the TUI.`,
 		newHookCmd(),
 		newRecordSessionCmd(),
 		newKeyCmd(),
+		newServeCmd(),
 	)
 	return root.Execute()
 }

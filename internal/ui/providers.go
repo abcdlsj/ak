@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -331,6 +332,20 @@ func problemLine(a *app, name string) string {
 	return errStyle.Render("✗ " + a.cfg.Settings.Prefix + name + ": " + strings.Join(st.Problems(), "; "))
 }
 
+// mappingSummary lists a pool's per-member model overrides, sorted by member.
+func mappingSummary(p config.Provider) string {
+	names := make([]string, 0, len(p.MemberModels))
+	for m := range p.MemberModels {
+		names = append(names, m)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, m := range names {
+		parts = append(parts, m+"="+p.MemberModels[m])
+	}
+	return strings.Join(parts, ", ")
+}
+
 // detailPanel shows everything about one provider at a glance.
 func detailPanel(a *app, name string, width int) string {
 	p := a.cfg.Providers[name]
@@ -348,8 +363,16 @@ func detailPanel(a *app, name string, width int) string {
 		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render(fmt.Sprintf("%-9s", label)), truncate(value, inner-10)))
 	}
 	field("engine", string(p.Kind))
-	field("endpoint", dash(p.BaseURL))
-	field("key", keySummary(p))
+	if p.IsPool() {
+		field("members", strings.Join(p.Members, ", "))
+		field("strategy", p.StrategyOrDefault())
+		if len(p.MemberModels) > 0 {
+			field("mapping", mappingSummary(p))
+		}
+	} else {
+		field("endpoint", dash(p.BaseURL))
+		field("key", keySummary(p))
+	}
 	field("model", dash(p.Model))
 	switch p.Kind {
 	case config.KindClaude:

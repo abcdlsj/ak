@@ -39,6 +39,8 @@ ak sync
 ak                          open the launcher (enter or 1-9 runs a provider)
 ak list                     list providers
 ak add [name]               add a provider (flags, or a form with no --base-url)
+ak add pool --member a --member b --strategy rotate   a pool: balance over several providers
+ak serve                    run the pool gateway (required while a pool command runs)
 ak edit <name> [--model …]  change only the given fields, or open the form
 ak rm <name>                remove a provider and its commands
 ak rename <name> <new>      rename a provider; its command follows
@@ -81,6 +83,39 @@ shim = true          # also generate ak-bilicodex-fast
 `ak` keeps one source of truth in `~/.config/ak/providers.toml` (mode `0600`)
 and derives everything else. Generated shims are marked and idempotent, so
 `ak sync` rewrites only what changed and reclaims what no longer applies.
+
+## Pools: balance and aggregate providers
+
+A pool is a provider backed by several others of the same kind, so one command
+spreads over them: fail over when one is down, or rotate for load. The engine
+talks to ak's own loopback gateway, which injects each member's real key and
+never writes it into the command.
+
+```sh
+ak add pool --kind claude --member kimi --member cpa --strategy order
+ak add pool --kind codex --member cpa --member step --strategy rotate \
+  --map step=gpt-5.6-luna
+ak serve            # required while a pool command runs
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--member` | a provider in the pool, repeatable and ordered |
+| `--strategy` | `order` (failover, the default), `rotate` (round-robin) or `least-used` |
+| `--map` | `member=model`: ask that member for a different model |
+
+The gateway listens on `127.0.0.1:17877` (`settings.gateway_addr` to change it)
+and is loopback-only. A member that fails is set aside for 30 seconds, doubling
+to ten minutes while it keeps failing, and the request falls through to the next
+member. Pools do not translate between protocols: every member must speak what
+the engine speaks. To aggregate one relay for both engines, register its
+Anthropic endpoint as a `claude` provider and its OpenAI endpoint as a `codex`
+provider, then pool each kind separately. `ak doctor` warns when a pool exists
+but nothing is listening on the gateway.
+
+Restart `ak serve` after changing a pool, and keep it running while a pool
+command is in use. Normal providers never touch the gateway: they stay direct,
+with their own key in their own command.
 
 ## Details worth knowing
 

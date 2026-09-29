@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -33,13 +34,15 @@ func newListCmd() *cobra.Command {
 }
 
 type listRow struct {
-	Name    string `json:"name"`
-	Command string `json:"command"`
-	Kind    string `json:"kind"`
-	Display string `json:"display,omitempty"`
-	BaseURL string `json:"base_url"`
-	Model   string `json:"model,omitempty"`
-	Default bool   `json:"default,omitempty"`
+	Name     string   `json:"name"`
+	Command  string   `json:"command"`
+	Kind     string   `json:"kind"`
+	Display  string   `json:"display,omitempty"`
+	BaseURL  string   `json:"base_url"`
+	Model    string   `json:"model,omitempty"`
+	Members  []string `json:"members,omitempty"`
+	Strategy string   `json:"strategy,omitempty"`
+	Default  bool     `json:"default,omitempty"`
 }
 
 func listRows(cfg *config.Config) []listRow {
@@ -47,13 +50,15 @@ func listRows(cfg *config.Config) []listRow {
 	for _, name := range cfg.Names() {
 		p := cfg.Providers[name]
 		rows = append(rows, listRow{
-			Name:    name,
-			Command: cfg.Settings.Prefix + name,
-			Kind:    string(p.Kind),
-			Display: p.Display,
-			BaseURL: p.BaseURL,
-			Model:   p.Model,
-			Default: cfg.Settings.Default == name,
+			Name:     name,
+			Command:  cfg.Settings.Prefix + name,
+			Kind:     string(p.Kind),
+			Display:  p.Display,
+			BaseURL:  p.BaseURL,
+			Model:    p.Model,
+			Members:  p.Members,
+			Strategy: p.Strategy,
+			Default:  cfg.Settings.Default == name,
 		})
 	}
 	return rows
@@ -73,7 +78,7 @@ func printList(cfg *config.Config) {
 			mark = " *"
 		}
 		fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\n",
-			r.Command, mark, r.Kind, dash(r.Model), r.BaseURL, r.Display)
+			r.Command, mark, r.Kind, dash(r.Model), endpoint(r), r.Display)
 	}
 	w.Flush()
 	if cfg.Settings.Default != "" {
@@ -86,4 +91,17 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// endpoint is what the command talks to: the upstream URL, or the members of a
+// pool.
+func endpoint(r listRow) string {
+	if len(r.Members) > 0 {
+		strat := r.Strategy
+		if strat == "" {
+			strat = config.StrategyOrder
+		}
+		return "pool(" + strat + ": " + strings.Join(r.Members, ", ") + ")"
+	}
+	return r.BaseURL
 }

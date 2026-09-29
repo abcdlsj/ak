@@ -2,6 +2,7 @@ package provider
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
 )
@@ -28,6 +29,25 @@ type Engine interface {
 // tests stay hermetic.
 type Context struct {
 	CodexHome string
+	// Gateway is the base URL of the local pool gateway, e.g.
+	// http://127.0.0.1:17877. A pool's command points at it instead of an
+	// upstream; empty means no gateway is available and pools cannot launch.
+	Gateway string
+}
+
+// poolKey is the placeholder the shim sends to the local gateway. The gateway
+// ignores it and injects each member's real key, so no upstream key is ever
+// written into a pool command.
+const poolKey = "ak-pool"
+
+// poolTarget rewrites a pool provider into the shape an engine expects: the
+// gateway as its base URL, so the engine renders a command that talks to ak
+// rather than to an upstream. The original provider is left untouched.
+func poolTarget(p config.Provider, name, gateway string) config.Provider {
+	p.BaseURL = strings.TrimRight(gateway, "/") + "/p/" + name
+	p.KeyField = ""
+	p.CodexHome = ""
+	return p
 }
 
 // Secret is how a command obtains the provider's key.

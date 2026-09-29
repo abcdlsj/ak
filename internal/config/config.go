@@ -17,6 +17,20 @@ import (
 // Version is the config file format version.
 const Version = 1
 
+// DefaultGatewayAddr is where the pool gateway listens when settings.gateway_addr
+// is not set. It is loopback-only: pool shims point their engine at it.
+const DefaultGatewayAddr = "127.0.0.1:17877"
+
+// Pool strategies decide which member a request goes to.
+const (
+	// StrategyOrder tries members in order, failing over to the next.
+	StrategyOrder = "order"
+	// StrategyRotate spreads requests over the members in turn.
+	StrategyRotate = "rotate"
+	// StrategyLeastUsed prefers the member that has served the fewest requests lately.
+	StrategyLeastUsed = "least-used"
+)
+
 // Kind distinguishes the engine behind a provider.
 type Kind string
 
@@ -39,6 +53,18 @@ type Settings struct {
 	Default   string `toml:"default,omitempty"`
 	ClaudeBin string `toml:"claude_bin,omitempty"`
 	CodexBin  string `toml:"codex_bin,omitempty"`
+	// GatewayAddr is the listen address of the pool gateway, host:port.
+	GatewayAddr string `toml:"gateway_addr,omitempty"`
+}
+
+// GatewayURL returns the loopback base URL of the pool gateway, without a
+// trailing slash, e.g. http://127.0.0.1:17877.
+func (s Settings) GatewayURL() string {
+	addr := s.GatewayAddr
+	if addr == "" {
+		addr = DefaultGatewayAddr
+	}
+	return "http://" + addr
 }
 
 // Provider is a single provider. Shared by claude and codex; each ignores the
@@ -70,6 +96,18 @@ type Provider struct {
 	// CodexHome is reserved: when set, the shim also exports CODEX_HOME.
 	CodexHome string `toml:"codex_home,omitempty"`
 
+	// Members names, in order, the providers this provider routes over. When
+	// non-empty the provider is a pool: BaseURL and the key fields are unused,
+	// and its command points at the local gateway instead of an upstream.
+	Members []string `toml:"members,omitempty"`
+	// MemberModels maps a member name to the model the gateway asks that
+	// member for, letting one pool map a logical model onto each upstream's
+	// own name. A member with no entry gets the requested model unchanged.
+	MemberModels map[string]string `toml:"member_models,omitempty"`
+	// Strategy is how a request picks a member: order, rotate or least-used.
+	// Empty means order.
+	Strategy string `toml:"strategy,omitempty"`
+
 	// Env holds arbitrary extra environment variables. Merged last, it can
 	// override derived keys.
 	Env map[string]string `toml:"env,omitempty"`
@@ -97,6 +135,18 @@ type Variant struct {
 	// Shim, when true, also generates a standalone command
 	// ak-<provider>-<variant>.
 	Shim bool `toml:"shim,omitempty"`
+}
+
+// IsPool reports whether the provider routes over other providers rather
+// than talking to an upstream itself.
+func (p Provider) IsPool() bool { return len(p.Members) > 0 }
+
+// StrategyOrDefault returns the pool's strategy, defaulting to order.
+func (p Provider) StrategyOrDefault() string {
+	if p.Strategy == "" {
+		return StrategyOrder
+	}
+	return p.Strategy
 }
 
 // Names returns the sorted provider names, keeping every iteration
@@ -142,7 +192,7 @@ func DataDir() (string, error) {
 func Default() *Config {
 	return &Config{
 		Version:   Version,
-		Settings:  Settings{BinDir: "~/.local/bin", Prefix: "ak-"},
+		Settings:  Settings{BinDir: "~/.local/bin", Prefix: "ak-", GatewayAddr: DefaultGatewayAddr},
 		Providers: map[string]Provider{},
 	}
 }
@@ -173,6 +223,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.Settings.Prefix == "" {
 		cfg.Settings.Prefix = "ak-"
+	}
+	if cfg.Settings.GatewayAddr == "" {
+		cfg.Settings.GatewayAddr = DefaultGatewayAddr
 	}
 	return cfg, nil
 }
