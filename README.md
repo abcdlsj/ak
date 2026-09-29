@@ -1,6 +1,6 @@
 # ak
 
-Run multiple Claude Code and Codex providers side by side.
+Run multiple Claude Code, Codex and Pi providers side by side.
 
 Instead of switching one active provider, `ak` gives every provider its own
 command. Pick a provider by typing its name, not by changing global state — so
@@ -11,6 +11,8 @@ on each other.
 ak-bilicodex        codex   gpt-5.6-terra    company gateway
 ak-cpacodex         codex   gpt-5.6-luna     own relay
 ak-stepfunclaude    claude  step-5-preview
+ak-cpapi            pi      glm-5            own relay
+ak-kimi-pi          pi      kimi-k2.7-code   kimi's own pi provider
 ```
 
 ## Why
@@ -45,6 +47,7 @@ ak edit <name> [--model …]  change only the given fields, or open the form
 ak rm <name>                remove a provider and its commands
 ak rename <name> <new>      rename a provider; its command follows
 ak import --from cc-switch  pick which cc-switch providers to copy over
+ak import --from pi         providers from ~/.pi/agent/models.json
 ak sync                     regenerate commands from the config
 ak doctor                   check for anything that would break the commands
 ak usage                    token usage by provider and model
@@ -53,6 +56,8 @@ ak-bilicodex                run codex on that provider
 ak-bilicodex high           override reasoning effort for this run
 ak-stepfunclaude opus       use the opus-tier model for this run
 ak-stepfunclaude -p "..."   run claude on that provider
+ak-cpapi high               run pi with thinking level high
+ak-cpapi -p "..."           run pi on that provider
 ```
 
 The TUI opens on a launcher: the providers in a list, the cursor on the
@@ -84,6 +89,31 @@ shim = true          # also generate ak-bilicodex-fast
 `ak` keeps one source of truth in `~/.config/ak/providers.toml` (mode `0600`)
 and derives everything else. Generated shims are marked and idempotent, so
 `ak sync` rewrites only what changed and reclaims what no longer applies.
+
+## Pi
+
+A `kind = "pi"` provider runs the pi coding agent. There are two shapes:
+
+- **A provider pi already knows** (`pi_provider`): ak writes nothing and passes
+  `--provider <id>`, so a pi package or a signed-in provider is used as it is.
+- **An endpoint ak registers**: ak keeps an `ak-<name>` entry in pi's
+  `models.json` with the base URL and a `$AK_KEY_<NAME>` key reference, and the
+  command exports the key, so no key lands in the file or on the command line.
+
+```sh
+ak add ccpi --kind pi --pi-provider commandcode --model deepseek/deepseek-v4.1-flash
+ak add cpapi --kind pi --base-url https://relay.example/v1 --key sk-... \
+  --model glm-5 --pi-api openai-completions
+```
+
+`--pi-api` is `anthropic-messages` (the default), `openai-completions` or
+`openai-responses`; `--pi-auth-header true` sends the key as
+`Authorization: Bearer` instead of `x-api-key`. The built-in thinking levels
+(`off` … `max`) are variants: `ak-cpapi high`. `ak import --from pi` copies the
+providers from `~/.pi/agent/models.json`, and `ak usage` counts pi's sessions.
+
+ak writes only `ak-*` entries in `models.json`. Everything else is preserved,
+and when ak's own entries have not changed the file is not rewritten at all.
 
 ## Pools: balance and aggregate providers
 

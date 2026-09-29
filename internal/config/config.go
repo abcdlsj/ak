@@ -37,6 +37,7 @@ type Kind string
 const (
 	KindClaude Kind = "claude"
 	KindCodex  Kind = "codex"
+	KindPi     Kind = "pi"
 )
 
 // Config is the top-level structure of providers.toml.
@@ -53,6 +54,7 @@ type Settings struct {
 	Default   string `toml:"default,omitempty"`
 	ClaudeBin string `toml:"claude_bin,omitempty"`
 	CodexBin  string `toml:"codex_bin,omitempty"`
+	PiBin     string `toml:"pi_bin,omitempty"`
 	// GatewayAddr is the listen address of the pool gateway, host:port.
 	GatewayAddr string `toml:"gateway_addr,omitempty"`
 }
@@ -93,6 +95,17 @@ type Provider struct {
 	ProviderID string `toml:"provider_id,omitempty"`
 	WireAPI    string `toml:"wire_api,omitempty"`
 	Reasoning  string `toml:"reasoning,omitempty"`
+
+	// pi-only. PiProvider names a provider pi already knows (its own config or
+	// a package); when set, ak passes --provider through and writes nothing,
+	// and base_url/key are unused. Otherwise ak registers an ak-<name> provider
+	// in pi's models.json. PiAPI is the wire API for that entry:
+	// anthropic-messages (default), openai-completions or openai-responses.
+	PiProvider string `toml:"pi_provider,omitempty"`
+	PiAPI      string `toml:"pi_api,omitempty"`
+	// PiAuthHeader sends the key as Authorization: Bearer instead of the
+	// Anthropic-style x-api-key, for relays that expect a bearer token.
+	PiAuthHeader bool `toml:"pi_auth_header,omitempty"`
 	// CodexHome is reserved: when set, the shim also exports CODEX_HOME.
 	CodexHome string `toml:"codex_home,omitempty"`
 

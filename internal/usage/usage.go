@@ -140,7 +140,11 @@ func Load(cfg *config.Config) ([]Row, error) {
 	// A cache write failure does not affect the result.
 	_ = saveCache(cache)
 	wg.Wait()
-	return attribute(buckets, &attribution{sessions: sessions, codexIDs: codexProviderNames(cfg, provider.BaseCodexProviderIDs())}), nil
+	return attribute(buckets, &attribution{
+		sessions: sessions,
+		codexIDs: codexProviderNames(cfg, provider.BaseCodexProviderIDs()),
+		piIDs:    piProviderNames(cfg),
+	}), nil
 }
 
 // Aggregate loads and summarizes everything.
@@ -157,6 +161,8 @@ type attribution struct {
 	sessions sessionIndex
 	// codexIDs maps a codex provider_id to the ak provider using it.
 	codexIDs map[string]string
+	// piIDs maps a pi provider id to the ak provider using it.
+	piIDs map[string]string
 }
 
 // attribute resolves each bucket's ak provider and folds away session detail.

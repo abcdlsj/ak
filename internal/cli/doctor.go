@@ -95,6 +95,14 @@ func runDoctor(cfg *config.Config) error {
 			fmt.Printf("✓ codex: %s\n", p)
 		}
 	}
+	if hasKind(cfg, config.KindPi) {
+		if p := lookPathOr(cfg.Settings.PiBin, "pi"); p == "" {
+			problems++
+			fmt.Println("✗ pi executable not found")
+		} else {
+			fmt.Printf("✓ pi: %s\n", p)
+		}
+	}
 
 	// 4. Generated commands must match the config on disk.
 	drifted, err := driftReport(cfg)

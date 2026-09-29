@@ -29,10 +29,22 @@ type Engine interface {
 // tests stay hermetic.
 type Context struct {
 	CodexHome string
+	// PiHome is pi's agent directory, where ak writes models.json.
+	PiHome string
 	// Gateway is the base URL of the local pool gateway, e.g.
 	// http://127.0.0.1:17877. A pool's command points at it instead of an
 	// upstream; empty means no gateway is available and pools cannot launch.
 	Gateway string
+}
+
+// SharedWriter is implemented by an engine that keeps one file covering all of
+// its providers rather than a file per provider, as pi's models.json does.
+// Sync calls it once and writes the result, comparing before writing.
+type SharedWriter interface {
+	// Shared returns the path and full content of the file, or "" when the
+	// engine has nothing to manage. content may equal the file on disk, which
+	// asks Sync not to rewrite it.
+	Shared(ctx Context, cfg *config.Config) (path string, content []byte, err error)
 }
 
 // poolKey is the placeholder the shim sends to the local gateway. The gateway
@@ -47,6 +59,8 @@ func poolTarget(p config.Provider, name, gateway string) config.Provider {
 	p.BaseURL = strings.TrimRight(gateway, "/") + "/p/" + name
 	p.KeyField = ""
 	p.CodexHome = ""
+	// A pi pool must be registered in models.json, whatever the pool named.
+	p.PiProvider = ""
 	return p
 }
 
@@ -117,7 +131,7 @@ func (p EnvPlan) Deferred() bool {
 	return false
 }
 
-var engines = []Engine{claudeEngine{}, codexEngine{}}
+var engines = []Engine{claudeEngine{}, codexEngine{}, piEngine{}}
 
 // Engines lists every supported engine.
 func Engines() []Engine { return engines }

@@ -21,7 +21,7 @@ type providerFlag struct {
 }
 
 var providerFlags = []providerFlag{
-	{"kind", "claude", "Engine: claude or codex", func(p *config.Provider, v string) { p.Kind = config.Kind(v) }},
+	{"kind", "claude", "Engine: claude, codex or pi", func(p *config.Provider, v string) { p.Kind = config.Kind(v) }},
 	{"base-url", "", "API endpoint", func(p *config.Provider, v string) { p.BaseURL = v }},
 	{"key", "", "API key, or a reference: env:NAME, cmd:..., keychain:...", func(p *config.Provider, v string) { p.SetKey(v) }},
 	{"model", "", "Primary model", func(p *config.Provider, v string) { p.Model = v }},
@@ -31,6 +31,9 @@ var providerFlags = []providerFlag{
 	{"key-field", "", "claude auth variable: auth_token or api_key", func(p *config.Provider, v string) { p.KeyField = v }},
 	{"wire-api", "", "codex wire API: responses or chat", func(p *config.Provider, v string) { p.WireAPI = v }},
 	{"reasoning", "", "codex default reasoning effort", func(p *config.Provider, v string) { p.Reasoning = v }},
+	{"pi-provider", "", "Existing pi provider id to use (skips models.json)", func(p *config.Provider, v string) { p.PiProvider = v }},
+	{"pi-api", "", "pi wire API: anthropic-messages, openai-completions, openai-responses", func(p *config.Provider, v string) { p.PiAPI = v }},
+	{"pi-auth-header", "", "Send the pi key as Authorization: Bearer (true)", func(p *config.Provider, v string) { p.PiAuthHeader = isTrueFlag(v) }},
 	{"display", "", "Name shown in listings", func(p *config.Provider, v string) { p.Display = v }},
 	{"quota", "", "Balance source: deepseek, openrouter, moonshot, siliconflow, or off", func(p *config.Provider, v string) { p.Quota = v }},
 	{"quota-cmd", "", "Shell command printing the balance as JSON or a number", func(p *config.Provider, v string) { p.QuotaCmd = v }},
@@ -127,6 +130,15 @@ func parseMemberModels(in []string) (map[string]string, error) {
 	return out, nil
 }
 
+// isTrueFlag reports whether a string flag value means true.
+func isTrueFlag(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 func newAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add [name]",
@@ -151,7 +163,7 @@ func newAddCmd() *cobra.Command {
 			if _, err := applyPoolFlags(cmd, &p, false); err != nil {
 				return err
 			}
-			if p.BaseURL == "" && !p.IsPool() {
+			if p.BaseURL == "" && !p.IsPool() && p.PiProvider == "" {
 				d := ui.NewDraft(name)
 				if err := runForm(d, cfg); err != nil {
 					return err

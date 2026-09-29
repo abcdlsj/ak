@@ -1,6 +1,7 @@
 package shim
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -61,6 +62,9 @@ type Syncer struct {
 	// rather than a hardcoded ~/.codex so tests stay hermetic instead of reaching
 	// into the real home directory.
 	CodexHome string
+	// PiHome is pi's agent directory, where models.json is written. Also a field
+	// so tests stay hermetic.
+	PiHome string
 	// Self is ak's own path, embedded in commands that resolve their key at
 	// run time. Empty means the running executable.
 	Self string
@@ -77,7 +81,7 @@ func (s *Syncer) Sync() (Report, error) {
 		}
 	}
 
-	ctx := provider.Context{CodexHome: s.codexHome(), Gateway: s.Cfg.Settings.GatewayURL()}
+	ctx := provider.Context{CodexHome: s.codexHome(), PiHome: s.piHome(), Gateway: s.Cfg.Settings.GatewayURL()}
 	// Record the artifacts that should exist this run; any other marked file
 	// in the same directories is treated as an orphan.
 	want := map[string]bool{}
@@ -121,6 +125,23 @@ func (s *Syncer) Sync() (Report, error) {
 		}
 	}
 
+	// Engines that keep one shared file (pi's models.json) write it once here.
+	for _, eng := range provider.Engines() {
+		sw, ok := eng.(provider.SharedWriter)
+		if !ok {
+			continue
+		}
+		path, content, err := sw.Shared(ctx, s.Cfg)
+		if err != nil {
+			return rep, err
+		}
+		if path == "" {
+			continue
+		}
+		want[path] = true
+		rep.Results = append(rep.Results, s.writeShared(path, content))
+	}
+
 	orphans, err := s.collectOrphans(binDir, ctx, want)
 	if err != nil {
 		return rep, err
@@ -129,6 +150,38 @@ func (s *Syncer) Sync() (Report, error) {
 
 	sort.Slice(rep.Results, func(i, j int) bool { return rep.Results[i].Path < rep.Results[j].Path })
 	return rep, nil
+}
+
+// writeShared writes an engine's shared file (pi's models.json). There is no
+// marker check: the engine only replaces its own namespaced keys, and the
+// content it returns is the whole file. An unchanged file is not rewritten.
+func (s *Syncer) writeShared(path string, content []byte) Result {
+	existing, err := os.ReadFile(path)
+	switch {
+	case err == nil && bytes.Equal(existing, content):
+		return Result{Path: path, Action: ActionUnchanged}
+	case err == nil:
+		if s.DryRun {
+			return Result{Path: path, Action: ActionUpdated}
+		}
+		if err := config.AtomicWrite(path, content, 0o644); err != nil {
+			return Result{Path: path, Action: ActionSkipped, Reason: err.Error()}
+		}
+		return Result{Path: path, Action: ActionUpdated}
+	case os.IsNotExist(err):
+		if s.DryRun {
+			return Result{Path: path, Action: ActionCreated}
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return Result{Path: path, Action: ActionSkipped, Reason: err.Error()}
+		}
+		if err := config.AtomicWrite(path, content, 0o644); err != nil {
+			return Result{Path: path, Action: ActionSkipped, Reason: err.Error()}
+		}
+		return Result{Path: path, Action: ActionCreated}
+	default:
+		return Result{Path: path, Action: ActionSkipped, Reason: err.Error()}
+	}
 }
 
 // secret resolves a plaintext key now, or defers an api_key_ref to run time
@@ -282,6 +335,22 @@ func (s *Syncer) checkRemovable(path string, e os.DirEntry) (Result, bool) {
 			Reason: fmt.Sprintf("marker version v%d is newer than the supported v%d", m.Version, MarkerVersion)}, false
 	}
 	return Result{}, true
+}
+
+// piHome returns pi's agent directory, honouring PI_CODING_AGENT_DIR the way pi
+// itself does, so ak writes models.json where the shim's pi will read it.
+func (s *Syncer) piHome() string {
+	if s.PiHome != "" {
+		return s.PiHome
+	}
+	if v := os.Getenv(provider.EnvPiHome); v != "" {
+		return config.ExpandHome(v)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".pi", "agent")
 }
 
 // codexHome returns the directory holding codex profiles.

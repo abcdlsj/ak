@@ -20,6 +20,7 @@ func newImportCmd() *cobra.Command {
 
   ak import --from claude-settings   # env block of ~/.claude/settings.json
   ak import --from codexa            # ~/.codex/profiles/*/
+  ak import --from pi                # ~/.pi/agent/models.json
   ak import --from cc-switch         # ~/.cc-switch/cc-switch.db, pick from a list`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
@@ -33,12 +34,14 @@ func newImportCmd() *cobra.Command {
 				return importCodexa(cfg)
 			case "cc-switch":
 				return importCCSwitch(cfg, all)
+			case "pi":
+				return importPi(cfg)
 			default:
-				return fmt.Errorf("--from must be claude-settings, codexa or cc-switch, got %q", from)
+				return fmt.Errorf("--from must be claude-settings, codexa, pi or cc-switch, got %q", from)
 			}
 		},
 	}
-	cmd.Flags().StringVar(&from, "from", "", "Source: claude-settings, codexa or cc-switch")
+	cmd.Flags().StringVar(&from, "from", "", "Source: claude-settings, codexa, pi or cc-switch")
 	cmd.Flags().BoolVar(&all, "all", false, "Import every provider without the selection prompt (cc-switch only)")
 	cmd.MarkFlagRequired("from")
 	return cmd

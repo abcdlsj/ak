@@ -392,6 +392,13 @@ func detailPanel(a *app, name string, width int) string {
 	case config.KindCodex:
 		field("wire api", dash(p.WireAPI))
 		field("effort", dash(p.Reasoning))
+	case config.KindPi:
+		if p.PiProvider != "" {
+			field("pi provider", p.PiProvider)
+		} else {
+			field("pi provider", provider.PiProviderID(name))
+		}
+		field("pi api", dash(p.PiAPI))
 	}
 	if vs := variantNames(a.cfg, name); len(vs) > 0 {
 		field("variants", strings.Join(vs, " "))

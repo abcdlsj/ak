@@ -98,16 +98,16 @@ func validateCommandNames(cfg *Config) error {
 
 func validateProvider(cfg *Config, name string, p Provider) error {
 	switch p.Kind {
-	case KindClaude, KindCodex:
+	case KindClaude, KindCodex, KindPi:
 	case "":
-		return fmt.Errorf("provider %q is missing kind (claude or codex)", name)
+		return fmt.Errorf("provider %q is missing kind (claude, codex or pi)", name)
 	default:
-		return fmt.Errorf("provider %q has invalid kind %q; must be claude or codex", name, p.Kind)
+		return fmt.Errorf("provider %q has invalid kind %q; must be claude, codex or pi", name, p.Kind)
 	}
 	if p.IsPool() {
 		return validatePool(cfg, name, p)
 	}
-	if p.BaseURL == "" {
+	if p.BaseURL == "" && p.PiProvider == "" {
 		return fmt.Errorf("provider %q is missing base_url", name)
 	}
 	if p.APIKey != "" && p.APIKeyRef != "" {
@@ -128,6 +128,11 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 		}
 		if r := p.Reasoning; r != "" && !validReasoning[r] {
 			return fmt.Errorf("provider %q has invalid reasoning %q", name, r)
+		}
+	}
+	if p.Kind == KindPi {
+		if err := validatePi(name, p); err != nil {
+			return err
 		}
 	}
 	if err := validateQuota(name, p.Quota); err != nil {
@@ -188,9 +193,12 @@ func validatePool(cfg *Config, name string, p Provider) error {
 }
 
 func validateVariants(name string, p Provider) error {
-	banned := claudeSubcommands
-	if p.Kind == KindCodex {
+	var banned map[string]bool
+	switch p.Kind {
+	case KindCodex:
 		banned = codexSubcommands
+	case KindClaude:
+		banned = claudeSubcommands
 	}
 	for v := range p.Variants {
 		if !nameRe.MatchString(v) {
@@ -199,12 +207,36 @@ func validateVariants(name string, p Provider) error {
 		if banned[v] {
 			return fmt.Errorf("provider %q variant %q collides with a %s subcommand, making that subcommand unreachable", name, v, p.Kind)
 		}
-		if p.Kind == KindClaude && implicitClaudeVariants[v] {
+		switch {
+		case p.Kind == KindClaude && implicitClaudeVariants[v]:
 			return fmt.Errorf("provider %q variant %q collides with a built-in model tier variant", name, v)
-		}
-		if p.Kind == KindCodex && validReasoning[v] {
+		case p.Kind == KindCodex && validReasoning[v]:
 			return fmt.Errorf("provider %q variant %q collides with a reasoning effort level", name, v)
+		case p.Kind == KindPi && validThinking[v]:
+			return fmt.Errorf("provider %q variant %q collides with a built-in thinking level", name, v)
 		}
+	}
+	return nil
+}
+
+// validatePi checks a pi provider: its wire API, and that ak-managed ones name
+// at least one model to register.
+func validatePi(name string, p Provider) error {
+	switch p.PiAPI {
+	case "", "anthropic-messages", "openai-completions", "openai-responses":
+	default:
+		return fmt.Errorf("provider %q has invalid pi_api %q; must be anthropic-messages, openai-completions or openai-responses", name, p.PiAPI)
+	}
+	if p.PiProvider != "" {
+		return nil
+	}
+	if p.Model == "" {
+		for _, v := range p.Variants {
+			if v.Model != "" {
+				return nil
+			}
+		}
+		return fmt.Errorf("provider %q is a pi provider with no model; set model (or pi_provider) so ak can register it", name)
 	}
 	return nil
 }
@@ -214,6 +246,13 @@ func validateVariants(name string, p Provider) error {
 var validReasoning = map[string]bool{
 	"minimal": true, "low": true, "medium": true, "high": true,
 	"xhigh": true, "max": true,
+}
+
+// validThinking lists pi's thinking levels. They double as the implicit
+// variants of a pi shim, each adding --thinking <level>.
+var validThinking = map[string]bool{
+	"off": true, "minimal": true, "low": true, "medium": true,
+	"high": true, "xhigh": true, "max": true,
 }
 
 // implicitClaudeVariants lists the built-in model tier variants of a claude
@@ -231,6 +270,14 @@ var (
 
 // ReasoningLevels lists codex reasoning efforts, weakest first.
 func ReasoningLevels() []string { return reasoningLevels }
+
+// ThinkingLevels lists pi thinking levels, weakest first.
+func ThinkingLevels() []string {
+	return []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+}
+
+// ValidThinking is exposed for shim rendering.
+func ValidThinking() map[string]bool { return validThinking }
 
 // ClaudeTiers lists the built-in claude model tiers.
 func ClaudeTiers() []string { return claudeTiers }

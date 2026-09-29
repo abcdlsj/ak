@@ -44,7 +44,7 @@ type Record struct {
 	Tokens      Tokens
 }
 
-var sources = []Source{claudeSource{}, codexSource{}}
+var sources = []Source{claudeSource{}, codexSource{}, piSource{}}
 
 func sourceFor(engine string) Source {
 	for _, s := range sources {

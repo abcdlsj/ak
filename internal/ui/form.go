@@ -12,20 +12,23 @@ import (
 // Draft is the editable state of a provider, shared by `ak add`, `ak edit`
 // and the TUI.
 type Draft struct {
-	Name      string
-	Kind      string
-	Display   string
-	BaseURL   string
-	Key       string // blank keeps the current key when editing
-	Model     string
-	Haiku     string
-	Sonnet    string
-	Opus      string
-	KeyField  string
-	WireAPI   string
-	Reasoning string
-	Quota     string
-	QuotaCmd  string
+	Name       string
+	Kind       string
+	Display    string
+	BaseURL    string
+	Key        string // blank keeps the current key when editing
+	Model      string
+	Haiku      string
+	Sonnet     string
+	Opus       string
+	KeyField   string
+	WireAPI    string
+	Reasoning  string
+	PiProvider string
+	PiAPI      string
+	PiAuth     bool
+	Quota      string
+	QuotaCmd   string
 	// Members is the comma-separated member list of a pool; empty makes the
 	// provider a normal upstream.
 	Members  string
@@ -48,6 +51,7 @@ func EditDraft(name string, p config.Provider) *Draft {
 		Name: name, Kind: string(p.Kind), Display: p.Display, BaseURL: p.BaseURL,
 		Model: p.Model, Haiku: p.Haiku, Sonnet: p.Sonnet, Opus: p.Opus,
 		KeyField: p.KeyField, WireAPI: p.WireAPI, Reasoning: p.Reasoning,
+		PiProvider: p.PiProvider, PiAPI: p.PiAPI, PiAuth: p.PiAuthHeader,
 		Quota: p.Quota, QuotaCmd: p.QuotaCmd,
 		Members: strings.Join(p.Members, ", "), Strategy: p.Strategy,
 		existing: true, orig: name, base: p,
@@ -77,6 +81,9 @@ func (d *Draft) Provider() config.Provider {
 	p.Opus = strings.TrimSpace(d.Opus)
 	p.Quota = strings.TrimSpace(d.Quota)
 	p.QuotaCmd = strings.TrimSpace(d.QuotaCmd)
+	p.PiProvider = strings.TrimSpace(d.PiProvider)
+	p.PiAPI = strings.TrimSpace(d.PiAPI)
+	p.PiAuthHeader = d.PiAuth
 	// Fields of the other engine are cleared, not carried along; a default
 	// value is left unset.
 	p.KeyField, p.WireAPI, p.Reasoning = "", "", ""
@@ -165,18 +172,24 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 	if !d.existing {
 		basics = append(basics,
 			huh.NewSelect[string]().Title("Engine").Value(&d.Kind).
-				Options(huh.NewOption("claude", string(config.KindClaude)), huh.NewOption("codex", string(config.KindCodex))),
+				Options(huh.NewOption("claude", string(config.KindClaude)), huh.NewOption("codex", string(config.KindCodex)), huh.NewOption("pi", string(config.KindPi))),
 		)
 	}
 	basics = append(basics,
 		huh.NewInput().Title("Pool members").Value(&d.Members).
 			Description("Comma-separated provider names; blank for a normal provider"),
+		huh.NewSelect[string]().Title("Pool strategy").Value(&d.Strategy).
+			Options(huh.NewOption("order (failover)", config.StrategyOrder), huh.NewOption("rotate", config.StrategyRotate), huh.NewOption("least-used", config.StrategyLeastUsed)),
 		huh.NewInput().Title("API endpoint").Value(&d.BaseURL).
 			Validate(func(s string) error {
-				if strings.TrimSpace(s) == "" && len(splitMembers(d.Members)) == 0 {
-					return errors.New("required unless the provider is a pool")
+				if strings.TrimSpace(s) != "" || len(splitMembers(d.Members)) > 0 {
+					return nil
 				}
-				return nil
+				// A pi provider may instead name one pi already knows.
+				if d.Kind == string(config.KindPi) {
+					return nil
+				}
+				return errors.New("required unless the provider is a pool")
 			}),
 		huh.NewInput().Title("API key").Value(&d.Key).Description(keyDesc).
 			EchoMode(huh.EchoModePassword),
@@ -194,8 +207,6 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 		huh.NewInput().Title("Haiku-tier model").Value(&d.Haiku),
 		huh.NewSelect[string]().Title("Auth variable").Value(&d.KeyField).
 			Options(huh.NewOption("ANTHROPIC_AUTH_TOKEN", "auth_token"), huh.NewOption("ANTHROPIC_API_KEY", "api_key")),
-		huh.NewSelect[string]().Title("Pool strategy").Value(&d.Strategy).
-			Options(huh.NewOption("order (failover)", config.StrategyOrder), huh.NewOption("rotate", config.StrategyRotate), huh.NewOption("least-used", config.StrategyLeastUsed)),
 	).WithHideFunc(isKind(config.KindClaude))
 
 	codex := huh.NewGroup(
@@ -205,7 +216,15 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 			Options(reasoningOptions()...),
 	).WithHideFunc(isKind(config.KindCodex))
 
-	return huh.NewForm(huh.NewGroup(basics...), claude, codex).WithShowHelp(true)
+	pi := huh.NewGroup(
+		huh.NewInput().Title("Existing pi provider").Value(&d.PiProvider).
+			Description("Use a provider pi already knows; blank registers ak-<name> from the endpoint"),
+		huh.NewSelect[string]().Title("Wire API").Value(&d.PiAPI).
+			Options(huh.NewOption("anthropic-messages", "anthropic-messages"), huh.NewOption("openai-completions", "openai-completions"), huh.NewOption("openai-responses", "openai-responses")),
+		huh.NewConfirm().Title("Send the key as Authorization: Bearer").Value(&d.PiAuth),
+	).WithHideFunc(isKind(config.KindPi))
+
+	return huh.NewForm(huh.NewGroup(basics...), claude, codex, pi).WithShowHelp(true)
 }
 
 func reasoningOptions() []huh.Option[string] {
