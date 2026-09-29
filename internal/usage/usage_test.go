@@ -264,7 +264,7 @@ func TestAttributeCodexProviderID(t *testing.T) {
 		{Date: "2026-09-01", Engine: "codex", Model: "m", RawProvider: "relay", Requests: 1},
 		{Date: "2026-09-01", Engine: "codex", Model: "m", RawProvider: "other", Requests: 1},
 		{Date: "2026-09-01", Engine: "claude", Model: "m", Session: "nope", Requests: 1},
-	}, &attribution{sessions: sessionIndex{}, codexIDs: codexProviderNames(cfg)})
+	}, &attribution{sessions: sessionIndex{}, codexIDs: codexProviderNames(cfg, nil)})
 	got := map[string]bool{}
 	for _, r := range rows {
 		got[r.Provider] = true
@@ -273,6 +273,41 @@ func TestAttributeCodexProviderID(t *testing.T) {
 		if !got[want] {
 			t.Errorf("missing provider %q in %v", want, got)
 		}
+	}
+}
+
+// A provider_id shared with the base codex config cannot be told apart in
+// the logs, so it must stay under the raw id instead of being credited to
+// the one ak provider that claims it.
+func TestCodexProviderIDSharedWithBaseConfigStaysRaw(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["mine"] = config.Provider{Kind: config.KindCodex, ProviderID: "custom"}
+	cfg.Providers["other"] = config.Provider{Kind: config.KindCodex, ProviderID: "relay"}
+	ids := codexProviderNames(cfg, map[string]bool{"custom": true})
+
+	if _, ok := ids["custom"]; ok {
+		t.Errorf("ids = %v, want the base config's id left unmapped", ids)
+	}
+	if ids["relay"] != "other" {
+		t.Errorf("ids = %v, want relay mapped to other", ids)
+	}
+
+	rows := attribute([]bucket{
+		{Date: "2026-09-01", Engine: "codex", Model: "m", RawProvider: "custom", Requests: 1},
+	}, &attribution{sessions: sessionIndex{}, codexIDs: ids})
+	if len(rows) != 1 || rows[0].Provider != "custom" {
+		t.Fatalf("rows = %+v, want the raw id custom", rows)
+	}
+}
+
+// Two ak providers claiming one id is ambiguous, and must not resolve to
+// whichever happened to be read last.
+func TestCodexProviderIDSharedByTwoProvidersStaysRaw(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["a"] = config.Provider{Kind: config.KindCodex, ProviderID: "shared"}
+	cfg.Providers["b"] = config.Provider{Kind: config.KindCodex, ProviderID: "shared"}
+	if ids := codexProviderNames(cfg, nil); len(ids) != 0 {
+		t.Errorf("ids = %v, want an ambiguous id left unmapped", ids)
 	}
 }
 

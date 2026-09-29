@@ -9,6 +9,7 @@ import (
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/shim"
 	"github.com/spf13/cobra"
 )
@@ -129,7 +130,20 @@ func runDoctor(cfg *config.Config) error {
 		}
 	}
 
-	// 7. Keys ak does not know are ignored, usually a misspelt field.
+	// 7. A codex provider_id that the base config also uses cannot be told
+	// apart in the session logs, so its usage is reported under the raw id.
+	if names := codexIDCollisions(cfg); len(names) > 0 {
+		warnings++
+		fmt.Println("! these codex providers reuse a model_provider id declared in ~/.codex/config.toml:")
+		for _, n := range names {
+			fmt.Printf("    %s\n", n)
+		}
+		fmt.Println("  Session logs record only the id, so ak cannot tell the two apart and")
+		fmt.Println("  `ak usage` reports the id itself instead of the provider. Give each")
+		fmt.Println("  provider its own id in providers.toml, then run `ak sync`.")
+	}
+
+	// 8. Keys ak does not know are ignored, usually a misspelt field.
 	if keys, err := config.UnknownKeys(); err == nil && len(keys) > 0 {
 		warnings++
 		fmt.Println("! providers.toml has keys ak ignores (misspelt?); the next save drops them:")
@@ -153,6 +167,26 @@ func runDoctor(cfg *config.Config) error {
 	}
 	fmt.Println("\nAll checks passed.")
 	return nil
+}
+
+// codexIDCollisions returns "name (provider_id \"id\")" for every ak codex
+// provider whose id the base codex config also declares.
+func codexIDCollisions(cfg *config.Config) []string {
+	base := provider.BaseCodexProviderIDs()
+	if len(base) == 0 {
+		return nil
+	}
+	var out []string
+	for _, name := range cfg.Names() {
+		p := cfg.Providers[name]
+		if p.Kind != config.KindCodex {
+			continue
+		}
+		if id := provider.CodexProviderID(name, p); base[id] {
+			out = append(out, fmt.Sprintf("%s (provider_id %q)", name, id))
+		}
+	}
+	return out
 }
 
 func hasKind(cfg *config.Config, k config.Kind) bool {

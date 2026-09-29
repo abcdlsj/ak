@@ -140,7 +140,7 @@ func Load(cfg *config.Config) ([]Row, error) {
 	// A cache write failure does not affect the result.
 	_ = saveCache(cache)
 	wg.Wait()
-	return attribute(buckets, &attribution{sessions: sessions, codexIDs: codexProviderNames(cfg)}), nil
+	return attribute(buckets, &attribution{sessions: sessions, codexIDs: codexProviderNames(cfg, provider.BaseCodexProviderIDs())}), nil
 }
 
 // Aggregate loads and summarizes everything.
@@ -209,8 +209,14 @@ func attribute(buckets []bucket, a *attribution) []Row {
 }
 
 // codexProviderNames maps a codex provider_id to the ak provider using it.
-// An id shared by several ak providers is ambiguous and left unmapped.
-func codexProviderNames(cfg *config.Config) map[string]string {
+//
+// An id is only mapped when it identifies exactly one ak provider and does
+// not also appear in baseIDs, the user's base codex config. Codex logs record
+// the id and nothing else, so a shared id cannot be told apart: mapping it
+// would credit one provider with every other provider's requests, and for a
+// base-config id with the engine's default login as well. Ids shared by
+// several ak providers are ambiguous for the same reason.
+func codexProviderNames(cfg *config.Config, baseIDs map[string]bool) map[string]string {
 	out := map[string]string{}
 	ambiguous := map[string]bool{}
 	for _, name := range cfg.Names() {
@@ -219,6 +225,9 @@ func codexProviderNames(cfg *config.Config) map[string]string {
 			continue
 		}
 		id := provider.CodexProviderID(name, p)
+		if baseIDs[id] {
+			continue
+		}
 		if _, dup := out[id]; dup {
 			ambiguous[id] = true
 		}
