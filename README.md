@@ -48,6 +48,7 @@ ak import --from cc-switch  pick which cc-switch providers to copy over
 ak sync                     regenerate commands from the config
 ak doctor                   check for anything that would break the commands
 ak usage                    token usage by provider and model
+ak quota                    provider balance and plan usage
 ak-bilicodex                run codex on that provider
 ak-bilicodex high           override reasoning effort for this run
 ak-stepfunclaude opus       use the opus-tier model for this run
@@ -116,6 +117,39 @@ but nothing is listening on the gateway.
 Restart `ak serve` after changing a pool, and keep it running while a pool
 command is in use. Normal providers never touch the gateway: they stay direct,
 with their own key in their own command.
+
+## Balance and quota
+
+`ak quota` asks each provider's balance API what is left. The source is
+detected from the endpoint host, so a DeepSeek, OpenRouter, Moonshot or
+SiliconFlow provider works with nothing extra:
+
+```sh
+ak quota                 # every provider
+ak quota deepseek        # one
+ak quota --json          # machine-readable
+```
+
+| Source | Endpoint host |
+| --- | --- |
+| `deepseek` | `api.deepseek.com` |
+| `openrouter` | `openrouter.ai` |
+| `moonshot` | `api.moonshot.cn`, `api.moonshot.ai` |
+| `siliconflow` | `api.siliconflow.cn` |
+
+For anything else, name a source with `--quota`, turn the query off with
+`--quota off`, or point `quota_cmd` at a script. The script prints the answer as
+JSON (a balance, or plan windows: `{"windows":[{"name":"5h","used":40}]}`) or a
+bare number, and is asked with `AK_QUOTA_KEY` and `AK_QUOTA_BASE_URL` in the
+environment:
+
+```toml
+[providers.myrelay]
+quota_cmd = "my-balance-check --json"
+```
+
+Queries are opt-in per run: ak never calls a balance API on its own. A pool is
+asked through its members.
 
 ## Details worth knowing
 

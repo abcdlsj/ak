@@ -32,6 +32,8 @@ var providerFlags = []providerFlag{
 	{"wire-api", "", "codex wire API: responses or chat", func(p *config.Provider, v string) { p.WireAPI = v }},
 	{"reasoning", "", "codex default reasoning effort", func(p *config.Provider, v string) { p.Reasoning = v }},
 	{"display", "", "Name shown in listings", func(p *config.Provider, v string) { p.Display = v }},
+	{"quota", "", "Balance source: deepseek, openrouter, moonshot, siliconflow, or off", func(p *config.Provider, v string) { p.Quota = v }},
+	{"quota-cmd", "", "Shell command printing the balance as JSON or a number", func(p *config.Provider, v string) { p.QuotaCmd = v }},
 }
 
 func addProviderFlags(cmd *cobra.Command, withDefaults bool) {

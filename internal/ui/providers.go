@@ -374,6 +374,16 @@ func detailPanel(a *app, name string, width int) string {
 		field("key", keySummary(p))
 	}
 	field("model", dash(p.Model))
+	if p.Quota != "" || p.QuotaCmd != "" {
+		q := p.Quota
+		if q == "" {
+			q = "auto"
+		}
+		if p.QuotaCmd != "" {
+			q = "script"
+		}
+		field("balance", q)
+	}
 	switch p.Kind {
 	case config.KindClaude:
 		if p.Opus != "" || p.Sonnet != "" || p.Haiku != "" {

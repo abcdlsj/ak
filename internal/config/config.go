@@ -111,6 +111,14 @@ type Provider struct {
 	// Env holds arbitrary extra environment variables. Merged last, it can
 	// override derived keys.
 	Env map[string]string `toml:"env,omitempty"`
+	// Quota names the balance source to query: a built-in id (deepseek,
+	// openrouter, moonshot, siliconflow) or "off" to disable. Empty
+	// auto-detects from the endpoint host.
+	Quota string `toml:"quota,omitempty"`
+	// QuotaCmd is a shell command that prints the balance as JSON (or a plain
+	// number). It is asked with AK_QUOTA_KEY and AK_QUOTA_BASE_URL set, and
+	// takes precedence over Quota, for vendors ak has no built-in for.
+	QuotaCmd string `toml:"quota_cmd,omitempty"`
 	// Pricing overrides the model pricing that models.dev cannot resolve.
 	Pricing *Pricing `toml:"pricing,omitempty"`
 	// Variants are the positional-argument variants of a command.

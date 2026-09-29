@@ -64,3 +64,19 @@ func TestDefaultGatewayAddr(t *testing.T) {
 		t.Errorf("GatewayURL = %q", got)
 	}
 }
+
+func TestValidateQuota(t *testing.T) {
+	cfg := Default()
+	cfg.Providers["a"] = Provider{Kind: KindClaude, BaseURL: "https://a.example", APIKey: "k", Quota: "deepseek"}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("a known quota id was rejected: %v", err)
+	}
+	cfg.Providers["a"] = Provider{Kind: KindClaude, BaseURL: "https://a.example", APIKey: "k", Quota: "off"}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("off was rejected: %v", err)
+	}
+	cfg.Providers["a"] = Provider{Kind: KindClaude, BaseURL: "https://a.example", APIKey: "k", Quota: "not a source"}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("a malformed quota id was accepted")
+	}
+}

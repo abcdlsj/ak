@@ -16,6 +16,7 @@ var Reserved = map[string]bool{
 	"import": true, "default": true, "env": true, "usage": true,
 	"completion": true, "help": true, "version": true, "run": true,
 	"prune-codexa": true, "rename": true, "mv": true, "serve": true,
+	"quota": true,
 }
 
 // claudeSubcommands and codexSubcommands are the banned variant names.
@@ -129,7 +130,24 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 			return fmt.Errorf("provider %q has invalid reasoning %q", name, r)
 		}
 	}
+	if err := validateQuota(name, p.Quota); err != nil {
+		return err
+	}
 	return validateVariants(name, p)
+}
+
+// quotaRe constrains a built-in quota source id; unknown ids are caught with a
+// clear message when the source is resolved, not here.
+var quotaRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+func validateQuota(name, q string) error {
+	if q == "" || q == "off" {
+		return nil
+	}
+	if !quotaRe.MatchString(q) {
+		return fmt.Errorf("provider %q has invalid quota %q; use a source id or \"off\"", name, q)
+	}
+	return nil
 }
 
 // validatePool checks a routing pool: its members exist, share its kind, are

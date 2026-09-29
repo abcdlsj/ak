@@ -24,6 +24,8 @@ type Draft struct {
 	KeyField  string
 	WireAPI   string
 	Reasoning string
+	Quota     string
+	QuotaCmd  string
 	// Members is the comma-separated member list of a pool; empty makes the
 	// provider a normal upstream.
 	Members  string
@@ -46,6 +48,7 @@ func EditDraft(name string, p config.Provider) *Draft {
 		Name: name, Kind: string(p.Kind), Display: p.Display, BaseURL: p.BaseURL,
 		Model: p.Model, Haiku: p.Haiku, Sonnet: p.Sonnet, Opus: p.Opus,
 		KeyField: p.KeyField, WireAPI: p.WireAPI, Reasoning: p.Reasoning,
+		Quota: p.Quota, QuotaCmd: p.QuotaCmd,
 		Members: strings.Join(p.Members, ", "), Strategy: p.Strategy,
 		existing: true, orig: name, base: p,
 	}
@@ -72,6 +75,8 @@ func (d *Draft) Provider() config.Provider {
 	p.Haiku = strings.TrimSpace(d.Haiku)
 	p.Sonnet = strings.TrimSpace(d.Sonnet)
 	p.Opus = strings.TrimSpace(d.Opus)
+	p.Quota = strings.TrimSpace(d.Quota)
+	p.QuotaCmd = strings.TrimSpace(d.QuotaCmd)
 	// Fields of the other engine are cleared, not carried along; a default
 	// value is left unset.
 	p.KeyField, p.WireAPI, p.Reasoning = "", "", ""
@@ -177,6 +182,10 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 			EchoMode(huh.EchoModePassword),
 		huh.NewInput().Title("Model").Value(&d.Model),
 		huh.NewInput().Title("Display name").Value(&d.Display),
+		huh.NewInput().Title("Balance source").Value(&d.Quota).
+			Description("deepseek, openrouter, moonshot, siliconflow, or off; blank auto-detects"),
+		huh.NewInput().Title("Balance command").Value(&d.QuotaCmd).
+			Description("Optional shell command printing the balance as JSON or a number"),
 	)
 
 	claude := huh.NewGroup(
