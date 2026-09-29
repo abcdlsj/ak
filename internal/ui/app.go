@@ -11,6 +11,7 @@ import (
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/abcdlsj/ak/internal/gateway"
 	"github.com/abcdlsj/ak/internal/shim"
 	"github.com/abcdlsj/ak/internal/usage"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -96,6 +97,11 @@ type app struct {
 	spinner  spinner.Model
 	flash    flash
 
+	// poolStats is the local gateway's flow view, refreshed while the manage
+	// page shows a pool.
+	poolStats    map[string]gateway.PoolStats
+	poolStatsErr error
+
 	width, height int
 	selection     Selection
 	quitting      bool
@@ -116,6 +122,11 @@ type (
 	statusesMsg  map[string]core.Status
 	flashMsg     flash
 	flashTickMsg struct{}
+	poolStatsMsg struct {
+		stats gateway.Stats
+		err   error
+	}
+	poolStatsTickMsg struct{}
 )
 
 const flashTTL = 4 * time.Second
@@ -135,7 +146,7 @@ func newApp(cfg *config.Config) *app {
 }
 
 func (a *app) Init() tea.Cmd {
-	return tea.Batch(a.loadUsage(), a.loadStatuses(), a.spinner.Tick)
+	return tea.Batch(a.loadUsage(), a.loadStatuses(), a.spinner.Tick, a.poolStatsTick())
 }
 
 // loadUsage rescans the logs; after the first scan only new bytes are read.
@@ -148,6 +159,34 @@ func (a *app) loadUsage() tea.Cmd {
 	return func() tea.Msg {
 		rows, err := usage.Load(cfg)
 		return usageLoadedMsg{rows, err}
+	}
+}
+
+// hasPools reports whether any provider is a pool.
+func (a *app) hasPools() bool {
+	for _, p := range a.cfg.Providers {
+		if p.IsPool() {
+			return true
+		}
+	}
+	return false
+}
+
+// poolStatsWanted is whether the flow view should be kept fresh: a pool exists
+// and the manage page is showing.
+func (a *app) poolStatsWanted() bool { return a.hasPools() && a.active == pageManage }
+
+// poolStatsTick keeps a poll running; each tick reloads only when wanted.
+func (a *app) poolStatsTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return poolStatsTickMsg{} })
+}
+
+// loadPoolStats reads the gateway's flow view.
+func (a *app) loadPoolStats() tea.Cmd {
+	base := a.cfg.Settings.GatewayURL()
+	return func() tea.Msg {
+		st, err := gateway.FetchStats(base)
+		return poolStatsMsg{stats: st, err: err}
 	}
 }
 
@@ -187,6 +226,15 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusesMsg:
 		a.statuses = msg
 		return a, nil
+	case poolStatsMsg:
+		a.poolStats, a.poolStatsErr = msg.stats.Pools, msg.err
+		return a, nil
+	case poolStatsTickMsg:
+		cmds := []tea.Cmd{a.poolStatsTick()}
+		if a.poolStatsWanted() {
+			cmds = append(cmds, a.loadPoolStats())
+		}
+		return a, tea.Batch(cmds...)
 	case flashMsg:
 		a.flash = flash(msg)
 		return a, tea.Tick(flashTTL, func(time.Time) tea.Msg { return flashTickMsg{} })
@@ -221,6 +269,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case "m":
 			a.active = pageManage
+			if a.hasPools() {
+				return a, a.loadPoolStats()
+			}
 			return a, nil
 		case "u":
 			a.active = pageUsage

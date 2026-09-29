@@ -144,6 +144,11 @@ Anthropic endpoint as a `claude` provider and its OpenAI endpoint as a `codex`
 provider, then pool each kind separately. `ak doctor` warns when a pool exists
 but nothing is listening on the gateway.
 
+With the gateway running, the TUI's Manage page shows a pool as it works: a
+sparkline per member of requests per minute over the last hour, scaled together
+so a busier member visibly outranks a quieter one, with each member's totals and
+any cooldown. The gateway answers `GET /stats` with the same data.
+
 Restart `ak serve` after changing a pool, and keep it running while a pool
 command is in use. Normal providers never touch the gateway: they stay direct,
 with their own key in their own command.

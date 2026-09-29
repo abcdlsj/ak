@@ -69,6 +69,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "ok\n")
 	})
+	mux.HandleFunc("/stats", s.handleStats)
 	mux.HandleFunc("/p/", s.handlePool)
 	return mux
 }
@@ -308,11 +309,14 @@ func copyFlush(w http.ResponseWriter, r io.Reader) {
 
 // state is the gateway's in-memory view of member health and use.
 type state struct {
-	mu    sync.Mutex
-	cool  map[string]time.Time // pool\x00member -> cooling until
-	fails map[string]int       // pool\x00member -> consecutive failures
-	turns map[string]int       // pool -> rotate counter
-	used  map[string]tokenUse  // pool\x00member -> decayed served count
+	mu     sync.Mutex
+	cool   map[string]time.Time // pool\x00member -> cooling until
+	fails  map[string]int       // pool\x00member -> consecutive failures
+	turns  map[string]int       // pool -> rotate counter
+	used   map[string]tokenUse  // pool\x00member -> decayed served count
+	series map[string]*minuteSeries
+	okN    map[string]int64 // pool\x00member -> requests served
+	failN  map[string]int64 // pool\x00member -> failed attempts
 }
 
 type tokenUse struct {
@@ -322,10 +326,13 @@ type tokenUse struct {
 
 func newState() *state {
 	return &state{
-		cool:  map[string]time.Time{},
-		fails: map[string]int{},
-		turns: map[string]int{},
-		used:  map[string]tokenUse{},
+		cool:   map[string]time.Time{},
+		fails:  map[string]int{},
+		turns:  map[string]int{},
+		used:   map[string]tokenUse{},
+		series: map[string]*minuteSeries{},
+		okN:    map[string]int64{},
+		failN:  map[string]int64{},
 	}
 }
 
@@ -378,6 +385,7 @@ func (s *state) succeeded(pool, member string) {
 	delete(s.fails, k)
 	u := s.used[k]
 	s.used[k] = tokenUse{n: u.now(now) + 1, at: now}
+	s.record(pool, member, true)
 }
 
 func (s *state) failed(pool, member string) {
@@ -385,6 +393,7 @@ func (s *state) failed(pool, member string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.fails[k]++
+	s.record(pool, member, false)
 	d := baseCooldown << min(s.fails[k]-1, 10)
 	if d > maxCooldown {
 		d = maxCooldown

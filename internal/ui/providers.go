@@ -407,6 +407,12 @@ func detailPanel(a *app, name string, width int) string {
 	b.WriteString("\n")
 	b.WriteString(usageSummary(a, name))
 
+	if p.IsPool() {
+		if flow := poolFlow(a, name, inner); flow != "" {
+			b.WriteString("\n" + flow + "\n")
+		}
+	}
+
 	if st, ok := a.statuses[name]; ok && !st.OK() {
 		b.WriteString("\n")
 		for _, pr := range st.Problems() {
