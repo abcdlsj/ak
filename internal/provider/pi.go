@@ -110,7 +110,7 @@ func (piEngine) Shared(ctx Context, cfg *config.Config) (string, []byte, error) 
 	if ctx.PiHome == "" {
 		return "", nil, nil
 	}
-	return PiModelsJSON(ctx.PiHome, cfg)
+	return PiModelsJSON(ctx.PiHome, cfg, ctx.Gateway)
 }
 
 // PiModelsJSON merges ak's pi providers into <agentDir>/models.json. Existing
@@ -118,7 +118,7 @@ func (piEngine) Shared(ctx Context, cfg *config.Config) (string, []byte, error) 
 // When the file is absent and there is nothing to add it returns "" so nothing
 // is written. When ak's entries are unchanged it returns the file as it is, so
 // the user's formatting is never disturbed without cause.
-func PiModelsJSON(agentDir string, cfg *config.Config) (string, []byte, error) {
+func PiModelsJSON(agentDir string, cfg *config.Config, gateway string) (string, []byte, error) {
 	path := filepath.Join(agentDir, "models.json")
 	orig, err := os.ReadFile(path)
 	exists := err == nil
@@ -160,7 +160,7 @@ func PiModelsJSON(agentDir string, cfg *config.Config) (string, []byte, error) {
 		if p.PiProvider != "" && !p.IsPool() {
 			continue
 		}
-		entry := piProviderEntry(name, p)
+		entry := piProviderEntry(name, p, gateway)
 		providers[PiProviderID(name)] = entry
 		b, _ := json.Marshal(entry)
 		after[PiProviderID(name)] = string(b)
@@ -181,10 +181,15 @@ func PiModelsJSON(agentDir string, cfg *config.Config) (string, []byte, error) {
 	return path, append(out, '\n'), nil
 }
 
-// piProviderEntry is one models.json provider entry for an ak provider.
-func piProviderEntry(name string, p config.Provider) map[string]any {
+// piProviderEntry is one models.json provider entry for an ak provider. A pool
+// has no upstream of its own, so it points at ak's gateway.
+func piProviderEntry(name string, p config.Provider, gateway string) map[string]any {
+	baseURL := p.BaseURL
+	if p.IsPool() {
+		baseURL = strings.TrimRight(gateway, "/") + "/p/" + name
+	}
 	e := map[string]any{
-		"baseUrl": p.BaseURL,
+		"baseUrl": baseURL,
 		"apiKey":  "$" + EnvKey(name),
 	}
 	if p.Display != "" {

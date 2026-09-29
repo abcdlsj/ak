@@ -8,6 +8,29 @@ func piCfg(p Provider) *Config {
 	return cfg
 }
 
+func TestValidatePiPool(t *testing.T) {
+	cfg := Default()
+	cfg.Providers["a"] = Provider{Kind: KindPi, BaseURL: "https://a", Model: "m"}
+	cfg.Providers["b"] = Provider{Kind: KindPi, BaseURL: "https://b", Model: "m"}
+	cfg.Providers["pool"] = Provider{Kind: KindPi, Members: []string{"a", "b"}, Model: "logical"}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("a valid pi pool was rejected: %v", err)
+	}
+
+	// A pi pool with no model has nothing for pi to select.
+	cfg.Providers["pool"] = Provider{Kind: KindPi, Members: []string{"a", "b"}}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("a pi pool without a model was accepted")
+	}
+
+	// A member that uses an existing pi provider has no endpoint to forward to.
+	cfg.Providers["pin"] = Provider{Kind: KindPi, PiProvider: "x", Model: "m"}
+	cfg.Providers["pool"] = Provider{Kind: KindPi, Members: []string{"pin"}, Model: "logical"}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("a pi pool with an endpoint-less member was accepted")
+	}
+}
+
 func TestValidatePi(t *testing.T) {
 	ok := []Provider{
 		{Kind: KindPi, BaseURL: "https://relay.example", Model: "m1"},

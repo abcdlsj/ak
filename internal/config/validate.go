@@ -183,11 +183,18 @@ func validatePool(cfg *Config, name string, p Provider) error {
 		if mp.Kind != p.Kind {
 			return fmt.Errorf("pool %q is %s but member %q is %s; a pool's members must share its kind", name, p.Kind, m, mp.Kind)
 		}
+		if mp.BaseURL == "" {
+			return fmt.Errorf("pool %q names %q, which has no base_url (a pi provider that uses pi_provider); a pool member needs an endpoint", name, m)
+		}
 	}
 	for m := range p.MemberModels {
 		if !seen[m] {
 			return fmt.Errorf("pool %q maps a model for %q, which is not one of its members", name, m)
 		}
+	}
+	// A pi pool is registered in models.json and needs a model for pi to pick.
+	if p.Kind == KindPi && p.Model == "" {
+		return fmt.Errorf("pi pool %q needs a model; set model to the name to request", name)
 	}
 	return validateVariants(name, p)
 }

@@ -89,7 +89,7 @@ func TestPiModelsJSONMerge(t *testing.T) {
 	cfg.Providers["pinned"] = config.Provider{Kind: config.KindPi, PiProvider: "commandcode", Model: "m"}
 	cfg.Providers["claude"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://a"}
 
-	outPath, content, err := PiModelsJSON(dir, cfg)
+	outPath, content, err := PiModelsJSON(dir, cfg, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,14 +135,14 @@ func TestPiModelsJSONIdempotent(t *testing.T) {
 	cfg := config.Default()
 	cfg.Providers["relay"] = config.Provider{Kind: config.KindPi, BaseURL: "https://relay.example", Model: "m1"}
 
-	_, first, err := PiModelsJSON(dir, cfg)
+	_, first, err := PiModelsJSON(dir, cfg, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "models.json"), first, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, second, err := PiModelsJSON(dir, cfg)
+	_, second, err := PiModelsJSON(dir, cfg, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestPiModelsJSONUnchangedLeavesUserBytes(t *testing.T) {
 	cfg := config.Default()
 	cfg.Providers["relay"] = config.Provider{Kind: config.KindPi, BaseURL: "https://relay.example", Model: "m1"}
 
-	_, content, err := PiModelsJSON(dir, cfg)
+	_, content, err := PiModelsJSON(dir, cfg, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestPiModelsJSONReclaimsRemovedProvider(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
 	cfg.Providers["relay"] = config.Provider{Kind: config.KindPi, BaseURL: "https://relay.example", Model: "m1"}
-	_, content, err := PiModelsJSON(dir, cfg)
+	_, content, err := PiModelsJSON(dir, cfg, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestPiModelsJSONReclaimsRemovedProvider(t *testing.T) {
 	}
 
 	// The provider is gone: its entry must be reclaimed.
-	_, content, err = PiModelsJSON(dir, config.Default())
+	_, content, err = PiModelsJSON(dir, config.Default(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,14 +200,35 @@ func TestPiModelsJSONRefusesBadJSON(t *testing.T) {
 	}
 	cfg := config.Default()
 	cfg.Providers["relay"] = config.Provider{Kind: config.KindPi, BaseURL: "https://x", Model: "m"}
-	if _, _, err := PiModelsJSON(dir, cfg); err == nil {
+	if _, _, err := PiModelsJSON(dir, cfg, ""); err == nil {
 		t.Fatal("a malformed models.json was overwritten")
+	}
+}
+
+func TestPiModelsJSONPoolPointsAtGateway(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Providers["pool"] = config.Provider{Kind: config.KindPi, Members: []string{"a", "b"}, Model: "logical"}
+	_, content, err := PiModelsJSON(dir, cfg, testGateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Providers map[string]struct {
+			BaseURL string `json:"baseUrl"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(content, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.Providers["ak-pool"].BaseURL; got != testGateway+"/p/pool" {
+		t.Errorf("pool baseUrl = %q, want the gateway", got)
 	}
 }
 
 func TestPiModelsJSONMissingAndEmpty(t *testing.T) {
 	dir := t.TempDir()
-	path, content, err := PiModelsJSON(dir, config.Default())
+	path, content, err := PiModelsJSON(dir, config.Default(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
