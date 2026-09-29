@@ -117,8 +117,11 @@ Claude writes a message once per content block, Codex repeats token events,
 and resumed or forked sessions copy history into new files. Days split at
 local midnight. Claude's logs do not record which provider a session used, so
 `ak hook install` adds a `SessionStart` hook that records the mapping; Codex
-sessions are attributed by their `provider_id`. Cost comes from models.dev;
-models it does not know are reported as unpriced rather than billed as zero.
+sessions are attributed by their `provider_id`. An id that the base
+`~/.codex/config.toml` also declares is left alone and reported under the id
+itself, because a log holding nothing but that id cannot say which provider
+ran it; `ak doctor` names the collision. Cost comes from models.dev; models it
+does not know are reported as unpriced rather than billed as zero.
 
 **cc-switch import is selective.** `ak import --from cc-switch` reads
 `~/.cc-switch/cc-switch.db` read-only, prints what it found, then opens a picker
