@@ -4,13 +4,20 @@
 package secrets
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
 )
+
+// cmdTimeout bounds a cmd: reference. A script that hangs would otherwise hang
+// every request that resolves it. A variable so tests can shrink it.
+var cmdTimeout = 10 * time.Second
 
 // Resolver turns a configured secret declaration into plaintext.
 type Resolver interface {
@@ -44,7 +51,9 @@ func (plain) Resolve(p config.Provider) (string, error) {
 		}
 		return v, nil
 	case "cmd":
-		out, err := exec.Command("sh", "-c", rest).Output()
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "sh", "-c", rest).Output()
 		if err != nil {
 			return "", fmt.Errorf("run %q: %w", rest, err)
 		}
@@ -69,4 +78,58 @@ func resolveKeychain(spec string) (string, error) {
 		return "", fmt.Errorf("read %s/%s from the Keychain: %w", service, account, err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// Cache wraps a resolver and remembers what it returned, so a long-lived
+// caller such as the pool gateway does not run a cmd: reference on every
+// request. A success is kept for keyTTL, a failure for keyErrTTL.
+type Cache struct {
+	inner Resolver
+	mu    sync.Mutex
+	m     map[string]cachedKey
+}
+
+const (
+	keyTTL    = 5 * time.Minute
+	keyErrTTL = 30 * time.Second
+)
+
+type cachedKey struct {
+	key string
+	err error
+	at  time.Time
+}
+
+// Cached wraps a resolver with a cache.
+func Cached(inner Resolver) *Cache {
+	return &Cache{inner: inner, m: map[string]cachedKey{}}
+}
+
+// Resolve returns the cached secret, or resolves and remembers it.
+func (c *Cache) Resolve(p config.Provider) (string, error) {
+	id := p.APIKey
+	if id == "" {
+		id = p.APIKeyRef
+	}
+	if id == "" {
+		return "", nil
+	}
+	c.mu.Lock()
+	if e, ok := c.m[id]; ok {
+		ttl := keyTTL
+		if e.err != nil {
+			ttl = keyErrTTL
+		}
+		if time.Since(e.at) < ttl {
+			c.mu.Unlock()
+			return e.key, e.err
+		}
+	}
+	c.mu.Unlock()
+
+	key, err := c.inner.Resolve(p)
+	c.mu.Lock()
+	c.m[id] = cachedKey{key: key, err: err, at: time.Now()}
+	c.mu.Unlock()
+	return key, err
 }

@@ -150,20 +150,26 @@ session header, or Codex's `prompt_cache_key`) so the vendor's prompt cache is
 read again rather than paid for afresh; load still spreads across conversations.
 Requests, their bodies and their streams are bounded: a body over 128 MB or
 unread for 60 seconds, a stream stalled for 2 minutes, each ends rather than
-hangs. Pools do not translate between protocols: every member must speak what
-the engine speaks. To aggregate one relay for both engines, register its
-Anthropic endpoint as a `claude` provider and its OpenAI endpoint as a `codex`
-provider, then pool each kind separately. `ak doctor` warns when a pool exists
-but nothing is listening on the gateway.
+hangs. A member's `max_concurrency` queues extra requests instead of sending
+them at once; `settings.max_inflight` (256 by default) refuses over that many
+with 503 rather than queueing. Pools do not translate between protocols: every
+member must speak what the engine speaks. To aggregate one relay for both
+engines, register its Anthropic endpoint as a `claude` provider and its OpenAI
+endpoint as a `codex` provider, then pool each kind separately. `ak doctor` warns
+when a pool exists but nothing is listening on the gateway.
 
 With the gateway running, the TUI's Manage page shows a pool as it works: a
 sparkline per member of requests per minute over the last hour, scaled together
 so a busier member visibly outranks a quieter one, with each member's totals and
-any cooldown. The gateway answers `GET /stats` with the same data.
+any cooldown. The gateway answers `GET /stats` with the same data, and
+`GET /healthz` with a cheaper liveness plus each member's cooling state.
 
-Restart `ak serve` after changing a pool, and keep it running while a pool
-command is in use. Normal providers never touch the gateway: they stay direct,
-with their own key in their own command.
+The affinity table is kept on disk, so a restart keeps every conversation on the
+member the vendor still has it cached at. `ak serve` reloads `providers.toml`
+when it changes (or on SIGHUP), so an edited or renamed pool takes effect
+without a restart; `settings.gateway_addr` still needs one. Keep it running
+while a pool command is in use. Normal providers never touch the gateway: they
+stay direct, with their own key in their own command.
 
 ## Balance and quota
 

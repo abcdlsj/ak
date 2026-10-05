@@ -21,6 +21,11 @@ const Version = 1
 // is not set. It is loopback-only: pool shims point their engine at it.
 const DefaultGatewayAddr = "127.0.0.1:17877"
 
+// DefaultMaxInflight is how many requests the gateway handles at once when
+// settings.max_inflight is not set. It is generous: the point is to fail one
+// caller fast rather than let a runaway one starve the machine.
+const DefaultMaxInflight = 256
+
 // Pool strategies decide which member a request goes to.
 const (
 	// StrategyOrder tries members in order, failing over to the next.
@@ -57,6 +62,9 @@ type Settings struct {
 	PiBin     string `toml:"pi_bin,omitempty"`
 	// GatewayAddr is the listen address of the pool gateway, host:port.
 	GatewayAddr string `toml:"gateway_addr,omitempty"`
+	// MaxInflight bounds how many requests the gateway handles at once; over
+	// it a request is refused with 503 rather than queued. 0 means no bound.
+	MaxInflight int `toml:"max_inflight"`
 }
 
 // GatewayURL returns the loopback base URL of the pool gateway, without a
@@ -120,6 +128,9 @@ type Provider struct {
 	// Strategy is how a request picks a member: order, rotate or least-used.
 	// Empty means order.
 	Strategy string `toml:"strategy,omitempty"`
+	// MaxConcurrency bounds how many requests the pool gateway sends to this
+	// provider at once; over it a request waits its turn. 0 means no bound.
+	MaxConcurrency int `toml:"max_concurrency,omitempty"`
 
 	// Env holds arbitrary extra environment variables. Merged last, it can
 	// override derived keys.
@@ -213,7 +224,7 @@ func DataDir() (string, error) {
 func Default() *Config {
 	return &Config{
 		Version:   Version,
-		Settings:  Settings{BinDir: "~/.local/bin", Prefix: "ak-", GatewayAddr: DefaultGatewayAddr},
+		Settings:  Settings{BinDir: "~/.local/bin", Prefix: "ak-", GatewayAddr: DefaultGatewayAddr, MaxInflight: DefaultMaxInflight},
 		Providers: map[string]Provider{},
 	}
 }

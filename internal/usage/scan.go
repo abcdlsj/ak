@@ -52,11 +52,14 @@ func (b *bucket) key() bucketKey { return bucketKey{b.Date, b.Model, b.RawProvid
 // fileState is one file's cached parse result plus what is needed to resume
 // parsing from Offset when the file grows.
 type fileState struct {
-	Engine  string
-	Size    int64
-	Mtime   time.Time
-	Offset  int64 // end of the last complete line parsed
-	Head    uint64
+	Engine string
+	Size   int64
+	Mtime  time.Time
+	Offset int64 // end of the last complete line parsed
+	Head   uint64
+	// Tail fingerprints the bytes just before Offset, so a file rewritten in
+	// place (same size, same head) is not mistaken for an appended one.
+	Tail    uint64
 	Buckets []bucket
 	// Keys are the dedupe keys this file owns.
 	Keys []uint64
@@ -109,7 +112,7 @@ func scan(files []logFile, cache *Cache) []bucket {
 		}
 		reads[i] = make(chan fileRead, 1)
 		if st != nil {
-			prevs[i] = &resumePoint{st.Engine, st.Size, st.Offset, st.Head, st.State}
+			prevs[i] = &resumePoint{Engine: st.Engine, Size: st.Size, Offset: st.Offset, Head: st.Head, Tail: st.Tail, State: st.State}
 		}
 	}
 	// Reading dominates, so the pool is twice the cores to keep the disk and
@@ -214,6 +217,7 @@ type resumePoint struct {
 	Size   int64
 	Offset int64
 	Head   uint64
+	Tail   uint64
 	State  []byte
 }
 
@@ -221,6 +225,7 @@ type resumePoint struct {
 type fileRead struct {
 	resume bool // appended to what was parsed; otherwise parsed from the start
 	head   uint64
+	tail   uint64
 	recs   []Record
 	offset int64 // end of the last complete line
 	state  []byte
@@ -232,7 +237,7 @@ func readFile(f logFile, prev *resumePoint) fileRead {
 	r := fileRead{head: headHash(f.path)}
 	var state []byte
 	if prev != nil && prev.Engine == f.src.Engine() && f.size >= prev.Size && f.size >= prev.Offset &&
-		prev.Head == r.head {
+		prev.Head == r.head && (prev.Offset <= headLen || rangeHash(f.path, prev.Offset) == prev.Tail) {
 		r.resume, r.offset, state = true, prev.Offset, prev.State
 	}
 	fh, err := os.Open(f.path)
@@ -272,6 +277,7 @@ func readFile(f logFile, prev *resumePoint) fileRead {
 		}
 	}
 	r.state = lp.State()
+	r.tail = rangeHash(f.path, r.offset)
 	return r
 }
 
@@ -298,6 +304,7 @@ func (s *scanner) apply(f logFile, r fileRead) *fileState {
 		a.add(rec)
 	}
 	st.Offset, st.State = r.offset, r.state
+	st.Tail = r.tail
 	a.flush()
 	for _, k := range st.Keys {
 		s.owners[k] = f.path
@@ -420,6 +427,33 @@ func headHash(path string) uint64 {
 	n, _ := io.ReadFull(f, buf)
 	h := fnv.New64a()
 	h.Write(buf[:n])
+	return h.Sum64()
+}
+
+// rangeHash fingerprints up to headLen bytes ending just before end. It is
+// compared against the stored Tail when a file seems to have only grown.
+func rangeHash(path string, end int64) uint64 {
+	if end <= 0 {
+		return 0
+	}
+	start := end - headLen
+	if start < 0 {
+		start = 0
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return 0
+	}
+	buf := make([]byte, end-start)
+	if _, err := io.ReadFull(f, buf); err != nil && err != io.ErrUnexpectedEOF {
+		return 0
+	}
+	h := fnv.New64a()
+	h.Write(buf)
 	return h.Sum64()
 }
 

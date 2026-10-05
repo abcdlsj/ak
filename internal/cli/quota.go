@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"text/tabwriter"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -37,16 +38,27 @@ pool is asked through its members.`,
 				return nil
 			}
 			resolver := secrets.Default()
-			results := make([]quota.Quota, 0, len(names))
-			for _, name := range names {
-				p := cfg.Providers[name]
-				key, err := resolver.Resolve(p)
-				if err != nil {
-					results = append(results, quota.Quota{Provider: name, Error: err.Error()})
-					continue
-				}
-				results = append(results, quota.Query(cmd.Context(), name, p, key))
+			results := make([]quota.Quota, len(names))
+			// Ask in parallel: one slow vendor should not hold up the rest.
+			const parallel = 8
+			sem := make(chan struct{}, parallel)
+			var wg sync.WaitGroup
+			for i, name := range names {
+				wg.Add(1)
+				sem <- struct{}{}
+				go func(i int, name string) {
+					defer wg.Done()
+					defer func() { <-sem }()
+					p := cfg.Providers[name]
+					key, err := resolver.Resolve(p)
+					if err != nil {
+						results[i] = quota.Quota{Provider: name, Error: err.Error()}
+						return
+					}
+					results[i] = quota.Query(cmd.Context(), name, p, key)
+				}(i, name)
 			}
+			wg.Wait()
 			if asJSON {
 				return json.NewEncoder(os.Stdout).Encode(results)
 			}

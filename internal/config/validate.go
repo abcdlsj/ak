@@ -52,6 +52,9 @@ func Validate(cfg *Config) error {
 	if cfg.Settings.Prefix == "" {
 		return fmt.Errorf("settings.prefix must not be empty")
 	}
+	if cfg.Settings.MaxInflight < 0 {
+		return fmt.Errorf("settings.max_inflight must not be negative")
+	}
 	for _, name := range cfg.Names() {
 		if err := ValidateName(name); err != nil {
 			return err
@@ -97,6 +100,9 @@ func validateCommandNames(cfg *Config) error {
 }
 
 func validateProvider(cfg *Config, name string, p Provider) error {
+	if p.MaxConcurrency < 0 {
+		return fmt.Errorf("provider %q has negative max_concurrency", name)
+	}
 	switch p.Kind {
 	case KindClaude, KindCodex, KindPi:
 	case "":

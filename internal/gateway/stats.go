@@ -140,7 +140,7 @@ func (s *state) snapshot(cfg *config.Config) Stats {
 // handleStats serves GET /stats.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	s.st.mu.Lock()
-	stats := s.st.snapshot(s.cfg)
+	stats := s.st.snapshot(s.config())
 	s.st.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(stats)

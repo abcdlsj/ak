@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -353,5 +354,28 @@ func TestSummarizeFilter(t *testing.T) {
 	}
 	if s := Summarize(rows, cfg, Filter{Provider: "a"}); s.TotalTokens != 1 || s.UnpricedTokens != 1 {
 		t.Fatalf("provider filter = %+v", s)
+	}
+}
+
+// A file rewritten in place with the same head and size — an editor's save, or
+// a vendor compacting a log — is rescanned rather than mistaken for an append.
+func TestInPlaceRewriteIsRescanned(t *testing.T) {
+	f := newFixture(t)
+	pad := `{"type":"system","pad":"` + strings.Repeat("a", 1050) + `"}` + "\n"
+	path := filepath.Join(f.claude, "s1.jsonl")
+	a := pad + claudeLine("m1", "s1", "2026-09-01T10:00:00Z", 10, 1, 0)
+	writeFile(t, path, a)
+	if toks, n := sum(f.scan()); n != 1 || toks.Input != 10 {
+		t.Fatalf("first scan = %d requests, input %d; want 1 and 10", n, toks.Input)
+	}
+	b := pad + claudeLine("m1", "s1", "2026-09-01T10:00:00Z", 20, 1, 0)
+	if len(a) != len(b) {
+		t.Fatalf("fixture lines differ in length: %d vs %d", len(a), len(b))
+	}
+	writeFile(t, path, b)
+	later := time.Now().Add(2 * time.Second)
+	_ = os.Chtimes(path, later, later)
+	if toks, n := sum(f.scan()); n != 1 || toks.Input != 20 {
+		t.Fatalf("after in-place rewrite = %d requests, input %d; want 1 and 20", n, toks.Input)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/provider"
+	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/shim"
 	"github.com/spf13/cobra"
 )
@@ -162,7 +163,18 @@ func runDoctor(cfg *config.Config) error {
 		}
 	}
 
-	// 9. Pools route through the local gateway, which must be running.
+	// 9. A referenced key must resolve now, or the command fails at launch.
+	if bad := keyRefProblems(cfg); len(bad) > 0 {
+		problems++
+		fmt.Println("✗ these providers' api_key_ref does not resolve:")
+		for _, b := range bad {
+			fmt.Printf("    %s\n", b)
+		}
+	} else if hasKeyRef(cfg) {
+		fmt.Println("✓ all referenced keys resolve")
+	}
+
+	// 10. Pools route through the local gateway, which must be running.
 	if pools := poolNames(cfg); len(pools) > 0 {
 		addr := cfg.Settings.GatewayAddr
 		if addr == "" {
@@ -191,6 +203,32 @@ func runDoctor(cfg *config.Config) error {
 	}
 	fmt.Println("\nAll checks passed.")
 	return nil
+}
+
+// keyRefProblems resolves every api_key_ref and names the ones that fail, so
+// a broken env:/cmd:/keychain: reference is caught before a launch.
+func keyRefProblems(cfg *config.Config) []string {
+	resolver := secrets.Default()
+	var out []string
+	for _, name := range cfg.Names() {
+		p := cfg.Providers[name]
+		if p.APIKeyRef == "" {
+			continue
+		}
+		if _, err := resolver.Resolve(p); err != nil {
+			out = append(out, fmt.Sprintf("%s (%v)", name, err))
+		}
+	}
+	return out
+}
+
+func hasKeyRef(cfg *config.Config) bool {
+	for _, p := range cfg.Providers {
+		if p.APIKeyRef != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // codexIDCollisions returns "name (provider_id \"id\")" for every ak codex

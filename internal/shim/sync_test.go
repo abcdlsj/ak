@@ -221,3 +221,22 @@ func TestCodexHome_DefaultsToRealDir(t *testing.T) {
 		t.Errorf("codexHome() = %q, expected %q", got, want)
 	}
 }
+
+func TestWriteSharedKeepsMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &Syncer{Cfg: config.Default()}
+	if res := s.writeShared(path, []byte(`{"providers":{}}`)); res.Action != ActionUpdated {
+		t.Fatalf("action = %v (%s)", res.Action, res.Reason)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %o, want 600 (ak changed the engine's file mode)", fi.Mode().Perm())
+	}
+}

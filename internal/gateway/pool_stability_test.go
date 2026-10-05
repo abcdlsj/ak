@@ -1,11 +1,14 @@
 package gateway
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -261,6 +264,117 @@ func TestAffinityTableBounded(t *testing.T) {
 	}
 }
 
+// The conversation table survives a restart through its file.
+func TestSticksPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "affinity.json")
+	st := newState()
+	st.succeeded("pool", "a", "conv1")
+	st.saveSticks(path)
+	other := newState()
+	other.loadSticks(path)
+	if m, ok := other.stickOf("pool", "conv1", time.Now()); !ok || m != "a" {
+		t.Errorf("stick = %q, %v; want a, true", m, ok)
+	}
+}
+
+// Over the gateway's in-flight limit a request is refused rather than queued.
+func TestInflightLimitRefuses(t *testing.T) {
+	setRetries(t, 0)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		close(started)
+		<-release
+		io.WriteString(w, `{"ok":true}`)
+	}))
+	t.Cleanup(up.Close)
+	cfg := poolConfig("pool", config.StrategyOrder, nil, map[string]config.Provider{
+		"a": {Kind: config.KindClaude, BaseURL: up.URL, APIKey: "sk-a"},
+	}, []string{"a"})
+	cfg.Settings.MaxInflight = 1
+	h := New(cfg).Handler()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		post(h, "/p/pool/v1/messages", `{"model":"m"}`)
+	}()
+	<-started
+	rec := post(h, "/p/pool/v1/messages", `{"model":"m"}`)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("second request status = %d, want 503", rec.Code)
+	}
+	close(release)
+	<-done
+}
+
+// A member's max_concurrency queues extra requests instead of sending them.
+func TestMemberConcurrencyQueues(t *testing.T) {
+	setRetries(t, 0)
+	var mu sync.Mutex
+	cur, peak := 0, 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		mu.Lock()
+		cur++
+		if cur > peak {
+			peak = cur
+		}
+		mu.Unlock()
+		time.Sleep(30 * time.Millisecond)
+		mu.Lock()
+		cur--
+		mu.Unlock()
+		io.WriteString(w, `{"ok":true}`)
+	}))
+	t.Cleanup(up.Close)
+	cfg := poolConfig("pool", config.StrategyOrder, nil, map[string]config.Provider{
+		"a": {Kind: config.KindClaude, BaseURL: up.URL, APIKey: "sk-a", MaxConcurrency: 1},
+	}, []string{"a"})
+	h := New(cfg).Handler()
+	var wg sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if rec := post(h, "/p/pool/v1/messages", `{"model":"m"}`); rec.Code != http.StatusOK {
+				t.Errorf("queued request status = %d, want 200", rec.Code)
+			}
+		}()
+	}
+	wg.Wait()
+	mu.Lock()
+	got := peak
+	mu.Unlock()
+	if got != 1 {
+		t.Errorf("peak concurrency = %d, want 1", got)
+	}
+}
+
+// /healthz names each pool and its members.
+func TestHealthzReportsPools(t *testing.T) {
+	a := newUpstream(t)
+	cfg := poolConfig("pool", config.StrategyOrder, nil, map[string]config.Provider{
+		"a": {Kind: config.KindClaude, BaseURL: a.server.URL, APIKey: "sk-a"},
+	}, []string{"a"})
+	h := New(cfg).Handler()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var doc struct {
+		Status string                    `json:"status"`
+		Pools  map[string]map[string]any `json:"pools"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Status != "ok" || doc.Pools["pool"] == nil {
+		t.Errorf("health = %s", rec.Body)
+	}
+}
+
 // A stream that breaks after its content cannot be retried, but the member
 // that broke it is set aside for the next request.
 func TestStreamBreakCoolsTheMember(t *testing.T) {
@@ -289,5 +403,23 @@ func TestStreamBreakCoolsTheMember(t *testing.T) {
 	post(h, "/p/pool/v1/messages", `{"model":"m"}`)
 	if got := aHits.Load(); got != before {
 		t.Errorf("the member that broke the stream was tried again: %d -> %d", before, got)
+	}
+}
+
+// Reload swaps the config a running gateway routes with.
+func TestReloadSwapsConfig(t *testing.T) {
+	a, b := newUpstream(t), newUpstream(t)
+	s := New(twoMemberPool(a.server.URL, b.server.URL, config.StrategyOrder))
+	h := s.Handler()
+	post(h, "/p/pool/v1/messages", `{"model":"m"}`)
+	if a.hits.Load() != 1 {
+		t.Fatalf("first member hits = %d, want 1", a.hits.Load())
+	}
+	s.Reload(poolConfig("pool", config.StrategyOrder, nil, map[string]config.Provider{
+		"b": {Kind: config.KindClaude, BaseURL: b.server.URL, APIKey: "sk-b"},
+	}, []string{"b"}))
+	post(h, "/p/pool/v1/messages", `{"model":"m"}`)
+	if b.hits.Load() != 1 || a.hits.Load() != 1 {
+		t.Errorf("after reload: a=%d b=%d, want 1 and 1", a.hits.Load(), b.hits.Load())
 	}
 }

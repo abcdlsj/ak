@@ -20,11 +20,14 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -77,10 +80,15 @@ var (
 
 // Server routes pool requests.
 type Server struct {
-	cfg    *config.Config
+	cfg    atomic.Pointer[config.Config]
 	res    secrets.Resolver
 	client *http.Client
 	st     *state
+	lanes  *lanes
+	live   gate // how many requests are in flight
+
+	// affinityPath is where the conversation table is kept between runs.
+	affinityPath string
 
 	// Logf, when set, logs routing decisions.
 	Logf func(format string, a ...any)
@@ -91,23 +99,73 @@ func New(cfg *config.Config) *Server {
 	tr, _ := http.DefaultTransport.(*http.Transport)
 	t := tr.Clone()
 	t.ResponseHeaderTimeout = 90 * time.Second
-	return &Server{
-		cfg:    cfg,
-		res:    secrets.Default(),
+	s := &Server{
+		res:    secrets.Cached(secrets.Default()),
 		client: &http.Client{Transport: t},
 		st:     newState(),
+		lanes:  newLanes(),
 	}
+	s.cfg.Store(cfg)
+	if dir, err := config.DataDir(); err == nil {
+		s.affinityPath = filepath.Join(dir, "affinity.json")
+	}
+	return s
 }
+
+// config is the current config, which Reload may have replaced.
+func (s *Server) config() *config.Config { return s.cfg.Load() }
+
+// Reload swaps in a new config; the running gateway picks up an edited pool
+// without a restart.
+func (s *Server) Reload(cfg *config.Config) {
+	s.cfg.Store(cfg)
+	s.logf("gateway reloaded %d provider(s)", len(cfg.Providers))
+}
+
+// Log writes a gateway message where Logf says to, else to the standard log.
+func (s *Server) Log(format string, a ...any) { s.logf(format, a...) }
 
 // Handler returns the gateway's HTTP handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, "ok\n")
-	})
+	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/stats", s.handleStats)
 	mux.HandleFunc("/p/", s.handlePool)
 	return mux
+}
+
+// handleHealth reports liveness and each pool member's state. Unlike /stats it
+// is cheap and carries no traffic series, so a supervisor can poll it.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	cfg := s.config()
+	now := time.Now()
+	s.st.mu.Lock()
+	type memberHealth struct {
+		Cooling      bool       `json:"cooling"`
+		CoolingUntil *time.Time `json:"cooling_until,omitempty"`
+		OK           int64      `json:"ok"`
+		Fail         int64      `json:"fail"`
+	}
+	pools := map[string]map[string]memberHealth{}
+	for name, p := range cfg.Providers {
+		if !p.IsPool() {
+			continue
+		}
+		ms := map[string]memberHealth{}
+		for _, m := range p.Members {
+			k := key(name, m)
+			h := memberHealth{OK: s.st.okN[k], Fail: s.st.failN[k]}
+			if until, ok := s.st.cool[k]; ok && until.After(now) {
+				u := until
+				h.Cooling, h.CoolingUntil = true, &u
+			}
+			ms[m] = h
+		}
+		pools[name] = ms
+	}
+	s.st.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "at": now, "pools": pools})
 }
 
 // Serve listens on addr and serves until ctx is cancelled.
@@ -127,14 +185,40 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 			errCh <- err
 		}
 	}()
+	// Keep the conversation table on disk, so a restart does not lose the
+	// vendor's prompt cache for every session.
+	s.st.loadSticks(s.affinityPath)
+	stopFlush := make(chan struct{})
+	go s.flushSticks(ctx, stopFlush)
+
 	s.logf("gateway listening on http://%s", ln.Addr())
 	select {
 	case <-ctx.Done():
+		s.st.saveSticks(s.affinityPath)
+		close(stopFlush)
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return srv.Shutdown(shutCtx)
 	case err := <-errCh:
+		s.st.saveSticks(s.affinityPath)
+		close(stopFlush)
 		return err
+	}
+}
+
+// flushSticks writes the conversation table periodically when it changed.
+func (s *Server) flushSticks(ctx context.Context, stop <-chan struct{}) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			s.st.saveSticks(s.affinityPath)
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		}
 	}
 }
 
@@ -148,17 +232,28 @@ func (s *Server) logf(format string, a ...any) {
 
 // handlePool serves /p/<pool>/<rest>.
 func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
+	cfg := s.config()
 	rest := strings.TrimPrefix(r.URL.Path, "/p/")
 	name, tail, ok := strings.Cut(rest, "/")
 	if !ok || name == "" {
 		http.Error(w, "ak: malformed pool path", http.StatusBadRequest)
 		return
 	}
-	p, found := s.cfg.Providers[name]
+	p, found := cfg.Providers[name]
 	if !found || !p.IsPool() {
 		http.Error(w, "ak: no pool named "+name, http.StatusNotFound)
 		return
 	}
+
+	// Refuse rather than queue when the gateway is already saturated, so one
+	// runaway caller cannot starve the machine.
+	s.live.setLimit(cfg.Settings.MaxInflight)
+	if !s.live.enter() {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "ak: gateway is at its in-flight limit; retry shortly", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.live.leave()
 
 	// Buffer the request body once: failover needs to replay it, and a model
 	// rewrite needs to read it.
@@ -175,12 +270,20 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var lastErr string
+	var tried []string
 	for i, m := range members {
-		mp := s.cfg.Providers[m]
+		mp := cfg.Providers[m]
+		// A member with a concurrency bound queues its turn; waiting is not
+		// failing and never moves the request to another member.
+		release, ok := s.lanes.acquire(r.Context(), m, mp.MaxConcurrency)
+		if !ok {
+			return // the client went away while waiting
+		}
 		var res forwardOutcome
 		for attempt := 0; ; attempt++ {
 			res = s.forward(w, r, name, m, tail, mp, body)
 			if res.handled {
+				release()
 				if res.ok {
 					s.st.succeeded(name, m, conv)
 				} else if res.err != nil {
@@ -203,12 +306,14 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 					case <-time.After(wait):
 						continue
 					case <-r.Context().Done():
+						release()
 						return
 					}
 				}
 			}
 			break
 		}
+		release()
 		if res.err == nil {
 			res.err = errors.New("no response")
 		}
@@ -219,6 +324,9 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		lastErr = res.err.Error()
+		if len(tried) < 8 {
+			tried = append(tried, m+": "+lastErr)
+		}
 		s.st.failed(name, m, res.retryAfter)
 		s.logf("pool %s: member %s failed (%s); trying next", name, m, lastErr)
 		if i == len(members)-1 {
@@ -226,7 +334,7 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Every member failed before any bytes were written.
-	http.Error(w, "ak: pool "+name+" exhausted its members: "+lastErr, http.StatusBadGateway)
+	http.Error(w, "ak: pool "+name+" exhausted its members: "+lastErr+"\n  "+strings.Join(tried, "\n  "), http.StatusBadGateway)
 }
 
 // readBody reads and bounds the request body. It writes the error itself and
@@ -275,7 +383,7 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, pool, member, t
 	}
 
 	out := body
-	if model := mpModel(member, s.cfg.Providers[pool]); model != "" {
+	if model := mpModel(member, s.config().Providers[pool]); model != "" {
 		out = rewriteModel(body, model)
 	}
 
@@ -805,6 +913,127 @@ type state struct {
 	okN    map[string]int64      // pool\x00member -> requests served
 	failN  map[string]int64      // pool\x00member -> failed attempts
 	sticks map[string]stickEntry // pool\x00conversation -> member that answered it
+	dirty  bool                  // the conversation table changed since it was saved
+}
+
+// gate bounds how many requests run at once; over the limit a caller is
+// refused rather than queued.
+type gate struct {
+	mu    sync.Mutex
+	n     int
+	limit int
+}
+
+func (g *gate) setLimit(n int) {
+	g.mu.Lock()
+	g.limit = n
+	g.mu.Unlock()
+}
+
+func (g *gate) enter() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.limit > 0 && g.n >= g.limit {
+		return false
+	}
+	g.n++
+	return true
+}
+
+func (g *gate) leave() {
+	g.mu.Lock()
+	if g.n > 0 {
+		g.n--
+	}
+	g.mu.Unlock()
+}
+
+// lanes bounds how many requests go to each member at once. A caller over the
+// limit waits its turn, first first; waiting is not a failure and never moves
+// the request to another member.
+type lanes struct {
+	mu sync.Mutex
+	m  map[string]*lane
+}
+
+type lane struct {
+	limit int
+	busy  int
+	queue []chan struct{}
+}
+
+func newLanes() *lanes { return &lanes{m: map[string]*lane{}} }
+
+// acquire waits for a slot on who's lane, in turn. It answers a release to
+// call once the request is done, and false when ctx ended first.
+func (l *lanes) acquire(ctx context.Context, who string, limit int) (func(), bool) {
+	if limit <= 0 {
+		return func() {}, true
+	}
+	l.mu.Lock()
+	ln := l.m[who]
+	if ln == nil {
+		ln = &lane{}
+		l.m[who] = ln
+	}
+	ln.limit = limit
+	if ln.busy < limit && len(ln.queue) == 0 {
+		ln.busy++
+		l.mu.Unlock()
+		return l.releaser(who, ln), true
+	}
+	ch := make(chan struct{})
+	ln.queue = append(ln.queue, ch)
+	l.mu.Unlock()
+	select {
+	case <-ch:
+		return l.releaser(who, ln), true
+	case <-ctx.Done():
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i, c := range ln.queue {
+		if c == ch {
+			ln.queue = append(ln.queue[:i], ln.queue[i+1:]...)
+			l.drop(who, ln)
+			return nil, false
+		}
+	}
+	// granted as ctx ended: the slot is given on to the next
+	ln.busy--
+	ln.grant()
+	l.drop(who, ln)
+	return nil, false
+}
+
+// releaser gives the slot back, once however often it is called.
+func (l *lanes) releaser(who string, ln *lane) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			l.mu.Lock()
+			ln.busy--
+			ln.grant()
+			l.drop(who, ln)
+			l.mu.Unlock()
+		})
+	}
+}
+
+// grant lets those first in the queue go while there is room.
+func (ln *lane) grant() {
+	for len(ln.queue) > 0 && ln.busy < ln.limit {
+		ln.busy++
+		close(ln.queue[0])
+		ln.queue = ln.queue[1:]
+	}
+}
+
+// drop forgets a lane nobody holds or waits on.
+func (l *lanes) drop(who string, ln *lane) {
+	if ln.busy <= 0 && len(ln.queue) == 0 && l.m[who] == ln {
+		delete(l.m, who)
+	}
 }
 
 type tokenUse struct {
@@ -940,6 +1169,7 @@ func (s *state) succeeded(pool, member, conv string) {
 		return
 	}
 	s.sticks[key(pool, conv)] = stickEntry{member: member, at: now}
+	s.dirty = true
 	if len(s.sticks) > affinityMax {
 		s.evictSticks(now)
 	}
@@ -963,4 +1193,73 @@ func (s *state) failed(pool, member string, after time.Duration) {
 		d = maxCooldown
 	}
 	s.cool[k] = time.Now().Add(d)
+}
+
+// savedStick is one conversation's answerer as the affinity file holds it.
+type savedStick struct {
+	Pool   string    `json:"pool"`
+	Conv   string    `json:"conv"`
+	Member string    `json:"member"`
+	At     time.Time `json:"at"`
+}
+
+// loadSticks reads the conversation table left by an earlier run, so a gateway
+// restart does not hand every session to whoever routing puts first while the
+// vendor still has it cached at the one before.
+func (s *state) loadSticks(path string) {
+	if path == "" {
+		return
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var saved []savedStick
+	if json.Unmarshal(b, &saved) != nil {
+		return
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range saved {
+		if x.Pool == "" || x.Conv == "" || x.Member == "" || now.Sub(x.At) > affinityTTL {
+			continue
+		}
+		s.sticks[key(x.Pool, x.Conv)] = stickEntry{member: x.Member, at: x.At}
+	}
+	s.evictSticks(now)
+}
+
+// saveSticks writes the conversation table when it changed. A problem only
+// costs the next run its affinity.
+func (s *state) saveSticks(path string) {
+	if path == "" {
+		return
+	}
+	s.mu.Lock()
+	if !s.dirty {
+		s.mu.Unlock()
+		return
+	}
+	now := time.Now()
+	s.evictSticks(now)
+	saved := make([]savedStick, 0, len(s.sticks))
+	for k, e := range s.sticks {
+		pool, conv, ok := strings.Cut(k, "\x00")
+		if !ok {
+			continue
+		}
+		saved = append(saved, savedStick{Pool: pool, Conv: conv, Member: e.member, At: e.at})
+	}
+	s.dirty = false
+	s.mu.Unlock()
+
+	data, err := json.Marshal(saved)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return
+	}
+	_ = config.AtomicWrite(path, data, 0o600)
 }

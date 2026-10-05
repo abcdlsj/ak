@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/pelletier/go-toml/v2"
+)
 
 func poolCfg(pool Provider, members map[string]Provider) *Config {
 	cfg := Default()
@@ -78,5 +82,42 @@ func TestValidateQuota(t *testing.T) {
 	cfg.Providers["a"] = Provider{Kind: KindClaude, BaseURL: "https://a.example", APIKey: "k", Quota: "not a source"}
 	if err := Validate(cfg); err == nil {
 		t.Fatal("a malformed quota id was accepted")
+	}
+}
+
+func TestValidateConcurrencyBounds(t *testing.T) {
+	cfg := Default()
+	cfg.Providers["a"] = Provider{Kind: KindClaude, BaseURL: "https://a.example", APIKey: "k", MaxConcurrency: -1}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("a negative max_concurrency was accepted")
+	}
+	cfg = Default()
+	cfg.Providers["a"] = Provider{Kind: KindClaude, BaseURL: "https://a.example", APIKey: "k", MaxConcurrency: 4}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("a positive max_concurrency was rejected: %v", err)
+	}
+	cfg.Settings.MaxInflight = -1
+	if err := Validate(cfg); err == nil {
+		t.Fatal("a negative max_inflight was accepted")
+	}
+}
+
+func TestDefaultMaxInflightRoundTrips(t *testing.T) {
+	cfg := Default()
+	if cfg.Settings.MaxInflight != DefaultMaxInflight {
+		t.Fatalf("Default MaxInflight = %d, want %d", cfg.Settings.MaxInflight, DefaultMaxInflight)
+	}
+	// An explicit 0 (no bound) must survive a save/load cycle.
+	cfg.Settings.MaxInflight = 0
+	data, err := toml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back := Default()
+	if err := toml.Unmarshal(data, back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Settings.MaxInflight != 0 {
+		t.Errorf("max_inflight = %d after a round trip, want 0", back.Settings.MaxInflight)
 	}
 }

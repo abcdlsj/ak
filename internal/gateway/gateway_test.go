@@ -148,6 +148,9 @@ func TestExhausted(t *testing.T) {
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", rec.Code)
 	}
+	if !strings.Contains(rec.Body.String(), "a:") {
+		t.Errorf("the exhausted body does not name the member: %s", rec.Body)
+	}
 }
 
 func TestModelMapping(t *testing.T) {

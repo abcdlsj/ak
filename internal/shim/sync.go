@@ -157,6 +157,14 @@ func (s *Syncer) Sync() (Report, error) {
 // content it returns is the whole file. An unchanged file is not rewritten.
 func (s *Syncer) writeShared(path string, content []byte) Result {
 	existing, err := os.ReadFile(path)
+	// Keep the mode the file already has, so ak does not change it out from
+	// under the engine that owns it.
+	mode := os.FileMode(0o644)
+	if err == nil {
+		if fi, statErr := os.Stat(path); statErr == nil {
+			mode = fi.Mode().Perm()
+		}
+	}
 	switch {
 	case err == nil && bytes.Equal(existing, content):
 		return Result{Path: path, Action: ActionUnchanged}
@@ -164,7 +172,7 @@ func (s *Syncer) writeShared(path string, content []byte) Result {
 		if s.DryRun {
 			return Result{Path: path, Action: ActionUpdated}
 		}
-		if err := config.AtomicWrite(path, content, 0o644); err != nil {
+		if err := config.AtomicWrite(path, content, mode); err != nil {
 			return Result{Path: path, Action: ActionSkipped, Reason: err.Error()}
 		}
 		return Result{Path: path, Action: ActionUpdated}
@@ -175,7 +183,7 @@ func (s *Syncer) writeShared(path string, content []byte) Result {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return Result{Path: path, Action: ActionSkipped, Reason: err.Error()}
 		}
-		if err := config.AtomicWrite(path, content, 0o644); err != nil {
+		if err := config.AtomicWrite(path, content, mode); err != nil {
 			return Result{Path: path, Action: ActionSkipped, Reason: err.Error()}
 		}
 		return Result{Path: path, Action: ActionCreated}
