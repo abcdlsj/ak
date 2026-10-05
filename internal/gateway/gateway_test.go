@@ -8,9 +8,21 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
 )
+
+func init() { retryPause = time.Millisecond }
+
+// setRetries fixes how many times a transient failure retries the same member
+// for one test.
+func setRetries(t *testing.T, n int) {
+	t.Helper()
+	old := sameMemberRetries
+	sameMemberRetries = n
+	t.Cleanup(func() { sameMemberRetries = old })
+}
 
 // upstream is a fake provider that records what it received.
 type upstream struct {
@@ -107,6 +119,7 @@ func TestFailover(t *testing.T) {
 }
 
 func TestFailoverCoolsTheFailedMember(t *testing.T) {
+	setRetries(t, 0)
 	bad := newUpstream(t)
 	bad.status = http.StatusServiceUnavailable
 	good := newUpstream(t)
@@ -117,9 +130,10 @@ func TestFailoverCoolsTheFailedMember(t *testing.T) {
 
 	h := New(cfg).Handler()
 	post(h, "/p/pool/v1/messages", `{"model":"m"}`)
+	first := bad.hits.Load()
 	post(h, "/p/pool/v1/messages", `{"model":"m"}`)
-	if got := bad.hits.Load(); got != 1 {
-		t.Errorf("cooling member hits = %d, want 1 (tried once, then skipped)", got)
+	if got := bad.hits.Load(); got != first {
+		t.Errorf("cooling member was tried again: %d -> %d", first, got)
 	}
 }
 

@@ -105,6 +105,16 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 		return fmt.Errorf("provider %q has invalid kind %q; must be claude, codex or pi", name, p.Kind)
 	}
 	if p.IsPool() {
+		if err := validateQuota(name, p.Quota); err != nil {
+			return err
+		}
+		// A pi pool is registered in models.json like any other pi provider,
+		// so its pi_api must be valid too.
+		if p.Kind == KindPi {
+			if err := validatePi(name, p); err != nil {
+				return err
+			}
+		}
 		return validatePool(cfg, name, p)
 	}
 	if p.BaseURL == "" && p.PiProvider == "" {

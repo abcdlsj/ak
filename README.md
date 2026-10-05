@@ -137,8 +137,20 @@ ak serve            # required while a pool command runs
 
 The gateway listens on `127.0.0.1:17877` (`settings.gateway_addr` to change it)
 and is loopback-only. A member that fails is set aside for 30 seconds, doubling
-to ten minutes while it keeps failing, and the request falls through to the next
-member. Pools do not translate between protocols: every member must speak what
+to ten minutes while it keeps failing, or for the vendor's own `Retry-After`
+when it is longer, and the request falls through to the next member. A busy
+vendor is retried on the same member once before it is left; a refusal that is
+that member's alone — a rejected key, a missing path, an unserved model, a
+quota — moves the request on, while one every member would give (a conversation
+too long, a missing field) reaches the agent. An event stream is held at its
+opening until its first content, so an error that starts it fails over instead
+of reaching the agent; one that breaks after content has begun is passed on as
+it came. A conversation stays with the member that answered it (its engine's
+session header, or Codex's `prompt_cache_key`) so the vendor's prompt cache is
+read again rather than paid for afresh; load still spreads across conversations.
+Requests, their bodies and their streams are bounded: a body over 128 MB or
+unread for 60 seconds, a stream stalled for 2 minutes, each ends rather than
+hangs. Pools do not translate between protocols: every member must speak what
 the engine speaks. To aggregate one relay for both engines, register its
 Anthropic endpoint as a `claude` provider and its OpenAI endpoint as a `codex`
 provider, then pool each kind separately. `ak doctor` warns when a pool exists

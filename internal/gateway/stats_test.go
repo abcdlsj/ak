@@ -52,6 +52,7 @@ func TestSnapshotAtAlignsMembers(t *testing.T) {
 }
 
 func TestStatsEndpoint(t *testing.T) {
+	setRetries(t, 0)
 	bad := newUpstream(t)
 	bad.status = http.StatusServiceUnavailable
 	good := newUpstream(t)

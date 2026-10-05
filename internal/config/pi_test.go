@@ -29,6 +29,13 @@ func TestValidatePiPool(t *testing.T) {
 	if err := Validate(cfg); err == nil {
 		t.Fatal("a pi pool with an endpoint-less member was accepted")
 	}
+
+	// A pi pool is registered like any other pi provider, so its wire API must
+	// be valid too.
+	cfg.Providers["pool"] = Provider{Kind: KindPi, Members: []string{"a", "b"}, Model: "logical", PiAPI: "grpc"}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("a pi pool with an invalid pi_api was accepted")
+	}
 }
 
 func TestValidatePi(t *testing.T) {
