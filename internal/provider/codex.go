@@ -2,11 +2,9 @@ package provider
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
-	"github.com/pelletier/go-toml/v2"
 )
 
 // EnvKey derives the provider-specific secret environment variable name.
@@ -27,10 +25,6 @@ func EnvKey(name string) string {
 	return b.String()
 }
 
-// ProfileName is the codex profile name, mapping to
-// ~/.codex/<ProfileName>.config.toml.
-func ProfileName(name string) string { return "ak-" + name }
-
 type codexEngine struct{}
 
 func (codexEngine) Kind() config.Kind                      { return config.KindCodex }
@@ -45,23 +39,20 @@ func (codexEngine) ArtifactDirs(ctx Context) []string {
 	return []string{ctx.CodexHome}
 }
 
-// Launch layers a profile over the user's codex config; the model and endpoint
-// travel through the profile, the environment only carries the secret.
+// Launch passes the provider, its endpoint and its model to codex as -c
+// overrides; the environment only carries the secret. Overrides are used
+// instead of a <name>.config.toml profile because codex persists the config it
+// changes (its TUI notices, for one) into the active profile file, and that
+// write can drop the provider we put there, silently sending the next launch to
+// the base config's default provider.
 func (codexEngine) Launch(name string, p config.Provider, key Secret, ctx Context) (Launch, error) {
 	if p.IsPool() && ctx.Gateway != "" {
 		p = poolTarget(p, name, ctx.Gateway)
 		key = Literal(poolKey)
 	}
-	body, err := CodexProfileTOML(name, p)
-	if err != nil {
-		return Launch{}, err
-	}
 	l := Launch{
 		Env:  CodexEnv(name, p, key),
-		Args: []string{"--profile", ProfileName(name)},
-	}
-	if ctx.CodexHome != "" {
-		l.Files = []File{{Path: filepath.Join(ctx.CodexHome, ProfileName(name)+".config.toml"), Body: body}}
+		Args: CodexArgs(name, p),
 	}
 	for _, v := range mergeNames(config.ReasoningLevels(), p.Variants) {
 		l.Variants = append(l.Variants, codexVariant(v, p))
@@ -86,10 +77,43 @@ func codexVariant(name string, p config.Provider) Variant {
 	return v
 }
 
+// CodexArgs renders the -c overrides that select the provider, its endpoint and
+// its model. The model_providers table is passed whole with the provider's id
+// as a quoted key, so an id containing a dot still parses (a dotted path would
+// split it).
+func CodexArgs(name string, p config.Provider) []string {
+	id := CodexProviderID(name, p)
+	wire := p.WireAPI
+	if wire == "" {
+		wire = "responses"
+	}
+	table := fmt.Sprintf("{%s={name=%s,base_url=%s,wire_api=%s,env_key=%s}}",
+		tomlString(id), tomlString(id), tomlString(p.BaseURL), tomlString(wire), tomlString(EnvKey(name)))
+	args := codexRaw("model_provider", tomlString(id))
+	if p.Model != "" {
+		args = append(args, codexRaw("model", tomlString(p.Model))...)
+	}
+	if p.Reasoning != "" {
+		args = append(args, codexRaw("model_reasoning_effort", tomlString(p.Reasoning))...)
+	}
+	return append(args, codexRaw("model_providers", table)...)
+}
+
 // codexOverride renders `-c key="value"`, the value as a TOML basic string.
 func codexOverride(key, value string) []string {
+	return codexRaw(key, tomlString(value))
+}
+
+// codexRaw renders `-c key=<raw>`, the value used exactly as written: a TOML
+// table is not a string, so it cannot go through tomlString.
+func codexRaw(key, raw string) []string {
+	return []string{"-c", key + "=" + raw}
+}
+
+// tomlString renders s as a TOML basic string.
+func tomlString(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
-	return []string{"-c", fmt.Sprintf(`%s="%s"`, key, r.Replace(value))}
+	return `"` + r.Replace(s) + `"`
 }
 
 // CodexEnv computes the environment plan for a codex provider.
@@ -110,48 +134,4 @@ func CodexProviderID(name string, p config.Provider) string {
 		return p.ProviderID
 	}
 	return name
-}
-
-// codexProfile is the structure of a generated profile file.
-//
-// It only writes scalar keys plus the single model_providers table. It never
-// writes [[skills.config]], [projects."..."], [features] or [tui] — even if the
-// layering replaced whole top-level tables, only the keys we intend to
-// override would be affected, and the base config's skills and projects live
-// under different top-level keys.
-type codexProfile struct {
-	ModelProvider  string                        `toml:"model_provider"`
-	Model          string                        `toml:"model,omitempty"`
-	ReasoningLevel string                        `toml:"model_reasoning_effort,omitempty"`
-	ModelProviders map[string]codexProviderTable `toml:"model_providers"`
-}
-
-type codexProviderTable struct {
-	Name    string `toml:"name"`
-	BaseURL string `toml:"base_url"`
-	WireAPI string `toml:"wire_api"`
-	EnvKey  string `toml:"env_key"`
-}
-
-// CodexProfileTOML renders the profile file body, without the marker line,
-// which the shim package adds uniformly.
-func CodexProfileTOML(name string, p config.Provider) ([]byte, error) {
-	id := CodexProviderID(name, p)
-	wire := p.WireAPI
-	if wire == "" {
-		wire = "responses"
-	}
-	prof := codexProfile{
-		ModelProvider:  id,
-		Model:          p.Model,
-		ReasoningLevel: p.Reasoning,
-		ModelProviders: map[string]codexProviderTable{
-			id: {Name: id, BaseURL: p.BaseURL, WireAPI: wire, EnvKey: EnvKey(name)},
-		},
-	}
-	data, err := toml.Marshal(prof)
-	if err != nil {
-		return nil, fmt.Errorf("render codex profile %q: %w", name, err)
-	}
-	return data, nil
 }

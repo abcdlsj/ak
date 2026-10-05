@@ -39,15 +39,18 @@ func TestCodexPoolLaunchPointsAtGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(l.Files) != 1 {
-		t.Fatalf("pool profile files = %d, want 1", len(l.Files))
+	if len(l.Files) != 0 {
+		t.Errorf("pool wrote %d files, want none", len(l.Files))
 	}
-	body := string(l.Files[0].Body)
-	if !strings.Contains(body, "base_url = '"+testGateway+"/p/pool'") {
-		t.Errorf("profile does not point at the gateway:\n%s", body)
+	args := strings.Join(l.Args, " ")
+	if !strings.Contains(args, testGateway+"/p/pool") {
+		t.Errorf("args do not point at the gateway:\n%s", args)
 	}
-	if !strings.Contains(body, "AK_KEY_POOL") {
-		t.Errorf("profile is missing the pool env key:\n%s", body)
+	if !strings.Contains(args, "AK_KEY_POOL") {
+		t.Errorf("args are missing the pool env key:\n%s", args)
+	}
+	if strings.Contains(args, "real-key") {
+		t.Errorf("args leaked the member key:\n%s", args)
 	}
 	env := envMap(l.Env)
 	if got := env["AK_KEY_POOL"]; got != poolKey {

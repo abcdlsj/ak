@@ -83,14 +83,20 @@ func TestCodexCustomVariantSetsModel(t *testing.T) {
 	f.sync(t, "")
 
 	out := run(t, filepath.Join(f.bin, "ak-cx"), nil, "fast", "hello")
-	if !strings.Contains(out, `args=--profile ak-cx -c model="gpt-fast" -c model_reasoning_effort="low" hello`) {
+	if !strings.Contains(out, `-c model="gpt-fast" -c model_reasoning_effort="low" hello`) {
 		t.Fatalf("custom variant args wrong:\n%s", out)
+	}
+	if !strings.Contains(out, `model_provider="cx"`) {
+		t.Fatalf("base provider not selected:\n%s", out)
+	}
+	if strings.Contains(out, "--profile") {
+		t.Fatalf("a profile file is still used:\n%s", out)
 	}
 	if strings.Contains(out, `model_reasoning_effort="fast"`) {
 		t.Fatalf("custom variant name leaked as a reasoning level:\n%s", out)
 	}
 	out = run(t, filepath.Join(f.bin, "ak-cx"), nil, "high")
-	if !strings.Contains(out, `args=--profile ak-cx -c model_reasoning_effort="high"`) {
+	if !strings.Contains(out, `-c model_reasoning_effort="high"`) {
 		t.Fatalf("reasoning variant args wrong:\n%s", out)
 	}
 	// The standalone variant command behaves like `ak-cx fast`.
@@ -98,8 +104,8 @@ func TestCodexCustomVariantSetsModel(t *testing.T) {
 	if !strings.Contains(out, `-c model="gpt-fast"`) || !strings.Contains(out, "AK_VARIANT=fast") {
 		t.Fatalf("alias output wrong:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(f.codexHome, "ak-cx.config.toml")); err != nil {
-		t.Fatalf("codex profile not written: %v", err)
+	if _, err := os.Stat(filepath.Join(f.codexHome, "ak-cx.config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("a codex profile file was written: %v", err)
 	}
 
 	// Dropping the variant reclaims its standalone command.

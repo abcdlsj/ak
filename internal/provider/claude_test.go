@@ -216,32 +216,45 @@ func TestEnvKey(t *testing.T) {
 	}
 }
 
-// TestCodexProfileTOML_NoArrayTables is a machine-checked guard: a profile
-// file must never contain array tables, because if the layering replaced whole
-// tables, the base config's [[skills.config]] and [projects.*] would be lost.
-func TestCodexProfileTOML_NoArrayTables(t *testing.T) {
+// TestCodexArgsSelectProvider is a machine-checked guard: the provider, its
+// endpoint and the key's variable name must reach codex, and the key itself
+// must not.
+func TestCodexArgsSelectProvider(t *testing.T) {
 	p := config.Provider{
 		Kind: config.KindCodex, BaseURL: "https://cpa.example/v1",
 		Model: "gpt-x", Reasoning: "max", WireAPI: "responses",
 	}
-	data, err := CodexProfileTOML("cpa", p)
-	if err != nil {
-		t.Fatal(err)
+	joined := ""
+	for _, a := range CodexArgs("cpa", p) {
+		joined += a + " "
 	}
-	s := string(data)
-	if contains(s, "[[") {
-		t.Errorf("profile contains array tables, which would threaten the base config:\n%s", s)
-	}
-	for _, forbidden := range []string{"skills", "projects", "features", "tui", "hooks"} {
-		if contains(s, forbidden) {
-			t.Errorf("profile contains a key it should not have, %q:\n%s", forbidden, s)
+	for _, want := range []string{
+		`model_provider="cpa"`,
+		`model="gpt-x"`,
+		`model_reasoning_effort="max"`,
+		`base_url="https://cpa.example/v1"`,
+		`wire_api="responses"`,
+		`env_key="AK_KEY_CPA"`,
+	} {
+		if !contains(joined, want) {
+			t.Errorf("codex args are missing %q:\n%s", want, joined)
 		}
 	}
-	// The required keys must be present.
-	for _, want := range []string{"model_provider", "base_url", "env_key", "AK_KEY_CPA"} {
-		if !contains(s, want) {
-			t.Errorf("profile is missing %q:\n%s", want, s)
-		}
+}
+
+// TestCodexArgsDottedProviderID guards the inline model_providers table: a
+// dotted id would split a dotted path, so the id goes in as a quoted TOML key.
+func TestCodexArgsDottedProviderID(t *testing.T) {
+	p := config.Provider{Kind: config.KindCodex, BaseURL: "https://x/v1", Model: "m"}
+	joined := ""
+	for _, a := range CodexArgs("my.site", p) {
+		joined += a + " "
+	}
+	if !contains(joined, `model_provider="my.site"`) {
+		t.Errorf("dotted provider id lost:\n%s", joined)
+	}
+	if !contains(joined, `{"my.site"=`) {
+		t.Errorf("dotted provider key is not quoted:\n%s", joined)
 	}
 }
 
