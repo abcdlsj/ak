@@ -60,6 +60,22 @@ const (
 	streamHead = 256 << 10
 )
 
+// Tunables for how long an upstream may take to answer with its headers. A
+// stream opens quickly, so a silent member is left early; a plain request may
+// legitimately think for minutes before its first byte, and since its reply is
+// still being produced (and billed), it is not replayed elsewhere.
+var (
+	streamHeaderWait = 90 * time.Second
+	plainHeaderWait  = 10 * time.Minute
+)
+
+// errHeaderWait is the cause recorded when an upstream sent no headers in time.
+var errHeaderWait = errors.New("no response headers in time")
+
+// errClientWrite marks a failure to write to the client: the agent hung up or
+// was interrupted, which says nothing about the member.
+var errClientWrite = errors.New("client write failed")
+
 // Affinity bounds: how long a conversation's answerer is remembered, and how
 // many conversations are kept.
 const (
@@ -98,7 +114,6 @@ type Server struct {
 func New(cfg *config.Config) *Server {
 	tr, _ := http.DefaultTransport.(*http.Transport)
 	t := tr.Clone()
-	t.ResponseHeaderTimeout = 90 * time.Second
 	s := &Server{
 		res:    secrets.Cached(secrets.Default()),
 		client: &http.Client{Transport: t},
@@ -170,6 +185,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // Serve listens on addr and serves until ctx is cancelled.
 func (s *Server) Serve(ctx context.Context, addr string) error {
+	// Keep the conversation table on disk, so a restart does not lose the
+	// vendor's prompt cache for every session. Loaded before listening, so an
+	// early request's entry is not overwritten by the older file.
+	s.st.loadSticks(s.affinityPath)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -185,9 +204,6 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 			errCh <- err
 		}
 	}()
-	// Keep the conversation table on disk, so a restart does not lose the
-	// vendor's prompt cache for every session.
-	s.st.loadSticks(s.affinityPath)
 	stopFlush := make(chan struct{})
 	go s.flushSticks(ctx, stopFlush)
 
@@ -281,16 +297,23 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		}
 		var res forwardOutcome
 		for attempt := 0; ; attempt++ {
-			res = s.forward(w, r, name, m, tail, mp, body)
+			res = s.forward(w, r, name, m, tail, p, mp, body)
 			if res.handled {
 				release()
-				if res.ok {
+				switch {
+				case res.ok:
 					s.st.succeeded(name, m, conv)
-				} else if res.err != nil {
+				case res.err != nil && !clientGone(r, res.err):
 					// A reply that broke after it began: it cannot be retried, but
 					// the member that cut it is set aside for the next request.
 					s.st.failed(name, m, 0)
 				}
+				return
+			}
+			if clientGone(r, res.err) {
+				// The agent hung up or was interrupted: not the member's fault,
+				// and nobody is left to answer.
+				release()
 				return
 			}
 			if !res.retryable {
@@ -318,9 +341,10 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 			res.err = errors.New("no response")
 		}
 		if !res.retryable {
-			// Nothing was written and no other member can help (e.g. an
-			// unresolvable key): tell the caller instead of an empty 200.
-			http.Error(w, "ak: pool "+name+": "+res.err.Error(), http.StatusBadGateway)
+			// Nothing was written and no other member can help (a request
+			// that already took the member past its wait): tell the caller
+			// instead of an empty 200.
+			http.Error(w, "ak: pool "+name+": "+res.err.Error(), http.StatusGatewayTimeout)
 			return
 		}
 		lastErr = res.err.Error()
@@ -376,32 +400,58 @@ type forwardOutcome struct {
 }
 
 // forward sends the request to one member.
-func (s *Server) forward(w http.ResponseWriter, r *http.Request, pool, member, tail string, mp config.Provider, body []byte) forwardOutcome {
+func (s *Server) forward(w http.ResponseWriter, r *http.Request, pool, member, tail string, pp, mp config.Provider, body []byte) forwardOutcome {
 	target := strings.TrimRight(mp.BaseURL, "/") + "/" + tail
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
 
 	out := body
-	if model := mpModel(member, s.config().Providers[pool]); model != "" {
+	if model := mpModel(member, pp); model != "" {
 		out = rewriteModel(body, model)
 	}
 
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, bytes.NewReader(out))
+	// Each member has its own key: one that cannot be resolved sets that
+	// member aside, and the next may still answer.
+	key, err := s.res.Resolve(mp)
 	if err != nil {
+		return forwardOutcome{retryable: true, err: fmt.Errorf("key for member %s: %w", member, err)}
+	}
+
+	// The wait for headers is per request: a stream gets a short one, a plain
+	// request a long one. Cancelling ctx also ends the body, so it is held
+	// until forward returns.
+	stream := isStreamRequest(body)
+	wait := plainHeaderWait
+	if stream {
+		wait = streamHeaderWait
+	}
+	ctx, cancel := context.WithCancelCause(r.Context())
+	defer cancel(nil)
+	headerTimer := time.AfterFunc(wait, func() { cancel(errHeaderWait) })
+
+	req, err := http.NewRequestWithContext(ctx, r.Method, target, bytes.NewReader(out))
+	if err != nil {
+		headerTimer.Stop()
 		return forwardOutcome{retryable: true, err: err}
 	}
 	copyHeaders(req.Header, r.Header)
-	key, err := s.res.Resolve(mp)
-	if err != nil {
-		return forwardOutcome{err: fmt.Errorf("key for member %s: %w", member, err)}
-	}
+	// Let the transport negotiate compression itself, so it decompresses the
+	// reply: a gzipped event stream or error body could not be inspected.
+	req.Header.Del("Accept-Encoding")
 	setAuth(req.Header, mp, key)
 
 	resp, err := s.client.Do(req)
+	headerTimer.Stop()
 	if err != nil {
 		if r.Context().Err() != nil {
 			return forwardOutcome{err: r.Context().Err()} // the client went away
+		}
+		if context.Cause(ctx) == errHeaderWait {
+			err = fmt.Errorf("upstream %s: %w after %s", mp.BaseURL, errHeaderWait, wait)
+			// A plain request may still be running, and billed, upstream:
+			// replaying it elsewhere would pay for it twice.
+			return forwardOutcome{retryable: stream, err: err}
 		}
 		return forwardOutcome{retryable: true, err: err}
 	}
@@ -422,6 +472,7 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, pool, member, t
 				err: fmt.Errorf("upstream %s returned %d: %s", mp.BaseURL, code, snippet(buf))}
 		}
 		copyHeaders(w.Header(), resp.Header)
+		w.Header().Del("Content-Length")
 		w.WriteHeader(code)
 		w.Write(buf)
 		return forwardOutcome{status: code, handled: true}
@@ -624,7 +675,7 @@ func streamSSE(w http.ResponseWriter, resp *http.Response) forwardOutcome {
 			timer.Reset(streamIdle)
 			if committed {
 				if _, werr := w.Write(buf[:n]); werr != nil {
-					return forwardOutcome{handled: true, err: werr}
+					return forwardOutcome{handled: true, err: fmt.Errorf("%w: %v", errClientWrite, werr)}
 				}
 				if flusher != nil {
 					flusher.Flush()
@@ -641,7 +692,7 @@ func streamSSE(w http.ResponseWriter, resp *http.Response) forwardOutcome {
 					copyHeaders(w.Header(), resp.Header)
 					w.WriteHeader(resp.StatusCode)
 					if _, werr := w.Write(head); werr != nil {
-						return forwardOutcome{handled: true, err: werr}
+						return forwardOutcome{handled: true, err: fmt.Errorf("%w: %v", errClientWrite, werr)}
 					}
 					if flusher != nil {
 						flusher.Flush()
@@ -652,6 +703,16 @@ func streamSSE(w http.ResponseWriter, resp *http.Response) forwardOutcome {
 		}
 		if rerr != nil {
 			if !committed {
+				if errors.Is(rerr, io.EOF) && len(head) > 0 {
+					// A stream that ended cleanly before any marker we know is
+					// still a complete reply; replaying it would bill it twice.
+					copyHeaders(w.Header(), resp.Header)
+					w.WriteHeader(resp.StatusCode)
+					if _, werr := w.Write(head); werr != nil {
+						return forwardOutcome{handled: true, err: fmt.Errorf("%w: %v", errClientWrite, werr)}
+					}
+					return forwardOutcome{handled: true, ok: true, status: resp.StatusCode}
+				}
 				return forwardOutcome{retryable: true, err: rerr}
 			}
 			if errors.Is(rerr, io.EOF) {
@@ -719,10 +780,13 @@ func sseEventKind(ev []byte) (content, failure bool) {
 	if json.Unmarshal(data, &v) != nil {
 		return hasContentMarker(data), false
 	}
-	if v.Type == "error" || v.Object == "error" {
-		return false, true
-	}
-	if len(v.Error) > 0 && !bytes.Equal(v.Error, []byte("null")) {
+	if v.Type == "error" || v.Object == "error" ||
+		(len(v.Error) > 0 && !bytes.Equal(v.Error, []byte("null"))) {
+		// An error every member would give (a conversation too long) is
+		// passed to the agent like content rather than failed over.
+		if overflowWords.Match(data) {
+			return true, false
+		}
 		return false, true
 	}
 	return hasContentMarker(data), false
@@ -761,7 +825,7 @@ func copyIdle(w http.ResponseWriter, r io.ReadCloser) error {
 		if n > 0 {
 			timer.Reset(streamIdle)
 			if _, werr := w.Write(buf[:n]); werr != nil {
-				return werr
+				return fmt.Errorf("%w: %v", errClientWrite, werr)
 			}
 			if flusher != nil {
 				flusher.Flush()
@@ -784,11 +848,36 @@ func setAuth(h http.Header, mp config.Provider, key string) {
 	if key == "" {
 		return
 	}
-	if mp.Kind == config.KindClaude && mp.KeyField == "api_key" {
+	if usesAPIKeyHeader(mp) {
 		h.Set("X-Api-Key", key)
 		return
 	}
 	h.Set("Authorization", "Bearer "+key)
+}
+
+// usesAPIKeyHeader reports whether a member's engine sends its key as
+// x-api-key: claude with key_field api_key, and pi on the Anthropic API unless
+// it is told to send a bearer token.
+func usesAPIKeyHeader(mp config.Provider) bool {
+	switch mp.Kind {
+	case config.KindClaude:
+		return mp.KeyField == "api_key"
+	case config.KindPi:
+		return (mp.PiAPI == "" || mp.PiAPI == "anthropic-messages") && !mp.PiAuthHeader
+	}
+	return false
+}
+
+// isStreamRequest reports whether a request body asks for a streamed reply.
+func isStreamRequest(body []byte) bool {
+	vs, ve, ok := findTopLevelValue(body, "stream")
+	return ok && string(bytes.TrimSpace(body[vs:ve])) == "true"
+}
+
+// clientGone reports whether a failure was the client's: it hung up, or a
+// write to it failed.
+func clientGone(r *http.Request, err error) bool {
+	return r.Context().Err() != nil || errors.Is(err, errClientWrite)
 }
 
 // copyHeaders copies src into dst, skipping hop-by-hop headers that must not be
@@ -1255,11 +1344,15 @@ func (s *state) saveSticks(path string) {
 	s.mu.Unlock()
 
 	data, err := json.Marshal(saved)
+	if err == nil {
+		if err = os.MkdirAll(filepath.Dir(path), 0o700); err == nil {
+			err = config.AtomicWrite(path, data, 0o600)
+		}
+	}
 	if err != nil {
-		return
+		// Not written: keep it dirty so the next flush tries again.
+		s.mu.Lock()
+		s.dirty = true
+		s.mu.Unlock()
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return
-	}
-	_ = config.AtomicWrite(path, data, 0o600)
 }

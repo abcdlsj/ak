@@ -52,6 +52,10 @@ func (piEngine) Launch(name string, p config.Provider, key Secret, ctx Context) 
 		env.setSecret(EnvKey(name), key)
 	}
 	env.set("AK_PROVIDER", name)
+	// Extra env vars merge last, as for claude.
+	for k, v := range p.Env {
+		env.set(k, v)
+	}
 
 	args := []string{"--provider", providerID}
 	if p.Model != "" {

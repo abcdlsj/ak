@@ -86,6 +86,19 @@ reasoning = "low"
 shim = true          # also generate ak-bilicodex-fast
 ```
 
+Extra environment variables go under `env`, for any kind, on the provider or
+on a variant. A proxy for one provider is just that:
+
+```toml
+[providers.bilicodex.env]
+HTTPS_PROXY = "http://127.0.0.1:7890"
+```
+
+A command launched from inside another ak command drops what the outer one
+exported first, so one provider's proxy, config dir or key never leaks into
+the next. A pool's upstream requests are made by `ak serve`, so its proxy goes
+in the environment of `ak serve`.
+
 `ak` keeps one source of truth in `~/.config/ak/providers.toml` (mode `0600`)
 and derives everything else. Generated shims are marked and idempotent, so
 `ak sync` rewrites only what changed and reclaims what no longer applies.

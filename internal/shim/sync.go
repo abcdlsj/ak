@@ -35,6 +35,9 @@ type Result struct {
 	Path   string
 	Action Action
 	Reason string // Explains why the file was skipped
+	// Foreign marks a file ak left alone because it is not ak's to remove
+	// (a user's own command sharing the prefix), not a problem to report.
+	Foreign bool
 }
 
 // Report holds all results of one sync.
@@ -217,6 +220,17 @@ func (s *Syncer) writeFile(path, content string, mode os.FileMode) Result {
 	existing, err := os.ReadFile(path)
 	switch {
 	case err == nil && string(existing) == content:
+		// Same content, but an older ak may have left it with a looser mode
+		// (a command holding a plaintext key readable by others).
+		if fi, serr := os.Stat(path); serr == nil && fi.Mode().Perm() != mode.Perm() {
+			if s.DryRun {
+				return Result{Path: path, Action: ActionUpdated}
+			}
+			if cerr := os.Chmod(path, mode); cerr != nil {
+				return Result{Path: path, Action: ActionSkipped, Reason: cerr.Error()}
+			}
+			return Result{Path: path, Action: ActionUpdated}
+		}
 		return Result{Path: path, Action: ActionUnchanged}
 	case err == nil:
 		// Exists but differs: only overwrite after confirming ak generated it,
@@ -299,6 +313,7 @@ func (s *Syncer) collectOrphansIn(dir, prefix string, want map[string]bool) ([]R
 			continue
 		}
 		if res, ok := s.checkRemovable(path, e); !ok {
+			res.Foreign = true
 			out = append(out, res)
 			continue
 		}

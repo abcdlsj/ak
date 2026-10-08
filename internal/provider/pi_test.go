@@ -236,3 +236,30 @@ func TestPiModelsJSONMissingAndEmpty(t *testing.T) {
 		t.Errorf("nothing to do should return empty, got %q", path)
 	}
 }
+
+func TestProviderEnvForPiAndCodex(t *testing.T) {
+	env := map[string]string{"HTTPS_PROXY": "http://127.0.0.1:7890"}
+	l, err := piEngine{}.Launch("relay", config.Provider{Kind: config.KindPi, BaseURL: "https://r", Model: "m", Env: env}, Literal("k"), Context{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envMap(l.Env)["HTTPS_PROXY"] != env["HTTPS_PROXY"] {
+		t.Error("pi provider env not exported")
+	}
+	l, err = codexEngine{}.Launch("cx", config.Provider{Kind: config.KindCodex, BaseURL: "https://r", Env: env}, Literal("k"), Context{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envMap(l.Env)["HTTPS_PROXY"] != env["HTTPS_PROXY"] {
+		t.Error("codex provider env not exported")
+	}
+	// A codex pool keeps its own codex_home.
+	pool := config.Provider{Kind: config.KindCodex, Members: []string{"a"}, CodexHome: "/tmp/h"}
+	l, err = codexEngine{}.Launch("pool", pool, Literal(""), Context{Gateway: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envMap(l.Env)["CODEX_HOME"] != "/tmp/h" {
+		t.Error("codex pool dropped its codex_home")
+	}
+}

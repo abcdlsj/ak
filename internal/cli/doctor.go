@@ -107,7 +107,10 @@ func runDoctor(cfg *config.Config) error {
 
 	// 4. Generated commands must match the config on disk.
 	drifted, err := driftReport(cfg)
-	if err == nil {
+	if err != nil {
+		problems++
+		fmt.Printf("✗ cannot check the commands against the config: %v\n", err)
+	} else {
 		if len(drifted) > 0 {
 			problems++
 			fmt.Println("✗ these commands do not match the config, run `ak sync` to fix:")
@@ -348,8 +351,17 @@ func driftReport(cfg *config.Config) ([]string, error) {
 	var out []string
 	for _, r := range rep.Results {
 		switch r.Action {
-		case shim.ActionUpdated, shim.ActionCreated:
+		case shim.ActionUpdated, shim.ActionCreated, shim.ActionRemoved:
 			out = append(out, r.Path)
+		case shim.ActionSkipped:
+			if r.Foreign {
+				continue
+			}
+			reason := r.Reason
+			if reason == "" {
+				reason = "skipped"
+			}
+			out = append(out, r.Path+" ("+reason+")")
 		}
 	}
 	return out, nil

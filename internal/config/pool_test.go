@@ -43,6 +43,9 @@ func TestValidatePoolErrors(t *testing.T) {
 		{"duplicate member", Provider{Kind: KindClaude, Members: []string{"a", "a"}}},
 		{"bad strategy", Provider{Kind: KindClaude, Members: []string{"a"}, Strategy: "random"}},
 		{"mapping for non-member", Provider{Kind: KindClaude, Members: []string{"a"}, MemberModels: map[string]string{"z": "m"}}},
+		{"wire mismatch", Provider{Kind: KindCodex, Members: []string{"c"}, WireAPI: "chat"}},
+		{"bad pool wire_api", Provider{Kind: KindCodex, Members: []string{"c"}, WireAPI: "grpc"}},
+		{"bad env name", Provider{Kind: KindClaude, Members: []string{"a"}, Env: map[string]string{"A B": "x"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,5 +122,25 @@ func TestDefaultMaxInflightRoundTrips(t *testing.T) {
 	}
 	if back.Settings.MaxInflight != 0 {
 		t.Errorf("max_inflight = %d after a round trip, want 0", back.Settings.MaxInflight)
+	}
+}
+
+func TestValidateEnvNames(t *testing.T) {
+	for _, k := range []string{"A B", "X;rm -rf", "$(id)", "1X", ""} {
+		cfg := Default()
+		cfg.Providers["a"] = Provider{Kind: KindClaude, BaseURL: "https://a.example", APIKey: "k", Env: map[string]string{k: "v"}}
+		if err := Validate(cfg); err == nil {
+			t.Errorf("env name %q accepted", k)
+		}
+		cfg.Providers["a"] = Provider{Kind: KindClaude, BaseURL: "https://a.example", APIKey: "k",
+			Variants: map[string]Variant{"v": {Env: map[string]string{k: "v"}}}}
+		if err := Validate(cfg); err == nil {
+			t.Errorf("variant env name %q accepted", k)
+		}
+	}
+	cfg := Default()
+	cfg.Providers["a"] = Provider{Kind: KindClaude, BaseURL: "https://a.example", APIKey: "k", Env: map[string]string{"HTTPS_PROXY": "v", "_x1": "v"}}
+	if err := Validate(cfg); err != nil {
+		t.Errorf("valid env names rejected: %v", err)
 	}
 }

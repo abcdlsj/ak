@@ -110,6 +110,14 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 	default:
 		return fmt.Errorf("provider %q has invalid kind %q; must be claude, codex or pi", name, p.Kind)
 	}
+	if err := validateEnv(name, p); err != nil {
+		return err
+	}
+	if p.Kind == KindCodex {
+		if err := validateCodex(name, p); err != nil {
+			return err
+		}
+	}
 	if p.IsPool() {
 		if err := validateQuota(name, p.Quota); err != nil {
 			return err
@@ -136,16 +144,6 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 			return fmt.Errorf("provider %q has invalid key_field %q; must be auth_token or api_key", name, p.KeyField)
 		}
 	}
-	if p.Kind == KindCodex {
-		switch p.WireAPI {
-		case "", "responses", "chat":
-		default:
-			return fmt.Errorf("provider %q has invalid wire_api %q; must be responses or chat", name, p.WireAPI)
-		}
-		if r := p.Reasoning; r != "" && !validReasoning[r] {
-			return fmt.Errorf("provider %q has invalid reasoning %q", name, r)
-		}
-	}
 	if p.Kind == KindPi {
 		if err := validatePi(name, p); err != nil {
 			return err
@@ -155,6 +153,56 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 		return err
 	}
 	return validateVariants(name, p)
+}
+
+func validateCodex(name string, p Provider) error {
+	switch p.WireAPI {
+	case "", "responses", "chat":
+	default:
+		return fmt.Errorf("provider %q has invalid wire_api %q; must be responses or chat", name, p.WireAPI)
+	}
+	if r := p.Reasoning; r != "" && !validReasoning[r] {
+		return fmt.Errorf("provider %q has invalid reasoning %q", name, r)
+	}
+	return nil
+}
+
+// envKeyRe is a shell variable name: anything else would break, or inject
+// into, the generated command.
+var envKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func validateEnv(name string, p Provider) error {
+	for k := range p.Env {
+		if !envKeyRe.MatchString(k) {
+			return fmt.Errorf("provider %q has invalid env name %q; use letters, digits and _", name, k)
+		}
+	}
+	for v, variant := range p.Variants {
+		for k := range variant.Env {
+			if !envKeyRe.MatchString(k) {
+				return fmt.Errorf("provider %q variant %q has invalid env name %q; use letters, digits and _", name, v, k)
+			}
+		}
+	}
+	return nil
+}
+
+// wireOf is the protocol a provider speaks to its upstream, defaults filled
+// in, so a pool can require its members to speak the same.
+func wireOf(p Provider) string {
+	switch p.Kind {
+	case KindCodex:
+		if p.WireAPI == "" {
+			return "responses"
+		}
+		return p.WireAPI
+	case KindPi:
+		if p.PiAPI == "" {
+			return "anthropic-messages"
+		}
+		return p.PiAPI
+	}
+	return ""
 }
 
 // quotaRe constrains a built-in quota source id; unknown ids are caught with a
@@ -201,6 +249,9 @@ func validatePool(cfg *Config, name string, p Provider) error {
 		}
 		if mp.BaseURL == "" {
 			return fmt.Errorf("pool %q names %q, which has no base_url (a pi provider that uses pi_provider); a pool member needs an endpoint", name, m)
+		}
+		if w, mw := wireOf(p), wireOf(mp); w != mw {
+			return fmt.Errorf("pool %q speaks %s but member %q speaks %s; pools do not translate between protocols", name, w, m, mw)
 		}
 	}
 	for m := range p.MemberModels {

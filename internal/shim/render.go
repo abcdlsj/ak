@@ -68,6 +68,14 @@ func Render(s Spec) string {
 			strings.Join(names, "|"))
 	}
 
+	// A nested launch inherits what the parent ak command exported; drop it
+	// first, so a parent's config dir, proxy or key cannot leak into this one.
+	b.WriteString("# Drop what a parent ak command exported\n")
+	b.WriteString("if [ -n \"${AK_ENV_KEYS:-}\" ]; then\n")
+	b.WriteString("  read -r -a ak_prev <<< \"$AK_ENV_KEYS\"\n")
+	b.WriteString("  for ak_k in ${ak_prev[@]+\"${ak_prev[@]}\"}; do unset \"$ak_k\" 2>/dev/null || true; done\n")
+	b.WriteString("fi\n\n")
+
 	if l.Env.Deferred() {
 		b.WriteString(renderKeyLookup(s))
 	}
@@ -82,6 +90,7 @@ func Render(s Spec) string {
 	for _, k := range l.Env.Unset {
 		fmt.Fprintf(&b, "unset %s || true\n", k)
 	}
+	fmt.Fprintf(&b, "ak_env_keys=%s\n", shellQuote(strings.Join(envKeys(l.Env.Set), " ")))
 	b.WriteString("\n")
 
 	// Under bash 3.2 an empty array expansion must be written as ${arr[@]+"${arr[@]}"}.
@@ -96,6 +105,9 @@ func Render(s Spec) string {
 			for _, kv := range v.Env {
 				b.WriteString("    " + renderExport(kv))
 			}
+			if len(v.Env) > 0 {
+				fmt.Fprintf(&b, "    ak_env_keys=\"$ak_env_keys \"%s\n", shellQuote(strings.Join(envKeys(v.Env), " ")))
+			}
 			if len(v.Args) > 0 {
 				fmt.Fprintf(&b, "    ak_args+=(%s)\n", shellWords(v.Args))
 			}
@@ -106,10 +118,19 @@ func Render(s Spec) string {
 	}
 	// AK_VARIANT is informational (e.g. for a status line) and never read
 	// back, so a parent's variant cannot leak into a nested launch.
-	b.WriteString("if [ -n \"${ak_variant:-}\" ]; then export AK_VARIANT=\"$ak_variant\"; else unset AK_VARIANT || true; fi\n\n")
+	b.WriteString("if [ -n \"${ak_variant:-}\" ]; then export AK_VARIANT=\"$ak_variant\"; else unset AK_VARIANT || true; fi\n")
+	b.WriteString("export AK_ENV_KEYS=\"$ak_env_keys\"\n\n")
 
 	b.WriteString(renderExec(s))
 	return script(s.Kind, s.Name, b.String())
+}
+
+func envKeys(kvs []provider.KV) []string {
+	keys := make([]string, len(kvs))
+	for i, kv := range kvs {
+		keys[i] = kv.Key
+	}
+	return keys
 }
 
 func renderExport(kv provider.KV) string {

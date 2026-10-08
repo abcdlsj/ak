@@ -58,7 +58,6 @@ const poolKey = "ak-pool"
 func poolTarget(p config.Provider, name, gateway string) config.Provider {
 	p.BaseURL = strings.TrimRight(gateway, "/") + "/p/" + name
 	p.KeyField = ""
-	p.CodexHome = ""
 	// A pi pool must be registered in models.json, whatever the pool named.
 	p.PiProvider = ""
 	return p

@@ -22,7 +22,7 @@ func fakeBin(t *testing.T, dir, name string) string {
 	p := filepath.Join(dir, name)
 	body := "#!/usr/bin/env bash\n" +
 		"echo \"args=$*\"\n" +
-		"env | grep -E '^(AK_|ANTHROPIC_)' | sort\n"
+		"env | grep -E '^(AK_|ANTHROPIC_|HTTPS_PROXY|CODEX_HOME)' | sort\n"
 	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -172,5 +172,63 @@ func TestTierVariantAlwaysConsumed(t *testing.T) {
 	out = run(t, filepath.Join(f.bin, "ak-bare"), nil, "haiku")
 	if !strings.Contains(out, "ANTHROPIC_MODEL=haiku\n") {
 		t.Fatalf("alias not passed through:\n%s", out)
+	}
+}
+
+// Provider env reaches codex too, and a nested launch drops what the parent
+// ak command exported: its proxy, config dir and key do not leak.
+func TestProviderEnvAndNestedLaunch(t *testing.T) {
+	f := newSyncFixture(t)
+	f.cfg.Providers["cx"] = config.Provider{Kind: config.KindCodex, BaseURL: "https://x", APIKey: "sk-1",
+		CodexHome: "/tmp/cx-home", Env: map[string]string{"HTTPS_PROXY": "http://127.0.0.1:7890"}}
+	f.cfg.Providers["cl"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://y", APIKey: "k", Model: "m"}
+	f.sync(t, "")
+
+	out := run(t, filepath.Join(f.bin, "ak-cx"), nil)
+	if !strings.Contains(out, "HTTPS_PROXY=http://127.0.0.1:7890\n") || !strings.Contains(out, "CODEX_HOME=/tmp/cx-home\n") {
+		t.Fatalf("codex provider env not exported:\n%s", out)
+	}
+	keys := ""
+	for _, ln := range strings.Split(out, "\n") {
+		if v, ok := strings.CutPrefix(ln, "AK_ENV_KEYS="); ok {
+			keys = v
+		}
+	}
+	if !strings.Contains(keys, "HTTPS_PROXY") || !strings.Contains(keys, "CODEX_HOME") {
+		t.Fatalf("AK_ENV_KEYS = %q", keys)
+	}
+
+	// ak-cl launched from inside ak-cx.
+	parent := []string{"HTTPS_PROXY=http://127.0.0.1:7890", "CODEX_HOME=/tmp/cx-home",
+		"AK_KEY_CX=sk-1", "AK_ENV_KEYS=" + keys}
+	out = run(t, filepath.Join(f.bin, "ak-cl"), parent)
+	for _, leaked := range []string{"HTTPS_PROXY", "CODEX_HOME", "AK_KEY_CX"} {
+		if strings.Contains(out, leaked+"=") {
+			t.Errorf("%s leaked into the nested launch:\n%s", leaked, out)
+		}
+	}
+	// A proxy the user set themselves is left alone.
+	out = run(t, filepath.Join(f.bin, "ak-cl"), []string{"HTTPS_PROXY=http://user:1"})
+	if !strings.Contains(out, "HTTPS_PROXY=http://user:1\n") {
+		t.Errorf("the user's own proxy was dropped:\n%s", out)
+	}
+}
+
+// sync tightens the mode of an unchanged command left looser by an older ak.
+func TestSyncFixesLooseMode(t *testing.T) {
+	f := newSyncFixture(t)
+	f.cfg.Providers["cl"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://y", APIKey: "k", Model: "m"}
+	f.sync(t, "")
+	path := filepath.Join(f.bin, "ak-cl")
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.sync(t, "")
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != shimMode {
+		t.Errorf("mode = %v, want %v", fi.Mode().Perm(), shimMode)
 	}
 }
