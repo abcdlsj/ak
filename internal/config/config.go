@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -263,14 +264,49 @@ func Path() (string, error) {
 	return filepath.Join(dir, "providers.toml"), nil
 }
 
-// DataDir returns ~/.local/share/ak, which holds the usage aggregates and the
-// session attribution index.
+// DataDir returns the directory holding ak's state (usage aggregates, the
+// session attribution index, the launcher's directory record, the gateway's
+// log). It is the config directory: everything ak keeps is in one place.
+// State an older ak left in ~/.local/share/ak is moved over on first use.
 func DataDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := Dir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".local", "share", "ak"), nil
+	migrateOnce.Do(func() { migrateLegacyData(dir) })
+	return dir, nil
+}
+
+var migrateOnce sync.Once
+
+// migrateLegacyData moves each file of the old data dir into dir, never
+// overwriting one already there, and removes the old dir once it is empty.
+// A file that cannot be moved stays where it was and is reported.
+func migrateLegacyData(dir string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	old := filepath.Join(home, ".local", "share", "ak")
+	entries, err := os.ReadDir(old)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "ak: cannot move %s to %s: %v\n", old, dir, err)
+		return
+	}
+	for _, e := range entries {
+		from, to := filepath.Join(old, e.Name()), filepath.Join(dir, e.Name())
+		if _, err := os.Lstat(to); err == nil {
+			fmt.Fprintf(os.Stderr, "ak: %s left in place: %s already exists\n", from, to)
+			continue
+		}
+		if err := os.Rename(from, to); err != nil {
+			fmt.Fprintf(os.Stderr, "ak: cannot move %s to %s: %v\n", from, to, err)
+		}
+	}
+	_ = os.Remove(old) // only succeeds when empty
 }
 
 // Default returns an empty config pre-filled with defaults.

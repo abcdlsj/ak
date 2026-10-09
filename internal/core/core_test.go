@@ -99,7 +99,7 @@ func TestRename(t *testing.T) {
 	if _, ok := cfg.Providers["cl"]; ok || cfg.Settings.Default != "claude2" {
 		t.Fatalf("rename left %v, default %q", cfg.Names(), cfg.Settings.Default)
 	}
-	data, _ := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".local/share/ak/sessions.jsonl"))
+	data, _ := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".config/ak/sessions.jsonl"))
 	if !strings.Contains(string(data), `"provider":"claude2"`) {
 		t.Fatalf("session records not rewritten: %s", data)
 	}

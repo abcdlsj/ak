@@ -59,5 +59,5 @@ ak-<name> [args...]             the same as ak <name>, for scripts
 
 ## Rolling back
 
-Delete the `ak-*` commands, `~/.config/ak/` and `~/.local/share/ak/`, and the
-`ak-*` entries in pi's `models.json` if you used pi. Nothing else was modified.
+Delete the `ak-*` commands, `~/.config/ak/`, and the `ak-*` entries in pi's
+`models.json` if you used pi. Nothing else was modified.

@@ -33,7 +33,7 @@ one, and `esc` comes back to Launch:
 
 With no provider configured, the launcher opens on the add form.
 
-The directory record lives in `~/.local/share/ak/recent.json`; nothing is
+The directory record lives in `~/.config/ak/recent.json`; nothing is
 written into the directories themselves.
 
 Before it execs the engine, ak checks the provider has a key and the engine

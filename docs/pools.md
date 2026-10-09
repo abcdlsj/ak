@@ -59,7 +59,7 @@ member must speak what the engine speaks. To aggregate one relay for both
 engines, register its Anthropic endpoint as a `claude` provider and its OpenAI
 endpoint as a `codex` provider, then pool each kind separately. Launching a pool
 starts `ak serve` in the background when nothing is listening, logging to
-`~/.local/share/ak/gateway.log`; `ak doctor` warns when a pool exists but
+`~/.config/ak/gateway.log`; `ak doctor` warns when a pool exists but
 nothing is listening on the gateway.
 
 With the gateway running, the TUI's Manage page shows a pool as it works: a

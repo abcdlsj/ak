@@ -22,9 +22,9 @@ func newServeCmd() *cobra.Command {
 		Short: "Run the local pool gateway",
 		Long: `Run the loopback gateway that provider pools route through.
 
-Every pool command points its engine at this gateway instead of an upstream, so
-it must be running for a pool command to work; a pool command starts it in the
-background when it is not, logging to ~/.local/share/ak/gateway.log. Normal
+Every pool points its engine at this gateway instead of an upstream, so
+it must be running for a pool to work; launching a pool starts it in the
+background when it is not, logging to ~/.config/ak/gateway.log. Normal
 providers do not use it.
 
 The gateway reloads providers.toml when it changes (or on SIGHUP), so an edited
