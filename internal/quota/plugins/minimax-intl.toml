@@ -1,0 +1,30 @@
+# MiniMax (international).
+# GET /v1/api/openplatform/coding_plan/remains ->
+# {"model_remains":[{"model_name":"general",
+#   "current_interval_remaining_percent":…,"end_time":<ms>,
+#   "current_weekly_status":1,"current_weekly_remaining_percent":…,"weekly_end_time":<ms>}],
+#  "base_resp":{"status_code":0,"status_msg":"success"}}
+# Only the general bucket counts; a weekly status other than 1 means the plan
+# has no weekly limit.
+id = "minimax-intl"
+match = ["minimax.io"]
+kind = "plan"
+ok = { path = "base_resp.status_code", equals = 0, message = "base_resp.status_msg" }
+
+[request]
+url = "https://api.minimax.io/v1/api/openplatform/coding_plan/remains"
+headers = { Authorization = "Bearer {{key}}" }
+
+[[windows]]
+name = "5h"
+each = "model_remains"
+where = { model_name = "general" }
+percent_left = "current_interval_remaining_percent"
+resets = "end_time"
+
+[[windows]]
+name = "weekly"
+each = "model_remains"
+where = { model_name = "general", current_weekly_status = 1 }
+percent_left = "current_weekly_remaining_percent"
+resets = "weekly_end_time"

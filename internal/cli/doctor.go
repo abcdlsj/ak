@@ -12,6 +12,7 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/provider"
+	"github.com/abcdlsj/ak/internal/quota"
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/shim"
 	"github.com/spf13/cobra"
@@ -188,6 +189,15 @@ func runDoctor(cfg *config.Config) error {
 		} else {
 			warnings++
 			fmt.Printf("! %d pool(s) configured but nothing is listening on %s; run `ak serve`\n", len(pools), addr)
+		}
+	}
+
+	// 11. A quota plugin that does not load is skipped by `ak quota`.
+	if errs := quota.PluginErrors(); len(errs) > 0 {
+		warnings++
+		fmt.Println("! these quota plugins do not load and are skipped:")
+		for _, err := range errs {
+			fmt.Printf("    %s\n", err)
 		}
 	}
 

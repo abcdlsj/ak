@@ -4,10 +4,18 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
 )
+
+// TestMain keeps the user's own quota.d out of the tests.
+func TestMain(m *testing.M) {
+	r := loadRegistry("")
+	reg = &r
+	os.Exit(m.Run())
+}
 
 // serveJSON answers one path with body, 404 otherwise.
 func serveJSON(t *testing.T, path, body string) *httptest.Server {
@@ -111,10 +119,18 @@ func TestScriptBadOutput(t *testing.T) {
 
 func TestAutoDetectByHost(t *testing.T) {
 	cases := map[string]string{
-		"https://api.deepseek.com/anthropic": "deepseek",
-		"https://openrouter.ai/api/v1":       "openrouter",
-		"https://api.moonshot.cn/anthropic":  "moonshot",
-		"https://api.siliconflow.cn/v1":      "siliconflow",
+		"https://api.deepseek.com/anthropic":     "deepseek",
+		"https://openrouter.ai/api/v1":           "openrouter",
+		"https://api.moonshot.cn/anthropic":      "moonshot",
+		"https://api.siliconflow.cn/v1":          "siliconflow",
+		"https://api.kimi.com/coding/":           "kimi",
+		"https://open.bigmodel.cn/api/anthropic": "zhipu",
+		"https://api.z.ai/api/anthropic":         "zhipu",
+		"https://api.minimaxi.com/anthropic":     "minimax",
+		"https://api.minimax.cn/anthropic":       "minimax",
+		"https://api.minimax.io/anthropic":       "minimax-intl",
+		"https://api.stepfun.com/v1":             "stepfun",
+		"https://api.stepfun.ai/v1":              "stepfun",
 	}
 	for base, want := range cases {
 		src, err := resolve(config.Provider{BaseURL: base})

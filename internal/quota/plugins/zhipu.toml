@@ -1,0 +1,30 @@
+# Zhipu GLM Coding Plan (open.bigmodel.cn, api.z.ai): GET
+# /api/monitor/usage/quota/limit on the provider's own host, key sent bare ->
+# {"success":true,"data":{"level":"…","limits":[
+#   {"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":…,"nextResetTime":<ms>},
+#   {"type":"TOKENS_LIMIT","unit":6,"number":7,"percentage":…,"nextResetTime":<ms>},
+#   {"type":"TIME_LIMIT",…}]}}
+# unit 3 is the five-hour window, unit 6 the weekly one.
+id = "zhipu"
+match = ["bigmodel.cn", "api.z.ai"]
+kind = "plan"
+detail = "{{data.level}}"
+ok = { path = "success", equals = true, message = "msg" }
+
+[request]
+url = "{{root}}/api/monitor/usage/quota/limit"
+headers = { Authorization = "{{key}}", Accept-Language = "en-US,en" }
+
+[[windows]]
+name = "5h"
+each = "data.limits"
+where = { type = "TOKENS_LIMIT|CREDIT_LIMIT", unit = 3 }
+percent = "percentage"
+resets = "nextResetTime"
+
+[[windows]]
+name = "weekly"
+each = "data.limits"
+where = { type = "TOKENS_LIMIT|CREDIT_LIMIT", unit = 6 }
+percent = "percentage"
+resets = "nextResetTime"

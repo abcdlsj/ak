@@ -1,0 +1,14 @@
+# SiliconFlow: GET /v1/user/info ->
+# {"code":20000,"data":{"balance":"…","totalBalance":"…","chargeBalance":"…"}}
+id = "siliconflow"
+match = ["siliconflow"]
+kind = "balance"
+detail = "charged {{data.chargeBalance}}"
+
+[request]
+url = "{{root}}/v1/user/info"
+headers = { Authorization = "Bearer {{key}}" }
+
+[balance]
+value = "data.totalBalance"
+currency = "CNY"

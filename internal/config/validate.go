@@ -254,7 +254,7 @@ func wireOf(p Provider) string {
 	return ""
 }
 
-// quotaRe constrains a built-in quota source id; unknown ids are caught with a
+// quotaRe constrains a quota source id; unknown ids are caught with a
 // clear message when the source is resolved, not here.
 var quotaRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 

@@ -4,38 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/abcdlsj/ak/internal/config"
 )
 
-// builtins lists the vendors ak knows a balance API for. Auto-detection uses
-// Match on the provider's endpoint host; a provider may also name one with its
-// quota field.
-var builtins = []Source{deepseek{}, openrouter{}, moonshot{}, siliconflow{}}
-
-// deepseek: GET /user/balance ->
-// {"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"…"}]}
-type deepseek struct{}
-
-func (deepseek) ID() string             { return "deepseek" }
-func (deepseek) Match(host string) bool { return strings.Contains(host, "deepseek") }
-
-func (deepseek) Fetch(ctx context.Context, base, key string) (Quota, error) {
-	var out struct {
-		IsAvailable  bool `json:"is_available"`
-		BalanceInfos []struct {
-			Currency     string    `json:"currency"`
-			TotalBalance flexFloat `json:"total_balance"`
-		} `json:"balance_infos"`
-	}
-	if err := getJSON(ctx, apiRoot(base)+"/user/balance", key, &out); err != nil {
-		return Quota{}, err
-	}
-	if len(out.BalanceInfos) == 0 {
-		return Quota{}, fmt.Errorf("the response carried no balance")
-	}
-	bi := out.BalanceInfos[0]
-	v := float64(bi.TotalBalance)
-	return Quota{Kind: "balance", Currency: bi.Currency, Balance: &v}, nil
-}
+// These sources stay in Go: openrouter may need a second request, and
+// moonshot's currency follows the endpoint host. The rest are TOML plugins
+// under plugins/.
 
 // openrouter: GET /api/v1/key -> {"data":{"limit":…,"usage":…,"limit_remaining":…}}
 // A key with no limit is credit-based, so the balance comes from /api/v1/credits
@@ -45,8 +20,8 @@ type openrouter struct{}
 func (openrouter) ID() string             { return "openrouter" }
 func (openrouter) Match(host string) bool { return strings.Contains(host, "openrouter") }
 
-func (openrouter) Fetch(ctx context.Context, base, key string) (Quota, error) {
-	root := apiRoot(base)
+func (openrouter) Fetch(ctx context.Context, p config.Provider, key string) (Quota, error) {
+	root := apiRoot(p.BaseURL)
 	if root == "" {
 		root = "https://openrouter.ai"
 	}
@@ -86,7 +61,8 @@ type moonshot struct{}
 func (moonshot) ID() string             { return "moonshot" }
 func (moonshot) Match(host string) bool { return strings.Contains(host, "moonshot") }
 
-func (moonshot) Fetch(ctx context.Context, base, key string) (Quota, error) {
+func (moonshot) Fetch(ctx context.Context, p config.Provider, key string) (Quota, error) {
+	base := p.BaseURL
 	var out struct {
 		Code int `json:"code"`
 		Data struct {
@@ -107,31 +83,4 @@ func (moonshot) Fetch(ctx context.Context, base, key string) (Quota, error) {
 		Kind: "balance", Currency: currency, Balance: &v,
 		Detail: fmt.Sprintf("cash %g · voucher %g", float64(out.Data.CashBalance), float64(out.Data.VoucherBalance)),
 	}, nil
-}
-
-// siliconflow: GET /v1/user/info ->
-// {"code":20000,"data":{"balance":"…","totalBalance":"…","chargeBalance":"…"}}
-type siliconflow struct{}
-
-func (siliconflow) ID() string             { return "siliconflow" }
-func (siliconflow) Match(host string) bool { return strings.Contains(host, "siliconflow") }
-
-func (siliconflow) Fetch(ctx context.Context, base, key string) (Quota, error) {
-	var out struct {
-		Code int `json:"code"`
-		Data struct {
-			Balance       flexFloat `json:"balance"`
-			TotalBalance  flexFloat `json:"totalBalance"`
-			ChargeBalance flexFloat `json:"chargeBalance"`
-		} `json:"data"`
-	}
-	if err := getJSON(ctx, apiRoot(base)+"/v1/user/info", key, &out); err != nil {
-		return Quota{}, err
-	}
-	v := float64(out.Data.TotalBalance)
-	if v == 0 {
-		v = float64(out.Data.Balance)
-	}
-	return Quota{Kind: "balance", Currency: "CNY", Balance: &v,
-		Detail: fmt.Sprintf("charged %g", float64(out.Data.ChargeBalance))}, nil
 }
