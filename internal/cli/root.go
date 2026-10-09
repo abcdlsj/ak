@@ -52,6 +52,8 @@ Run with no arguments to open the TUI.`,
 		newKeyCmd(),
 		newServeCmd(),
 		newQuotaCmd(),
+		newCheckCmd(),
+		newModelsCmd(),
 	)
 	return root.Execute()
 }

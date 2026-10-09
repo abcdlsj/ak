@@ -52,6 +52,8 @@ ak sync                     regenerate commands from the config
 ak doctor                   check for anything that would break the commands
 ak usage                    token usage by provider and model
 ak quota                    provider balance and plan usage
+ak check [name...]          send each provider a minimal real request
+ak models <name>            list the models a provider serves
 ak-bilicodex                run codex on that provider
 ak-bilicodex high           override reasoning effort for this run
 ak-stepfunclaude opus       use the opus-tier model for this run
@@ -222,6 +224,15 @@ when it changes (or on SIGHUP), so an edited or renamed pool takes effect
 without a restart; `settings.gateway_addr` still needs one. Keep it running
 while a pool command is in use. Normal providers never touch the gateway: they
 stay direct, with their own key in their own command.
+
+## Health and models
+
+`ak check` sends every provider (or the named ones) one minimal, non-streamed
+request and prints status and latency: ok, slow, auth, model or fail. Each check
+spends a few tokens; a pool is checked through its members, not the gateway,
+and the command exits 1 when anything failed. `ak models <name>` asks the
+upstream for its model list, trying `/v1/models` and `/models` on the base URL
+and on its root when the base ends in a compat path such as `/anthropic`.
 
 ## Balance and quota
 
