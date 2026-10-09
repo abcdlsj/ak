@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 )
@@ -113,6 +114,9 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 	if err := validateEnv(name, p); err != nil {
 		return err
 	}
+	if err := validateIsolation(name, p); err != nil {
+		return err
+	}
 	if p.Kind == KindCodex {
 		if err := validateCodex(name, p); err != nil {
 			return err
@@ -181,6 +185,51 @@ func validateEnv(name string, p Provider) error {
 		for k := range variant.Env {
 			if !envKeyRe.MatchString(k) {
 				return fmt.Errorf("provider %q variant %q has invalid env name %q; use letters, digits and _", name, v, k)
+			}
+		}
+	}
+	return nil
+}
+
+// ClaudeRoutingKeys are the environment variables that pick claude's
+// endpoint, key and models. Claude applies a settings file's env over the
+// process environment, so any of these in a settings env silently overrides
+// what an ak command sets.
+var ClaudeRoutingKeys = []string{
+	"ANTHROPIC_BASE_URL",
+	"ANTHROPIC_AUTH_TOKEN",
+	"ANTHROPIC_API_KEY",
+	"ANTHROPIC_MODEL",
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL",
+	"ANTHROPIC_DEFAULT_SONNET_MODEL",
+	"ANTHROPIC_DEFAULT_OPUS_MODEL",
+	"ANTHROPIC_DEFAULT_FABLE_MODEL",
+	"ANTHROPIC_SMALL_FAST_MODEL",
+}
+
+// validateIsolation checks each engine's isolation fields are its own, and
+// that the settings layer can be passed to claude as JSON.
+func validateIsolation(name string, p Provider) error {
+	if p.ConfigDir != "" && p.Kind != KindClaude {
+		return fmt.Errorf("provider %q sets config_dir, which only applies to claude (codex uses codex_home)", name)
+	}
+	if p.CodexHome != "" && p.Kind != KindCodex {
+		return fmt.Errorf("provider %q sets codex_home, which only applies to codex (claude uses config_dir)", name)
+	}
+	if len(p.Settings) > 0 {
+		if p.Kind != KindClaude {
+			return fmt.Errorf("provider %q sets settings, which only applies to claude", name)
+		}
+		if _, err := json.Marshal(p.Settings); err != nil {
+			return fmt.Errorf("provider %q settings cannot be passed to claude as JSON: %v", name, err)
+		}
+		// claude applies a settings env over the process environment, so a
+		// routing key here would override the one the command sets.
+		if env, ok := p.Settings["env"].(map[string]any); ok {
+			for _, k := range ClaudeRoutingKeys {
+				if _, set := env[k]; set {
+					return fmt.Errorf("provider %q sets %s in settings.env, which would override its own endpoint; set it through the provider's fields or env instead", name, k)
+				}
 			}
 		}
 	}

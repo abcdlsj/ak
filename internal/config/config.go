@@ -96,8 +96,14 @@ type Provider struct {
 	// KeyField selects which environment variable receives the key:
 	// auth_token (default) or api_key.
 	KeyField string `toml:"key_field,omitempty"`
-	// ConfigDir is reserved: when set, the shim also exports CLAUDE_CONFIG_DIR.
+	// ConfigDir isolates the provider's whole claude environment: the shim
+	// exports CLAUDE_CONFIG_DIR, so settings, login, MCP servers, plugins,
+	// skills and sessions all live there instead of ~/.claude.
 	ConfigDir string `toml:"config_dir,omitempty"`
+	// Settings is a claude settings layer for this provider alone, passed as
+	// --settings on top of the shared settings.json: a value here replaces the
+	// shared one, everything else (login, sessions, plugins) stays shared.
+	Settings map[string]any `toml:"settings,omitempty"`
 
 	// codex-only.
 	ProviderID string `toml:"provider_id,omitempty"`
@@ -114,7 +120,9 @@ type Provider struct {
 	// PiAuthHeader sends the key as Authorization: Bearer instead of the
 	// Anthropic-style x-api-key, for relays that expect a bearer token.
 	PiAuthHeader bool `toml:"pi_auth_header,omitempty"`
-	// CodexHome is reserved: when set, the shim also exports CODEX_HOME.
+	// CodexHome isolates the provider's whole codex environment: the shim
+	// exports CODEX_HOME, so config.toml, auth, MCP servers and sessions live
+	// there instead of ~/.codex.
 	CodexHome string `toml:"codex_home,omitempty"`
 
 	// Members names, in order, the providers this provider routes over. When

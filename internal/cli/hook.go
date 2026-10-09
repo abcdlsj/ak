@@ -34,7 +34,17 @@ func newHookInstallCmd() *cobra.Command {
 		Use:   "install",
 		Short: "Install the SessionStart hook so claude usage is attributed to providers",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return installHook()
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			for _, path := range claudeSettingsPaths(cfg) {
+				if err := installHook(path); err != nil {
+					return err
+				}
+			}
+			fmt.Println("claude usage is now attributed to providers; earlier records stay unknown")
+			return nil
 		},
 	}
 }
@@ -44,7 +54,16 @@ func newHookUninstallCmd() *cobra.Command {
 		Use:   "uninstall",
 		Short: "Remove the hook",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return uninstallHook()
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			for _, path := range claudeSettingsPaths(cfg) {
+				if err := uninstallHook(path); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	}
 }
@@ -68,14 +87,16 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-func settingsPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude", "settings.json")
-}
-
-func installHook() error {
-	path := settingsPath()
+// installHook adds the hook to one settings.json. An isolated config_dir may
+// not have one yet; it is started empty.
+func installHook(path string) error {
 	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return err
+		}
+		data, err = []byte("{}"), nil
+	}
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
@@ -116,14 +137,15 @@ func installHook() error {
 	if err := config.AtomicWrite(path, out, 0o600); err != nil {
 		return err
 	}
-	fmt.Println("installed SessionStart hook")
-	fmt.Println("claude usage is now attributed to providers; earlier records stay unknown")
+	fmt.Printf("installed SessionStart hook in %s\n", path)
 	return nil
 }
 
-func uninstallHook() error {
-	path := settingsPath()
+func uninstallHook(path string) error {
 	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -133,7 +155,7 @@ func uninstallHook() error {
 	}
 	raw, ok := settings["hooks"]
 	if !ok || !strings.Contains(string(raw), hookMarker) {
-		fmt.Println("no ak-managed hook found")
+		fmt.Printf("no ak-managed hook in %s\n", path)
 		return nil
 	}
 
@@ -174,10 +196,16 @@ func removeMarked(hooks map[string][]map[string]any) {
 	}
 }
 
-// hookInstalled reports whether settings.json carries the ak hook.
-func hookInstalled() bool {
-	data, err := os.ReadFile(settingsPath())
-	return err == nil && strings.Contains(string(data), hookMarker)
+// hookMissing lists the claude settings files that lack the ak hook.
+func hookMissing(cfg *config.Config) []string {
+	var out []string
+	for _, path := range claudeSettingsPaths(cfg) {
+		data, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(data), hookMarker) {
+			out = append(out, path)
+		}
+	}
+	return out
 }
 
 // newRecordSessionCmd is a hidden command invoked by the hook, not by hand.

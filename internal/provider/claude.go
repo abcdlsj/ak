@@ -3,6 +3,8 @@
 package provider
 
 import (
+	"encoding/json"
+	"fmt"
 	"sort"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -72,7 +74,25 @@ func (claudeEngine) Launch(name string, p config.Provider, key Secret, ctx Conte
 		quiet := !isCustom && (len(delta) == 0 || p.Model == "")
 		variants = append(variants, Variant{Name: v, Env: delta, Shim: custom.Shim, Quiet: quiet})
 	}
-	return Launch{Env: base, Variants: variants}, nil
+	args, err := ClaudeArgs(name, p)
+	if err != nil {
+		return Launch{}, err
+	}
+	return Launch{Env: base, Args: args, Variants: variants}, nil
+}
+
+// ClaudeArgs passes the provider's own settings layer as --settings. Inline
+// JSON rather than a file: nothing extra to write or reclaim, and the map is
+// marshalled with sorted keys, so the command stays byte-stable.
+func ClaudeArgs(name string, p config.Provider) ([]string, error) {
+	if len(p.Settings) == 0 {
+		return nil, nil
+	}
+	b, err := json.Marshal(p.Settings)
+	if err != nil {
+		return nil, fmt.Errorf("provider %s settings: %w", name, err)
+	}
+	return []string{"--settings", string(b)}, nil
 }
 
 // ClaudeEnv computes the environment plan for a claude provider.

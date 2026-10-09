@@ -21,17 +21,7 @@ import (
 // remain in settings.json. Claude Code runs Object.assign(process.env,
 // settingsEnv) at startup, so settings.json wins over the environment. Any of
 // these keys left behind silently override the matching ak-* command.
-var providerEnvKeys = []string{
-	"ANTHROPIC_BASE_URL",
-	"ANTHROPIC_AUTH_TOKEN",
-	"ANTHROPIC_API_KEY",
-	"ANTHROPIC_MODEL",
-	"ANTHROPIC_DEFAULT_HAIKU_MODEL",
-	"ANTHROPIC_DEFAULT_SONNET_MODEL",
-	"ANTHROPIC_DEFAULT_OPUS_MODEL",
-	"ANTHROPIC_DEFAULT_FABLE_MODEL",
-	"ANTHROPIC_SMALL_FAST_MODEL",
-}
+var providerEnvKeys = config.ClaudeRoutingKeys
 
 func newDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -53,20 +43,27 @@ func runDoctor(cfg *config.Config) error {
 
 	// 1. Provider keys left in settings.json. This is the worst case: no error
 	// is raised, requests just silently go to the wrong provider.
-	residual := residualProviderKeys()
-	if len(residual) > 0 {
+	// An isolated provider reads its own settings.json, which can hold the
+	// same leftovers.
+	clean := true
+	for _, path := range claudeSettingsPaths(cfg) {
+		residual := residualProviderKeys(path)
+		if len(residual) == 0 {
+			continue
+		}
+		clean = false
 		problems++
-		fmt.Println("✗ ~/.claude/settings.json still has provider-specific keys in env:")
+		fmt.Printf("✗ %s still has provider-specific keys in env:\n", path)
 		for _, k := range residual {
 			fmt.Printf("    %s\n", k)
 		}
 		fmt.Println("  These override the environment variables ak-* commands inject, so")
 		fmt.Println("  those commands silently reach the wrong provider.")
-		fmt.Println("  Remove them (run `ak import --from claude-settings` first to keep them):")
-		fmt.Printf("    %s\n", claudeSettingsPath())
+		fmt.Println("  Remove them (run `ak import --from claude-settings` first to keep them).")
 		fmt.Println("  Keep the global preference keys, e.g. NODE_EXTRA_CA_CERTS and")
 		fmt.Println("  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC.")
-	} else {
+	}
+	if clean {
 		fmt.Println("✓ no provider keys left in settings.json")
 	}
 
@@ -124,11 +121,14 @@ func runDoctor(cfg *config.Config) error {
 
 	// 5. Claude usage attribution needs the SessionStart hook.
 	if hasKind(cfg, config.KindClaude) {
-		if hookInstalled() {
+		if missing := hookMissing(cfg); len(missing) == 0 {
 			fmt.Println("✓ usage attribution hook installed")
 		} else {
 			warnings++
-			fmt.Println("! usage attribution hook missing; claude usage shows as unknown. Run `ak hook install`")
+			fmt.Println("! usage attribution hook missing; claude usage shows as unknown. Run `ak hook install`:")
+			for _, m := range missing {
+				fmt.Printf("    %s\n", m)
+			}
 		}
 	}
 
@@ -306,8 +306,8 @@ func isExecutable(p string) bool {
 }
 
 // residualProviderKeys returns provider keys still present in settings.json's env.
-func residualProviderKeys() []string {
-	data, err := os.ReadFile(claudeSettingsPath())
+func residualProviderKeys(path string) []string {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -324,6 +324,25 @@ func residualProviderKeys() []string {
 		}
 	}
 	return out
+}
+
+// claudeSettingsPaths lists the shared settings.json and that of every claude
+// provider with its own config_dir.
+func claudeSettingsPaths(cfg *config.Config) []string {
+	paths := []string{claudeSettingsPath()}
+	seen := map[string]bool{paths[0]: true}
+	for _, name := range cfg.Names() {
+		p := cfg.Providers[name]
+		if p.Kind != config.KindClaude || p.ConfigDir == "" {
+			continue
+		}
+		path := filepath.Join(config.ExpandHome(p.ConfigDir), "settings.json")
+		if !seen[path] {
+			seen[path] = true
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 func claudeSettingsPath() string {

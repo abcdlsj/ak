@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,6 +35,8 @@ var providerFlags = []providerFlag{
 	{"pi-provider", "", "Existing pi provider id to use (skips models.json)", func(p *config.Provider, v string) { p.PiProvider = v }},
 	{"pi-api", "", "pi wire API: anthropic-messages, openai-completions, openai-responses", func(p *config.Provider, v string) { p.PiAPI = v }},
 	{"pi-auth-header", "", "Send the pi key as Authorization: Bearer (true)", func(p *config.Provider, v string) { p.PiAuthHeader = isTrueFlag(v) }},
+	{"config-dir", "", "Isolate claude's whole config here (CLAUDE_CONFIG_DIR)", func(p *config.Provider, v string) { p.ConfigDir = v }},
+	{"codex-home", "", "Isolate codex's whole home here (CODEX_HOME)", func(p *config.Provider, v string) { p.CodexHome = v }},
 	{"display", "", "Name shown in listings", func(p *config.Provider, v string) { p.Display = v }},
 	{"quota", "", "Balance source: deepseek, openrouter, moonshot, siliconflow, or off", func(p *config.Provider, v string) { p.Quota = v }},
 	{"quota-cmd", "", "Shell command printing the balance as JSON or a number", func(p *config.Provider, v string) { p.QuotaCmd = v }},
@@ -103,6 +106,25 @@ func applyPoolFlags(cmd *cobra.Command, p *config.Provider, onlyChanged bool) (c
 	return changed, nil
 }
 
+// applySettingsFlag sets the claude settings layer from --settings, a JSON
+// object; an empty value clears it.
+func applySettingsFlag(cmd *cobra.Command, p *config.Provider) (int, error) {
+	if !cmd.Flags().Changed("settings") {
+		return 0, nil
+	}
+	v, _ := cmd.Flags().GetString("settings")
+	if strings.TrimSpace(v) == "" {
+		p.Settings = nil
+		return 1, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(v), &m); err != nil {
+		return 0, fmt.Errorf("--settings must be a JSON object: %w", err)
+	}
+	p.Settings = m
+	return 1, nil
+}
+
 // parseMemberList trims and drops empty member names.
 func parseMemberList(in []string) []string {
 	var out []string
@@ -163,6 +185,9 @@ func newAddCmd() *cobra.Command {
 			if _, err := applyPoolFlags(cmd, &p, false); err != nil {
 				return err
 			}
+			if _, err := applySettingsFlag(cmd, &p); err != nil {
+				return err
+			}
 			if p.BaseURL == "" && !p.IsPool() && p.PiProvider == "" {
 				d := ui.NewDraft(name)
 				if err := runForm(d, cfg); err != nil {
@@ -181,6 +206,7 @@ func newAddCmd() *cobra.Command {
 	}
 	addProviderFlags(cmd, true)
 	addPoolFlags(cmd)
+	cmd.Flags().String("settings", "", `claude settings layer as a JSON object, e.g. '{"effortLevel":"low"}'; '' clears it`)
 	return cmd
 }
 
@@ -210,6 +236,11 @@ func newEditCmd() *cobra.Command {
 				return err
 			}
 			changed += n
+			n, err = applySettingsFlag(cmd, &p)
+			if err != nil {
+				return err
+			}
+			changed += n
 			if changed == 0 {
 				d := ui.EditDraft(name, p)
 				if err := runForm(d, cfg); err != nil {
@@ -225,6 +256,7 @@ func newEditCmd() *cobra.Command {
 	}
 	addProviderFlags(cmd, false)
 	addPoolFlags(cmd)
+	cmd.Flags().String("settings", "", `claude settings layer as a JSON object, e.g. '{"effortLevel":"low"}'; '' clears it`)
 	return cmd
 }
 

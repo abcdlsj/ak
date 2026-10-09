@@ -103,6 +103,36 @@ in the environment of `ak serve`.
 and derives everything else. Generated shims are marked and idempotent, so
 `ak sync` rewrites only what changed and reclaims what no longer applies.
 
+## Sharing or isolating config
+
+By default every provider of a kind shares the engine's own directory:
+`~/.claude` or `~/.codex`, with its login, sessions, plugins, skills, MCP
+servers and `CLAUDE.md`. Only the endpoint, key and model differ. Two levels
+of separation are available when that is too much sharing:
+
+| Field | Kind | What is separate |
+| --- | --- | --- |
+| `settings` | claude | a settings layer passed as `--settings`; its values replace the shared `settings.json`'s, the rest stays shared |
+| `config_dir` | claude | everything: exports `CLAUDE_CONFIG_DIR` |
+| `codex_home` | codex | everything: exports `CODEX_HOME` |
+
+```toml
+[providers.stepfunclaude.settings]
+effortLevel = "low"
+statusLine = { type = "command", command = "~/bin/stepfun-status" }
+
+[providers.bili-claude]
+config_dir = "~/.claude-bili"     # its own login, MCP, plugins and sessions
+```
+
+Or `ak edit stepfunclaude --settings '{"effortLevel":"low"}'`,
+`ak edit bili-claude --config-dir ~/.claude-bili`. A settings layer cannot
+remove what the shared file sets, and it may not set the endpoint or key in
+its `env`: those come from the provider. A separate directory starts empty,
+so sign in, MCP servers and plugins are set up there again; `ak usage`
+reads its sessions, and `ak hook install` and `ak doctor` cover its
+`settings.json` too.
+
 ## Pi
 
 A `kind = "pi"` provider runs the pi coding agent. There are two shapes:
