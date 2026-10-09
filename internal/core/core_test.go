@@ -112,3 +112,18 @@ func TestRename(t *testing.T) {
 		t.Fatalf("provider_id = %q, want cx", id)
 	}
 }
+
+// A provider pi already knows needs no key of its own; a pool of one does not
+// either, while a pool with a keyless member does.
+func TestQuickStatusPiProviderNeedsNoKey(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["pp"] = config.Provider{Kind: config.KindPi, PiProvider: "commandcode", Model: "m"}
+	cfg.Providers["bare"] = config.Provider{Kind: config.KindPi, BaseURL: "https://x", Model: "m"}
+	cfg.Providers["pool"] = config.Provider{Kind: config.KindPi, Members: []string{"pp"}}
+	cfg.Providers["bad"] = config.Provider{Kind: config.KindPi, Members: []string{"pp", "bare"}}
+	for name, want := range map[string]bool{"pp": false, "bare": true, "pool": false, "bad": true} {
+		if got := QuickStatus(cfg, name).NoKey; got != want {
+			t.Errorf("%s: NoKey = %v, want %v", name, got, want)
+		}
+	}
+}

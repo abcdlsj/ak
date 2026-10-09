@@ -286,16 +286,30 @@ func Statuses(cfg *config.Config) map[string]Status {
 	return out
 }
 
+// QuickStatus is Statuses for one provider without the dry-run sync, so it
+// never reports drift; cheap enough for shell completion.
+func QuickStatus(cfg *config.Config, name string) Status {
+	p := cfg.Providers[name]
+	st := Status{NoKey: noKey(cfg, p)}
+	if eng := provider.EngineFor(p.Kind); eng == nil || findEngine(cfg, eng) == "" {
+		st.NoEngine = true
+	}
+	return st
+}
+
 // noKey reports whether a provider cannot authenticate. A pool holds no key of
 // its own; it is missing one only when a member is.
 func noKey(cfg *config.Config, p config.Provider) bool {
 	if p.IsPool() {
 		for _, m := range p.Members {
-			mp := cfg.Providers[m]
-			if mp.APIKey == "" && mp.APIKeyRef == "" {
+			if noKey(cfg, cfg.Providers[m]) {
 				return true
 			}
 		}
+		return false
+	}
+	// A provider pi already knows signs in through pi itself.
+	if p.PiProvider != "" {
 		return false
 	}
 	return p.APIKey == "" && p.APIKeyRef == ""
