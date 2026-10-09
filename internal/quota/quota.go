@@ -51,6 +51,56 @@ type Quota struct {
 	NoSource bool `json:"no_source,omitempty"`
 }
 
+// Spent reports whether the provider has nothing left to spend: a plan window
+// used up, or a balance at or below zero. back is when it has allowance again,
+// the latest reset among its spent windows, or nil when that is not known. A
+// failed query is never spent: nothing is known of it.
+func (q Quota) Spent() (spent bool, back *time.Time) {
+	if q.Error != "" {
+		return false, nil
+	}
+	if q.Balance != nil && *q.Balance <= 0 {
+		spent = true
+	}
+	for _, w := range q.Windows {
+		if w.Used < 100 {
+			continue
+		}
+		spent = true
+		if w.Resets == nil {
+			// One spent window with no reset time makes the whole wait unknown.
+			return true, nil
+		}
+		if back == nil || w.Resets.After(*back) {
+			t := *w.Resets
+			back = &t
+		}
+	}
+	if !spent {
+		return false, nil
+	}
+	if q.Balance != nil && *q.Balance <= 0 {
+		// A balance does not reset on its own.
+		return true, nil
+	}
+	return true, back
+}
+
+// NextReset is the soonest reset among windows with allowance left, or nil.
+func (q Quota) NextReset() *time.Time {
+	var out *time.Time
+	for _, w := range q.Windows {
+		if w.Used >= 100 || w.Resets == nil {
+			continue
+		}
+		if out == nil || w.Resets.Before(*out) {
+			t := *w.Resets
+			out = &t
+		}
+	}
+	return out
+}
+
 // ErrNoSource is returned when no source matches a provider's endpoint.
 var ErrNoSource = errors.New("no balance source")
 
@@ -114,6 +164,16 @@ func Query(ctx context.Context, name string, p config.Provider, key string) Quot
 		q.Error = err.Error()
 	}
 	return q
+}
+
+// HasSource reports whether a balance query can be made for the provider: it
+// has quota_cmd, or a source is named or detected and not turned off.
+func HasSource(p config.Provider) bool {
+	if p.QuotaCmd != "" {
+		return true
+	}
+	_, err := resolve(p)
+	return err == nil
 }
 
 // resolve picks the source for a provider: the named one, else the first whose

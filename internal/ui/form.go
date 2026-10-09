@@ -251,7 +251,7 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 		huh.NewInput().Title("Pool members").Value(&d.Members).
 			Description("Comma-separated provider names; blank for a normal provider"),
 		huh.NewSelect[string]().Title("Pool strategy").Value(&d.Strategy).
-			Options(huh.NewOption("order (failover)", config.StrategyOrder), huh.NewOption("rotate", config.StrategyRotate), huh.NewOption("least-used", config.StrategyLeastUsed)),
+			Options(huh.NewOption("order (failover)", config.StrategyOrder), huh.NewOption("rotate", config.StrategyRotate), huh.NewOption("least-used", config.StrategyLeastUsed), huh.NewOption("smart (soonest reset first)", config.StrategySmart)),
 		huh.NewInput().Title("API endpoint").Value(&d.BaseURL).
 			Validate(func(s string) error {
 				if strings.TrimSpace(s) != "" || len(splitMembers(d.Members)) > 0 {

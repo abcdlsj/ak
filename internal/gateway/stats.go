@@ -118,7 +118,7 @@ func (s *state) snapshot(cfg *config.Config) Stats {
 			continue
 		}
 		ps := PoolStats{Name: name}
-		for _, m := range p.Members {
+		for _, m := range cfg.Leaves(name) {
 			k := key(name, m)
 			ms := MemberStats{
 				Name:   m,

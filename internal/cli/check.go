@@ -81,7 +81,11 @@ func checkRows(cfg *config.Config, args []string) ([]string, error) {
 			if _, ok := cfg.Providers[m]; !ok {
 				return nil, fmt.Errorf("pool %q names missing member %q", n, m)
 			}
-			add(m)
+		}
+		if p.IsPool() {
+			for _, m := range cfg.Leaves(n) {
+				add(m)
+			}
 		}
 		add(n)
 	}
@@ -124,8 +128,9 @@ func runChecks(ctx context.Context, cfg *config.Config, args []string, resolver 
 		if !p.IsPool() {
 			continue
 		}
-		members := make([]probe.Result, 0, len(p.Members))
-		for _, m := range p.Members {
+		leaves := cfg.Leaves(name)
+		members := make([]probe.Result, 0, len(leaves))
+		for _, m := range leaves {
 			members = append(members, byName[m])
 		}
 		results[i] = probe.Aggregate(name, members)

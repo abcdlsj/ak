@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // nameRe constrains provider names so they are safe as a command name suffix.
@@ -273,14 +274,17 @@ func validateQuota(name, q string) error {
 	return nil
 }
 
-// validatePool checks a routing pool: its members exist, share its kind, are
-// not itself and are not other pools (one level only for now), and its
+// validatePool checks a routing pool: its members exist, share its kind and
+// wire, do not lead back to it and nest no deeper than MaxPoolDepth, and its
 // strategy and model mapping name members.
 func validatePool(cfg *Config, name string, p Provider) error {
 	switch p.Strategy {
-	case "", StrategyOrder, StrategyRotate, StrategyLeastUsed:
+	case "", StrategyOrder, StrategyRotate, StrategyLeastUsed, StrategySmart:
 	default:
-		return fmt.Errorf("provider %q has invalid strategy %q; must be order, rotate or least-used", name, p.Strategy)
+		return fmt.Errorf("provider %q has invalid strategy %q; must be order, rotate, least-used or smart", name, p.Strategy)
+	}
+	if err := poolDepth(cfg, name, nil); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	for _, m := range p.Members {
@@ -295,13 +299,10 @@ func validatePool(cfg *Config, name string, p Provider) error {
 		if !ok {
 			return fmt.Errorf("pool %q names unknown member %q", name, m)
 		}
-		if mp.IsPool() {
-			return fmt.Errorf("pool %q names %q, which is itself a pool; pools may not nest", name, m)
-		}
 		if mp.Kind != p.Kind {
 			return fmt.Errorf("pool %q is %s but member %q is %s; a pool's members must share its kind", name, p.Kind, m, mp.Kind)
 		}
-		if mp.BaseURL == "" {
+		if mp.BaseURL == "" && !mp.IsPool() {
 			return fmt.Errorf("pool %q names %q, which has no base_url (a pi provider that uses pi_provider); a pool member needs an endpoint", name, m)
 		}
 		if w, mw := wireOf(p), wireOf(mp); w != mw {
@@ -318,6 +319,30 @@ func validatePool(cfg *Config, name string, p Provider) error {
 		return fmt.Errorf("pi pool %q needs a model; set model to the name to request", name)
 	}
 	return validateVariants(name, p)
+}
+
+// poolDepth rejects a pool whose members lead back to it, or that nests
+// deeper than MaxPoolDepth.
+func poolDepth(cfg *Config, name string, path []string) error {
+	for _, n := range path {
+		if n == name {
+			return fmt.Errorf("pool %q leads back to itself: %s", path[0], strings.Join(append(path, name), " → "))
+		}
+	}
+	p := cfg.Providers[name]
+	if !p.IsPool() {
+		return nil
+	}
+	path = append(path, name)
+	if len(path) > MaxPoolDepth {
+		return fmt.Errorf("pool %q nests deeper than %d: %s", path[0], MaxPoolDepth, strings.Join(path, " → "))
+	}
+	for _, m := range p.Members {
+		if err := poolDepth(cfg, m, path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateVariants(name string, p Provider) error {

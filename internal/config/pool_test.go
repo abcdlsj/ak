@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/pelletier/go-toml/v2"
@@ -56,13 +58,48 @@ func TestValidatePoolErrors(t *testing.T) {
 	}
 }
 
-func TestValidatePoolCannotNest(t *testing.T) {
-	cfg := Default()
-	cfg.Providers["inner"] = Provider{Kind: KindClaude, Members: []string{"a"}}
-	cfg.Providers["a"] = Provider{Kind: KindClaude, BaseURL: "https://a.example", APIKey: "k"}
-	cfg.Providers["outer"] = Provider{Kind: KindClaude, Members: []string{"inner"}}
-	if err := Validate(cfg); err == nil {
-		t.Fatal("nested pool accepted")
+func TestValidatePoolNesting(t *testing.T) {
+	base := func() *Config {
+		cfg := Default()
+		cfg.Providers["a"] = Provider{Kind: KindClaude, BaseURL: "https://a.example", APIKey: "k"}
+		cfg.Providers["b"] = Provider{Kind: KindClaude, BaseURL: "https://b.example", APIKey: "k"}
+		cfg.Providers["inner"] = Provider{Kind: KindClaude, Members: []string{"a", "b"}}
+		cfg.Providers["outer"] = Provider{Kind: KindClaude, Members: []string{"inner", "a"}, Strategy: StrategySmart}
+		return cfg
+	}
+	cfg := base()
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("nested pool rejected: %v", err)
+	}
+	if got := cfg.Leaves("outer"); strings.Join(got, ",") != "a,b" {
+		t.Errorf("Leaves(outer) = %v, want [a b]", got)
+	}
+	if got := cfg.Leaves("a"); strings.Join(got, ",") != "a" {
+		t.Errorf("Leaves(a) = %v", got)
+	}
+
+	cyc := base()
+	cyc.Providers["inner"] = Provider{Kind: KindClaude, Members: []string{"a", "outer"}}
+	if err := Validate(cyc); err == nil || !strings.Contains(err.Error(), "leads back") {
+		t.Fatalf("cycle: %v", err)
+	}
+
+	deep := base()
+	prev := "a"
+	for i := 0; i < MaxPoolDepth+1; i++ {
+		n := fmt.Sprintf("p%d", i)
+		deep.Providers[n] = Provider{Kind: KindClaude, Members: []string{prev}}
+		prev = n
+	}
+	if err := Validate(deep); err == nil || !strings.Contains(err.Error(), "deeper") {
+		t.Fatalf("depth: %v", err)
+	}
+
+	kind := base()
+	kind.Providers["inner"] = Provider{Kind: KindCodex, Members: []string{"c"}}
+	kind.Providers["c"] = Provider{Kind: KindCodex, BaseURL: "https://c.example", APIKey: "k"}
+	if err := Validate(kind); err == nil {
+		t.Fatal("a claude pool took a codex pool")
 	}
 }
 

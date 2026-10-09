@@ -105,14 +105,14 @@ func applyProviderFlags(cmd *cobra.Command, p *config.Provider, onlyChanged bool
 
 // addPoolFlags adds the flags that turn a provider into a routing pool.
 func addPoolFlags(cmd *cobra.Command) {
-	cmd.Flags().StringArray("member", nil, "pool member provider name (repeatable)")
-	cmd.Flags().String("strategy", "", "pool strategy: order, rotate or least-used")
+	cmd.Flags().StringArray("member", nil, "pool member provider name, or another pool (repeatable)")
+	cmd.Flags().String("strategy", "", "pool strategy: order, rotate, least-used or smart (soonest quota reset first)")
 	cmd.Flags().StringArray("map", nil, "pool model mapping member=model (repeatable)")
 	_ = cmd.RegisterFlagCompletionFunc("member", func(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		used, _ := cmd.Flags().GetStringArray("member")
 		return providerNames(used, toComplete), cobra.ShellCompDirectiveNoFileComp
 	})
-	_ = cmd.RegisterFlagCompletionFunc("strategy", cobra.FixedCompletions([]string{"order", "rotate", "least-used"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("strategy", cobra.FixedCompletions([]string{"order", "rotate", "least-used", "smart"}, cobra.ShellCompDirectiveNoFileComp))
 }
 
 // applyPoolFlags sets the pool fields; onlyChanged skips flags the user did not

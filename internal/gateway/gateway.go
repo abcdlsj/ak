@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/quota"
 	"github.com/abcdlsj/ak/internal/secrets"
 )
 
@@ -108,6 +109,11 @@ type Server struct {
 
 	// Logf, when set, logs routing decisions.
 	Logf func(format string, a ...any)
+
+	// queryQuota reads a provider's quota for smart pools; quotaKick asks for
+	// a fresh reading, as after a reload.
+	queryQuota func(ctx context.Context, name string, p config.Provider, key string) quota.Quota
+	quotaKick  chan struct{}
 }
 
 // New builds a server over a config.
@@ -119,6 +125,9 @@ func New(cfg *config.Config) *Server {
 		client: &http.Client{Transport: t},
 		st:     newState(),
 		lanes:  newLanes(),
+
+		queryQuota: quota.Query,
+		quotaKick:  make(chan struct{}, 1),
 	}
 	s.cfg.Store(cfg)
 	if dir, err := config.DataDir(); err == nil {
@@ -135,6 +144,10 @@ func (s *Server) config() *config.Config { return s.cfg.Load() }
 func (s *Server) Reload(cfg *config.Config) {
 	s.cfg.Store(cfg)
 	s.logf("gateway reloaded %d provider(s)", len(cfg.Providers))
+	select {
+	case s.quotaKick <- struct{}{}:
+	default:
+	}
 }
 
 // Log writes a gateway message where Logf says to, else to the standard log.
@@ -160,6 +173,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		CoolingUntil *time.Time `json:"cooling_until,omitempty"`
 		OK           int64      `json:"ok"`
 		Fail         int64      `json:"fail"`
+		// Spent and Back are the last quota reading, for smart pools.
+		Spent *bool      `json:"spent,omitempty"`
+		Back  *time.Time `json:"back,omitempty"`
 	}
 	pools := map[string]map[string]memberHealth{}
 	for name, p := range cfg.Providers {
@@ -167,9 +183,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		ms := map[string]memberHealth{}
-		for _, m := range p.Members {
+		for _, m := range cfg.Leaves(name) {
 			k := key(name, m)
 			h := memberHealth{OK: s.st.okN[k], Fail: s.st.failN[k]}
+			if a := s.st.quota[m]; a.known {
+				h.Spent, h.Back = &a.spent, a.back
+			}
 			if until, ok := s.st.cool[k]; ok && until.After(now) {
 				u := until
 				h.Cooling, h.CoolingUntil = true, &u
@@ -206,6 +225,7 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 	}()
 	stopFlush := make(chan struct{})
 	go s.flushSticks(ctx, stopFlush)
+	go s.refreshQuota(ctx)
 
 	s.logf("gateway listening on http://%s", ln.Addr())
 	select {
@@ -279,15 +299,16 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conv := conversationKey(r, body)
-	members := s.st.candidates(name, p, conv)
-	if len(members) == 0 {
+	routes := s.st.candidates(cfg, name, p, conv)
+	if len(routes) == 0 {
 		http.Error(w, "ak: pool "+name+" has no members", http.StatusServiceUnavailable)
 		return
 	}
 
 	var lastErr string
 	var tried []string
-	for i, m := range members {
+	for i, rt := range routes {
+		m := rt.member
 		mp := cfg.Providers[m]
 		// A member with a concurrency bound queues its turn; waiting is not
 		// failing and never moves the request to another member.
@@ -297,7 +318,7 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		}
 		var res forwardOutcome
 		for attempt := 0; ; attempt++ {
-			res = s.forward(w, r, name, m, tail, p, mp, body)
+			res = s.forward(w, r, name, m, tail, rt.model, mp, body)
 			if res.handled {
 				release()
 				switch {
@@ -353,7 +374,7 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		}
 		s.st.failed(name, m, res.retryAfter)
 		s.logf("pool %s: member %s failed (%s); trying next", name, m, lastErr)
-		if i == len(members)-1 {
+		if i == len(routes)-1 {
 			break
 		}
 	}
@@ -400,14 +421,14 @@ type forwardOutcome struct {
 }
 
 // forward sends the request to one member.
-func (s *Server) forward(w http.ResponseWriter, r *http.Request, pool, member, tail string, pp, mp config.Provider, body []byte) forwardOutcome {
+func (s *Server) forward(w http.ResponseWriter, r *http.Request, pool, member, tail, model string, mp config.Provider, body []byte) forwardOutcome {
 	target := strings.TrimRight(mp.BaseURL, "/") + "/" + tail
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
 
 	out := body
-	if model := mpModel(member, pp); model != "" {
+	if model != "" {
 		out = rewriteModel(body, model)
 	}
 
@@ -514,15 +535,6 @@ func snippet(b []byte) string {
 		s = s[:200] + "…"
 	}
 	return s
-}
-
-// mpModel is the model to ask the member for: the pool's mapping for it, else
-// empty meaning pass the request's model through.
-func mpModel(member string, pool config.Provider) string {
-	if pool.MemberModels == nil {
-		return ""
-	}
-	return pool.MemberModels[member]
 }
 
 // rewriteModel replaces the body's top-level model field, leaving every other
@@ -1002,6 +1014,7 @@ type state struct {
 	okN    map[string]int64      // pool\x00member -> requests served
 	failN  map[string]int64      // pool\x00member -> failed attempts
 	sticks map[string]stickEntry // pool\x00conversation -> member that answered it
+	quota  map[string]allowance  // concrete provider -> its last quota reading, for smart
 	dirty  bool                  // the conversation table changed since it was saved
 }
 
@@ -1145,6 +1158,7 @@ func newState() *state {
 		okN:    map[string]int64{},
 		failN:  map[string]int64{},
 		sticks: map[string]stickEntry{},
+		quota:  map[string]allowance{},
 	}
 }
 
@@ -1154,46 +1168,48 @@ func (u tokenUse) now(t time.Time) float64 {
 	return u.n * math.Exp2(-t.Sub(u.at).Seconds()/halfLife.Seconds())
 }
 
-// candidates orders a pool's members for one request: healthy members by the
-// strategy first — the conversation's own answerer ahead of them — then cooling
-// ones by when they come back.
-func (s *state) candidates(pool string, p config.Provider, conv string) []string {
+// route is one way to answer a pool's request: a concrete provider, and the
+// model to ask it for (empty passes the request's model through).
+type route struct {
+	member string
+	model  string
+}
+
+// candidates orders the concrete providers a pool's request may go to: healthy
+// ones by the strategy at each level of nesting first — the conversation's own
+// answerer ahead of them — then cooling ones by when they come back.
+//
+// Health, usage and affinity are kept per (pool, concrete provider), for the
+// pool the request came to, however deep the provider sits in it.
+func (s *state) candidates(cfg *config.Config, pool string, p config.Provider, conv string) []route {
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var healthy, cooling []string
-	for _, m := range p.Members {
-		if until, ok := s.cool[key(pool, m)]; ok && until.After(now) {
-			cooling = append(cooling, m)
-			continue
+	var healthy, cooling []route
+	seen := map[string]bool{}
+	for _, rt := range s.order(cfg, pool, pool, p, "", now, 0) {
+		if seen[rt.member] {
+			continue // reached through two sub-pools: the first place counts
 		}
-		healthy = append(healthy, m)
+		seen[rt.member] = true
+		if s.coolingUntil(pool, rt.member, now).IsZero() {
+			healthy = append(healthy, rt)
+		} else {
+			cooling = append(cooling, rt)
+		}
 	}
 	sort.SliceStable(cooling, func(i, j int) bool {
-		return s.cool[key(pool, cooling[i])].Before(s.cool[key(pool, cooling[j])])
+		return s.coolingUntil(pool, cooling[i].member, now).Before(s.coolingUntil(pool, cooling[j].member, now))
 	})
-
-	switch p.StrategyOrDefault() {
-	case config.StrategyRotate:
-		if n := len(healthy); n > 1 {
-			k := s.turns[pool] % n
-			s.turns[pool]++
-			healthy = append(append([]string{}, healthy[k:]...), healthy[:k]...)
-		}
-	case config.StrategyLeastUsed:
-		sort.SliceStable(healthy, func(i, j int) bool {
-			return s.used[key(pool, healthy[i])].now(now) < s.used[key(pool, healthy[j])].now(now)
-		})
-	}
 
 	// Affinity: a conversation stays with the member that answered it, so what
 	// the vendor cached of it is read again rather than paid for afresh.
 	if conv != "" {
 		if m, ok := s.stickOf(pool, conv, now); ok {
 			for i, h := range healthy {
-				if h == m {
-					ordered := make([]string, 0, len(healthy))
+				if h.member == m {
+					ordered := make([]route, 0, len(healthy))
 					ordered = append(ordered, h)
 					ordered = append(ordered, healthy[:i]...)
 					ordered = append(ordered, healthy[i+1:]...)
@@ -1204,6 +1220,94 @@ func (s *state) candidates(pool string, p config.Provider, conv string) []string
 		}
 	}
 	return append(healthy, cooling...)
+}
+
+// coolingUntil is when a pool's member comes back, or zero when it is not
+// cooling. The caller holds the lock.
+func (s *state) coolingUntil(pool, member string, now time.Time) time.Time {
+	if until, ok := s.cool[key(pool, member)]; ok && until.After(now) {
+		return until
+	}
+	return time.Time{}
+}
+
+// order lists the concrete providers under p, reached as name inside the
+// request's pool top, by p's strategy; a member that is a pool is expanded by
+// its own. A mapping deeper down overrides one above it. The caller holds the
+// lock.
+func (s *state) order(cfg *config.Config, top, name string, p config.Provider, model string, now time.Time, depth int) []route {
+	type entry struct {
+		routes  []route
+		healthy bool
+		back    time.Time // soonest a cooling entry comes back
+		used    float64
+		rank    smartRank
+	}
+	var healthy, cooling []entry
+	for _, m := range p.Members {
+		mp, ok := cfg.Providers[m]
+		if !ok {
+			continue
+		}
+		mm := model
+		if v := p.MemberModels[m]; v != "" {
+			mm = v
+		}
+		var rs []route
+		if mp.IsPool() {
+			if depth >= config.MaxPoolDepth {
+				continue
+			}
+			rs = s.order(cfg, top, m, mp, mm, now, depth+1)
+		} else {
+			rs = []route{{member: m, model: mm}}
+		}
+		if len(rs) == 0 {
+			continue
+		}
+		e := entry{routes: rs, rank: smartRank{class: rankUnknown}}
+		for i, rt := range rs {
+			until := s.coolingUntil(top, rt.member, now)
+			if until.IsZero() {
+				e.healthy = true
+			} else if e.back.IsZero() || until.Before(e.back) {
+				e.back = until
+			}
+			e.used += s.used[key(top, rt.member)].now(now)
+			if r := s.quota[rt.member].rank(); i == 0 || r.before(e.rank) {
+				e.rank = r
+			}
+		}
+		if e.healthy {
+			healthy = append(healthy, e)
+		} else {
+			cooling = append(cooling, e)
+		}
+	}
+	sort.SliceStable(cooling, func(i, j int) bool { return cooling[i].back.Before(cooling[j].back) })
+
+	switch p.StrategyOrDefault() {
+	case config.StrategyRotate:
+		if n := len(healthy); n > 1 {
+			tk := top
+			if name != top {
+				tk = key(top, name)
+			}
+			k := s.turns[tk] % n
+			s.turns[tk]++
+			healthy = append(append([]entry{}, healthy[k:]...), healthy[:k]...)
+		}
+	case config.StrategyLeastUsed:
+		sort.SliceStable(healthy, func(i, j int) bool { return healthy[i].used < healthy[j].used })
+	case config.StrategySmart:
+		sort.SliceStable(healthy, func(i, j int) bool { return healthy[i].rank.before(healthy[j].rank) })
+	}
+
+	var out []route
+	for _, e := range append(healthy, cooling...) {
+		out = append(out, e.routes...)
+	}
+	return out
 }
 
 // stickOf is the member that answered a conversation, if it is still fresh.

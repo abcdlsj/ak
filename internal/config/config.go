@@ -34,6 +34,9 @@ const (
 	StrategyRotate = "rotate"
 	// StrategyLeastUsed prefers the member that has served the fewest requests lately.
 	StrategyLeastUsed = "least-used"
+	// StrategySmart prefers, among members with allowance left, the one whose
+	// plan window resets soonest, so the least of it goes unused.
+	StrategySmart = "smart"
 )
 
 // Kind distinguishes the engine behind a provider.
@@ -137,7 +140,8 @@ type Provider struct {
 	// member for, letting one pool map a logical model onto each upstream's
 	// own name. A member with no entry gets the requested model unchanged.
 	MemberModels map[string]string `toml:"member_models,omitempty"`
-	// Strategy is how a request picks a member: order, rotate or least-used.
+	// Strategy is how a request picks a member: order, rotate, least-used or
+	// smart. A member may itself be a pool, which picks among its own.
 	// Empty means order.
 	Strategy string `toml:"strategy,omitempty"`
 	// MaxConcurrency bounds how many requests the pool gateway sends to this
@@ -189,6 +193,38 @@ type Variant struct {
 // IsPool reports whether the provider routes over other providers rather
 // than talking to an upstream itself.
 func (p Provider) IsPool() bool { return len(p.Members) > 0 }
+
+// MaxPoolDepth bounds how deeply pools may nest.
+const MaxPoolDepth = 4
+
+// Leaves expands a provider into the concrete providers it routes to, in
+// member order: itself when it is not a pool, else its members' leaves, each
+// once. A missing member or a cycle is skipped; Validate rejects both.
+func (c *Config) Leaves(name string) []string {
+	seen := map[string]bool{}
+	var out []string
+	var walk func(n string, depth int, path map[string]bool)
+	walk = func(n string, depth int, path map[string]bool) {
+		p, ok := c.Providers[n]
+		if !ok || path[n] || depth > MaxPoolDepth {
+			return
+		}
+		if !p.IsPool() {
+			if !seen[n] {
+				seen[n] = true
+				out = append(out, n)
+			}
+			return
+		}
+		path[n] = true
+		for _, m := range p.Members {
+			walk(m, depth+1, path)
+		}
+		delete(path, n)
+	}
+	walk(name, 0, map[string]bool{})
+	return out
+}
 
 // StrategyOrDefault returns the pool's strategy, defaulting to order.
 func (p Provider) StrategyOrDefault() string {

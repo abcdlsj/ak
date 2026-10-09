@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -198,6 +199,25 @@ func runDoctor(cfg *config.Config) error {
 		fmt.Println("! these quota plugins do not load and are skipped:")
 		for _, err := range errs {
 			fmt.Printf("    %s\n", err)
+		}
+	}
+
+	// 12. A smart pool ranks members by their quota; one without a source
+	// is never ranked ahead of those with one.
+	for _, name := range poolNames(cfg) {
+		if cfg.Providers[name].StrategyOrDefault() != config.StrategySmart {
+			continue
+		}
+		var blind []string
+		for _, m := range cfg.Leaves(name) {
+			if !quota.HasSource(cfg.Providers[m]) {
+				blind = append(blind, m)
+			}
+		}
+		if len(blind) > 0 {
+			warnings++
+			fmt.Printf("! smart pool %s cannot read the quota of %s; they rank after members with allowance that resets\n",
+				name, strings.Join(blind, ", "))
 		}
 	}
 
