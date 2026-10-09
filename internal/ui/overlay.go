@@ -14,19 +14,24 @@ type formOverlay struct {
 	draft   *Draft
 	editing bool
 	form    *huh.Form
+	// picking is set while a new provider's engine and preset are asked,
+	// before the main form.
+	picking bool
 }
 
 func newFormOverlay(d *Draft, editing bool) *formOverlay {
-	return &formOverlay{draft: d, editing: editing}
+	return &formOverlay{draft: d, editing: editing, picking: !editing && d.IsNew()}
 }
 
 func (o *formOverlay) init(a *app) tea.Cmd { return o.build(a).Init() }
 
 func (o *formOverlay) build(a *app) *huh.Form {
 	if o.form == nil {
-		o.form = o.draft.Form(func(n string) bool { _, ok := a.cfg.Providers[n]; return ok }).
-			WithWidth(min(a.contentWidth(), 80)).
-			WithShowHelp(true)
+		f := o.draft.PresetForm()
+		if !o.picking {
+			f = o.draft.Form(func(n string) bool { _, ok := a.cfg.Providers[n]; return ok })
+		}
+		o.form = f.WithWidth(min(a.contentWidth(), 80)).WithShowHelp(true)
 	}
 	return o.form
 }
@@ -38,8 +43,11 @@ func (o *formOverlay) update(a *app, msg tea.Msg) (bool, tea.Cmd) {
 		case "esc", "ctrl+c":
 			return true, a.notify("cancelled", false)
 		case "ctrl+s":
-			// Save from any field, without stepping through the rest.
-			return o.save(a)
+			// Save from any field, without stepping through the rest. While
+			// picking a preset there is nothing to save yet.
+			if !o.picking {
+				return o.save(a)
+			}
 		}
 	}
 	m, cmd := f.Update(msg)
@@ -50,6 +58,12 @@ func (o *formOverlay) update(a *app, msg tea.Msg) (bool, tea.Cmd) {
 	case huh.StateAborted:
 		return true, a.notify("cancelled", false)
 	case huh.StateCompleted:
+		if o.picking {
+			o.picking = false
+			o.draft.ApplyPreset()
+			o.form = nil
+			return false, o.init(a)
+		}
 		return o.save(a)
 	}
 	return false, cmd
