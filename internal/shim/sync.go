@@ -114,7 +114,7 @@ func (s *Syncer) Sync() (Report, error) {
 			Name: name, Kind: kind,
 			Bin:     s.resolveBin(eng.ConfiguredBin(s.Cfg.Settings), eng.BinName()),
 			BinName: eng.BinName(), EnvVar: eng.BinEnvVar(),
-			Launch: launch, Self: s.self(),
+			Launch: launch, Self: s.self(), Pool: p.IsPool(),
 		}), shimMode)
 
 		for _, f := range launch.Files {

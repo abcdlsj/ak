@@ -188,7 +188,7 @@ func runDoctor(cfg *config.Config) error {
 			fmt.Printf("✓ pool gateway reachable at %s\n", addr)
 		} else {
 			warnings++
-			fmt.Printf("! %d pool(s) configured but nothing is listening on %s; run `ak serve`\n", len(pools), addr)
+			fmt.Printf("! %d pool(s) configured but nothing is listening on %s; a pool command starts it, or run `ak serve`\n", len(pools), addr)
 		}
 	}
 

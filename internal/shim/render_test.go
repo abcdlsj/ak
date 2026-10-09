@@ -256,3 +256,35 @@ func TestDefaultVariantApplied(t *testing.T) {
 		t.Fatalf("explicit variant did not override the default:\n%s", out)
 	}
 }
+
+// A pool command asks ak to bring the gateway up before it launches, and does
+// not launch when that fails; a normal command never asks.
+func TestPoolStartsGateway(t *testing.T) {
+	f := newSyncFixture(t)
+	f.cfg.Providers["a"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://x", APIKey: "k", Model: "m"}
+	f.cfg.Providers["pl"] = config.Provider{Kind: config.KindClaude, Members: []string{"a"}, Model: "m"}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "asked")
+	self := filepath.Join(dir, "ak")
+	body := "#!/usr/bin/env bash\n[ \"$1\" = __gateway-up ] && touch " + marker + " && [ -z \"${FAIL:-}\" ]\n"
+	if err := os.WriteFile(self, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.sync(t, self)
+
+	run(t, filepath.Join(f.bin, "ak-a"), nil)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a normal provider asked for the gateway")
+	}
+	if out := run(t, filepath.Join(f.bin, "ak-pl"), nil); !strings.Contains(out, "args=") {
+		t.Fatalf("pool did not launch:\n%s", out)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("pool command did not ask for the gateway")
+	}
+	cmd := exec.Command(filepath.Join(f.bin, "ak-pl"))
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "FAIL=1"}
+	if out, err := cmd.CombinedOutput(); err == nil || strings.Contains(string(out), "args=") {
+		t.Fatalf("pool launched although the gateway did not start:\n%s", out)
+	}
+}

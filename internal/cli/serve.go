@@ -2,8 +2,11 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -20,7 +23,9 @@ func newServeCmd() *cobra.Command {
 		Long: `Run the loopback gateway that provider pools route through.
 
 Every pool command points its engine at this gateway instead of an upstream, so
-it must be running for a pool command to work. Normal providers do not use it.
+it must be running for a pool command to work; a pool command starts it in the
+background when it is not, logging to ~/.local/share/ak/gateway.log. Normal
+providers do not use it.
 
 The gateway reloads providers.toml when it changes (or on SIGHUP), so an edited
 or renamed pool takes effect without a restart. Changing settings.gateway_addr
@@ -31,10 +36,7 @@ still needs a restart, since that is where it listens.`,
 				return err
 			}
 			if addr == "" {
-				addr = cfg.Settings.GatewayAddr
-			}
-			if addr == "" {
-				addr = config.DefaultGatewayAddr
+				addr = gatewayAddr(cfg)
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
@@ -49,6 +51,82 @@ still needs a restart, since that is where it listens.`,
 	}
 	cmd.Flags().StringVar(&addr, "addr", "", "listen address, host:port (default settings.gateway_addr)")
 	return cmd
+}
+
+// newGatewayUpCmd makes sure the gateway is listening, starting `ak serve` in
+// the background when it is not. Pool commands call it before they launch.
+func newGatewayUpCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "__gateway-up",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			return ensureGateway(gatewayAddr(cfg))
+		},
+	}
+}
+
+func gatewayAddr(cfg *config.Config) string {
+	if cfg.Settings.GatewayAddr != "" {
+		return cfg.Settings.GatewayAddr
+	}
+	return config.DefaultGatewayAddr
+}
+
+// ensureGateway starts a detached `ak serve` unless addr already answers, and
+// waits for it to listen. Its output goes to gateway.log in ak's data dir.
+func ensureGateway(addr string) error {
+	if gatewayUp(addr) {
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	dir, err := config.DataDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	logPath := filepath.Join(dir, "gateway.log")
+	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer logf.Close()
+	c := exec.Command(exe, "serve")
+	c.Stdout, c.Stderr = logf, logf
+	// Its own session, so closing the terminal or the agent does not stop it.
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := c.Start(); err != nil {
+		return fmt.Errorf("start ak serve: %w", err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- c.Wait() }()
+	deadline := time.After(5 * time.Second)
+	for {
+		if gatewayUp(addr) {
+			fmt.Fprintf(os.Stderr, "ak: started the pool gateway on %s (log: %s)\n", addr, logPath)
+			return nil
+		}
+		select {
+		case <-exited:
+			// Another command may have started it first.
+			if gatewayUp(addr) {
+				return nil
+			}
+			return fmt.Errorf("ak serve exited; see %s", logPath)
+		case <-deadline:
+			return fmt.Errorf("ak serve did not listen on %s within 5s; see %s", addr, logPath)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // watchConfig reloads the gateway when providers.toml changes, so an edited
