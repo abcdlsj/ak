@@ -166,7 +166,7 @@ type Provider struct {
 	QuotaVars map[string]string `toml:"quota_vars,omitempty"`
 	// Pricing overrides the model pricing that models.dev cannot resolve.
 	Pricing *Pricing `toml:"pricing,omitempty"`
-	// Variants are the positional-argument variants of a command.
+	// Variants are the named variants a launch selects with <provider>:<variant>.
 	Variants map[string]Variant `toml:"variants,omitempty"`
 }
 

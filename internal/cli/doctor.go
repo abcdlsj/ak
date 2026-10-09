@@ -121,13 +121,13 @@ func runDoctor(cfg *config.Config) error {
 		}
 	}
 
-	// 5. Claude usage attribution needs the SessionStart hook.
+	// 5. ak passes each new claude session its own id and records it, so the
+	// SessionStart hook only adds sessions ak did not start (a fork).
 	if hasKind(cfg, config.KindClaude) {
 		if missing := hookMissing(cfg); len(missing) == 0 {
 			fmt.Println("✓ usage attribution hook installed")
 		} else {
-			warnings++
-			fmt.Println("! usage attribution hook missing; claude usage shows as unknown. Run `ak hook install`:")
+			fmt.Println("· usage attribution hook not installed; sessions ak starts are attributed anyway. `ak hook install` also covers forked sessions:")
 			for _, m := range missing {
 				fmt.Printf("    %s\n", m)
 			}

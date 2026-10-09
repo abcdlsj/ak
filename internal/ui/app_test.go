@@ -175,3 +175,17 @@ func TestDefaultVariantSkipsPicker(t *testing.T) {
 		t.Fatalf("overlay=%v selection=%+v quitting=%v", a.overlay, a.selection, a.quitting)
 	}
 }
+
+// With nothing configured, the launcher opens on the add form.
+func TestOnboardingOpensAddForm(t *testing.T) {
+	a := newApp(config.Default())
+	a.Init()
+	if _, ok := a.overlay.(*formOverlay); !ok {
+		t.Fatalf("overlay = %T, want the add form", a.overlay)
+	}
+	b := newApp(testConfig())
+	b.Init()
+	if b.overlay != nil {
+		t.Fatalf("overlay = %T with providers configured", b.overlay)
+	}
+}

@@ -11,31 +11,18 @@ import (
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 // Reserved holds ak's own subcommand names. A provider must not claim one,
-// otherwise `ak <name>` becomes ambiguous.
+// otherwise `ak <name>` becomes ambiguous. The cli registers its command tree
+// with Reserve; listed here are the names cobra adds on its own, and run and
+// pick, kept free for ak's use.
 var Reserved = map[string]bool{
-	"ui": true, "pick": true, "list": true, "ls": true, "add": true,
-	"rm": true, "remove": true, "edit": true, "sync": true, "doctor": true,
-	"import": true, "default": true, "env": true, "usage": true,
-	"completion": true, "help": true, "version": true, "run": true,
-	"prune-codexa": true, "rename": true, "mv": true, "serve": true,
-	"quota": true, "preset": true, "check": true, "models": true,
+	"help": true, "completion": true, "run": true, "pick": true,
 }
 
-// claudeSubcommands and codexSubcommands are the banned variant names.
-// A variant is matched against the first positional argument, so a variant
-// named like one of the engine's own subcommands would swallow it and make
-// that subcommand unreachable.
-var claudeSubcommands = map[string]bool{
-	"mcp": true, "update": true, "doctor": true, "config": true,
-	"install": true, "setup-token": true, "migrate-installer": true,
-	"resume": true, "plugin": true,
-}
-
-var codexSubcommands = map[string]bool{
-	"exec": true, "login": true, "logout": true, "mcp": true, "review": true,
-	"resume": true, "apply": true, "completion": true, "debug": true,
-	"doctor": true, "queue": true, "archive": true, "delete": true,
-	"unarchive": true, "fork": true, "sandbox": true, "cloud": true,
+// Reserve adds command names to Reserved.
+func Reserve(names ...string) {
+	for _, n := range names {
+		Reserved[n] = true
+	}
 }
 
 // ValidateName validates a provider name.
@@ -346,22 +333,12 @@ func poolDepth(cfg *Config, name string, path []string) error {
 }
 
 func validateVariants(name string, p Provider) error {
-	var banned map[string]bool
-	switch p.Kind {
-	case KindCodex:
-		banned = codexSubcommands
-	case KindClaude:
-		banned = claudeSubcommands
-	}
 	if p.DefaultVariant != "" && !validVariant(p, p.DefaultVariant) {
 		return fmt.Errorf("provider %q has default_variant %q, which is not a %s variant", name, p.DefaultVariant, p.Kind)
 	}
 	for v := range p.Variants {
 		if !nameRe.MatchString(v) {
 			return fmt.Errorf("provider %q has invalid variant name %q", name, v)
-		}
-		if banned[v] {
-			return fmt.Errorf("provider %q variant %q collides with a %s subcommand, making that subcommand unreachable", name, v, p.Kind)
 		}
 		switch {
 		case p.Kind == KindClaude && implicitClaudeVariants[v]:

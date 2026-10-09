@@ -53,23 +53,6 @@ still needs a restart, since that is where it listens.`,
 	return cmd
 }
 
-// newGatewayUpCmd makes sure the gateway is listening, starting `ak serve` in
-// the background when it is not. Pool commands call it before they launch.
-func newGatewayUpCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:    "__gateway-up",
-		Hidden: true,
-		Args:   cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadConfig()
-			if err != nil {
-				return err
-			}
-			return ensureGateway(gatewayAddr(cfg))
-		},
-	}
-}
-
 func gatewayAddr(cfg *config.Config) string {
 	if cfg.Settings.GatewayAddr != "" {
 		return cfg.Settings.GatewayAddr

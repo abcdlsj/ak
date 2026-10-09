@@ -47,52 +47,7 @@ names, every provider is asked. A pool is asked through its members.`,
 			for _, err := range quota.PluginErrors() {
 				fmt.Fprintln(os.Stderr, "warning: quota plugin skipped:", err)
 			}
-			resolver := secrets.Default()
-			results := make([]quota.Quota, len(names))
-			// Providers on the same account (same key, host and source) get
-			// the same answer, so each account is asked once.
-			type job struct {
-				name    string
-				p       config.Provider
-				key     string
-				targets []int
-			}
-			var jobs []*job
-			byKey := map[string]*job{}
-			for i, name := range names {
-				p := cfg.Providers[name]
-				key, err := resolver.Resolve(p)
-				if err != nil {
-					results[i] = quota.Quota{Provider: name, Error: err.Error()}
-					continue
-				}
-				k := quota.DedupKey(p, key)
-				if j := byKey[k]; j != nil {
-					j.targets = append(j.targets, i)
-					continue
-				}
-				j := &job{name: name, p: p, key: key, targets: []int{i}}
-				byKey[k] = j
-				jobs = append(jobs, j)
-			}
-			// Ask in parallel: one slow vendor should not hold up the rest.
-			const parallel = 8
-			sem := make(chan struct{}, parallel)
-			var wg sync.WaitGroup
-			for _, j := range jobs {
-				wg.Add(1)
-				sem <- struct{}{}
-				go func(j *job) {
-					defer wg.Done()
-					defer func() { <-sem }()
-					q := quota.Query(cmd.Context(), j.name, j.p, j.key)
-					for _, i := range j.targets {
-						q.Provider = names[i]
-						results[i] = q
-					}
-				}(j)
-			}
-			wg.Wait()
+			results := queryQuotas(cmd.Context(), cfg, names)
 			if asJSON {
 				return json.NewEncoder(os.Stdout).Encode(results)
 			}
@@ -207,6 +162,57 @@ func waitQuota(ctx context.Context, cfg *config.Config, names []string, every ti
 		case <-time.After(wait):
 		}
 	}
+}
+
+// queryQuotas asks each named provider's balance API, in parallel.
+func queryQuotas(ctx context.Context, cfg *config.Config, names []string) []quota.Quota {
+	resolver := secrets.Default()
+	results := make([]quota.Quota, len(names))
+	// Providers on the same account (same key, host and source) get
+	// the same answer, so each account is asked once.
+	type job struct {
+		name    string
+		p       config.Provider
+		key     string
+		targets []int
+	}
+	var jobs []*job
+	byKey := map[string]*job{}
+	for i, name := range names {
+		p := cfg.Providers[name]
+		key, err := resolver.Resolve(p)
+		if err != nil {
+			results[i] = quota.Quota{Provider: name, Error: err.Error()}
+			continue
+		}
+		k := quota.DedupKey(p, key)
+		if j := byKey[k]; j != nil {
+			j.targets = append(j.targets, i)
+			continue
+		}
+		j := &job{name: name, p: p, key: key, targets: []int{i}}
+		byKey[k] = j
+		jobs = append(jobs, j)
+	}
+	// Ask in parallel: one slow vendor should not hold up the rest.
+	const parallel = 8
+	sem := make(chan struct{}, parallel)
+	var wg sync.WaitGroup
+	for _, j := range jobs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(j *job) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			q := quota.Query(ctx, j.name, j.p, j.key)
+			for _, i := range j.targets {
+				q.Provider = names[i]
+				results[i] = q
+			}
+		}(j)
+	}
+	wg.Wait()
+	return results
 }
 
 // quotaTargets expands the requested names into concrete providers: a pool

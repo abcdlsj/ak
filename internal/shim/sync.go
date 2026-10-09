@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,11 +11,10 @@ import (
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/provider"
-	"github.com/abcdlsj/ak/internal/secrets"
 )
 
-// shimMode is the permission mode of a shim. 700 rather than 755: the file
-// embeds a plaintext key, so other users on the machine get no read access.
+// shimMode is the permission mode of a shim. It holds no key any more, but
+// 700 keeps the mode older commands were tightened to.
 const shimMode = 0o700
 
 // Action is the outcome for a single file.
@@ -57,9 +55,8 @@ func (r Report) Counts() map[Action]int {
 
 // Syncer generates and reclaims ak's artifacts.
 type Syncer struct {
-	Cfg      *config.Config
-	Resolver secrets.Resolver
-	DryRun   bool
+	Cfg    *config.Config
+	DryRun bool
 
 	// CodexHome is the directory scanned for codex profile files. It is a field
 	// rather than a hardcoded ~/.codex so tests stay hermetic instead of reaching
@@ -68,8 +65,8 @@ type Syncer struct {
 	// PiHome is pi's agent directory, where models.json is written. Also a field
 	// so tests stay hermetic.
 	PiHome string
-	// Self is ak's own path, embedded in commands that resolve their key at
-	// run time. Empty means the running executable.
+	// Self is ak's own path, which every command calls back into. Empty means
+	// the running executable.
 	Self string
 }
 
@@ -99,23 +96,15 @@ func (s *Syncer) Sync() (Report, error) {
 		if eng == nil {
 			return rep, fmt.Errorf("provider %s: unsupported kind %q", name, p.Kind)
 		}
-		key, err := s.secret(p)
-		if err != nil {
-			return rep, fmt.Errorf("secret for provider %s: %w", name, err)
-		}
-		launch, err := eng.Launch(name, p, key, ctx)
+		// Commands resolve the key at launch; nothing here needs it.
+		launch, err := eng.Launch(name, p, provider.Secret{Deferred: true}, ctx)
 		if err != nil {
 			return rep, err
 		}
 
 		kind := string(p.Kind)
 		path := filepath.Join(binDir, s.Cfg.Settings.Prefix+name)
-		write(path, Render(Spec{
-			Name: name, Kind: kind,
-			Bin:     s.resolveBin(eng.ConfiguredBin(s.Cfg.Settings), eng.BinName()),
-			BinName: eng.BinName(), EnvVar: eng.BinEnvVar(),
-			Launch: launch, Self: s.self(), Pool: p.IsPool(),
-		}), shimMode)
+		write(path, Render(Spec{Name: name, Kind: kind, Target: name, Self: s.self()}), shimMode)
 
 		for _, f := range launch.Files {
 			write(f.Path, withMarker(kind, name, f.Body), 0o600)
@@ -123,7 +112,7 @@ func (s *Syncer) Sync() (Report, error) {
 		for _, v := range launch.Variants {
 			if v.Shim {
 				alias := filepath.Join(binDir, s.Cfg.Settings.Prefix+name+"-"+v.Name)
-				write(alias, RenderAlias(kind, name, path, v.Name), shimMode)
+				write(alias, Render(Spec{Name: name, Kind: kind, Target: name + ":" + v.Name, Self: s.self()}), shimMode)
 			}
 		}
 	}
@@ -195,16 +184,6 @@ func (s *Syncer) writeShared(path string, content []byte) Result {
 	}
 }
 
-// secret resolves a plaintext key now, or defers an api_key_ref to run time
-// so the command never holds a plaintext copy.
-func (s *Syncer) secret(p config.Provider) (provider.Secret, error) {
-	if p.APIKeyRef != "" {
-		return provider.Secret{Deferred: true}, nil
-	}
-	key, err := s.Resolver.Resolve(p)
-	return provider.Literal(key), err
-}
-
 func (s *Syncer) self() string {
 	if s.Self != "" {
 		return s.Self
@@ -221,7 +200,7 @@ func (s *Syncer) writeFile(path, content string, mode os.FileMode) Result {
 	switch {
 	case err == nil && string(existing) == content:
 		// Same content, but an older ak may have left it with a looser mode
-		// (a command holding a plaintext key readable by others).
+		// (commands once held a plaintext key).
 		if fi, serr := os.Stat(path); serr == nil && fi.Mode().Perm() != mode.Perm() {
 			if s.DryRun {
 				return Result{Path: path, Action: ActionUpdated}
@@ -388,21 +367,4 @@ func (s *Syncer) codexHome() string {
 		return ""
 	}
 	return filepath.Join(home, ".codex")
-}
-
-// resolveBin resolves the engine binary path.
-// It takes only the layer found via PATH and does not call EvalSymlinks —
-// claude's ~/.local/bin/claude is a symlink to versions/<ver>, and resolving it
-// would leave every shim pointing at an old version after a self-update.
-func (s *Syncer) resolveBin(configured, name string) string {
-	if configured != "" {
-		return config.ExpandHome(configured)
-	}
-	if p, err := exec.LookPath(name); err == nil {
-		if abs, err := filepath.Abs(p); err == nil {
-			return abs
-		}
-		return p
-	}
-	return ""
 }

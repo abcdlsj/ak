@@ -65,10 +65,10 @@ func poolTarget(p config.Provider, name, gateway string) config.Provider {
 
 // Secret is how a command obtains the provider's key.
 type Secret struct {
-	// Value is the plaintext key, written into the command.
+	// Value is the plaintext key, exported to the engine at launch.
 	Value string
-	// Deferred means the key is resolved each time the command runs
-	// (api_key_ref), so no plaintext copy is written to disk.
+	// Deferred means the key is not known yet, as when generating commands,
+	// which resolve it at launch.
 	Deferred bool
 }
 
@@ -80,7 +80,7 @@ type Launch struct {
 	Env EnvPlan
 	// Args are passed to the engine before the user's arguments.
 	Args []string
-	// Variants are recognised as the command's first argument.
+	// Variants are selected as <provider>:<variant>.
 	Variants []Variant
 	// DefaultVariant is applied when the command gets no variant argument, so
 	// a provider with a default skips the launcher's picker.
@@ -121,16 +121,6 @@ type KV struct {
 type EnvPlan struct {
 	Set   []KV
 	Unset []string
-}
-
-// Deferred reports whether the plan needs the key resolved at run time.
-func (p EnvPlan) Deferred() bool {
-	for _, kv := range p.Set {
-		if kv.Secret && kv.Value == "" {
-			return true
-		}
-	}
-	return false
 }
 
 var engines = []Engine{claudeEngine{}, codexEngine{}, piEngine{}}

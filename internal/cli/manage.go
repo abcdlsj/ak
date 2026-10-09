@@ -11,6 +11,7 @@ import (
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/abcdlsj/ak/internal/launch"
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/ui"
@@ -449,25 +450,27 @@ func newDefaultCmd() *cobra.Command {
 // visible without issuing a real request.
 func newEnvCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:               "env <name> [variant]",
-		ValidArgsFunction: completeFirstProvider,
+		Use:               "env <name>[:variant]",
+		ValidArgsFunction: completeFirstTarget,
 		Short:             "Print the environment a provider would inject",
-		Args:              cobra.RangeArgs(1, 2),
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
 				return err
 			}
-			name := args[0]
+			name, variant, err := launch.ParseTarget(args[0])
+			if err != nil {
+				return err
+			}
 			p, ok := cfg.Providers[name]
 			if !ok {
 				return fmt.Errorf("provider %q does not exist", name)
 			}
 			// Show what a launch would actually use: the provider's default,
-			// unless a variant argument overrides it (pass "" for none).
-			variant := p.DefaultVariant
-			if len(args) > 1 {
-				variant = args[1]
+			// unless the target names another.
+			if variant == "" {
+				variant = p.DefaultVariant
 			}
 
 			key, err := secrets.Default().Resolve(p)
@@ -486,7 +489,7 @@ func newEnvCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printEnvPlan(view, cfg.Settings.Prefix+name)
+			printEnvPlan(view, "ak "+args[0])
 			return nil
 		},
 	}
@@ -507,33 +510,7 @@ func newUICmd() *cobra.Command {
 		Use:   "ui",
 		Short: "Open the TUI (same as running ak with no arguments)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ui.RunUI()
-		},
-	}
-}
-
-// newKeyCmd prints a provider's resolved key. Commands for providers using
-// api_key_ref call it at launch so no plaintext copy is written to disk.
-func newKeyCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:    "__key <name>",
-		Hidden: true,
-		Args:   cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadConfig()
-			if err != nil {
-				return err
-			}
-			p, ok := cfg.Providers[args[0]]
-			if !ok {
-				return fmt.Errorf("provider %q does not exist", args[0])
-			}
-			key, err := secrets.Default().Resolve(p)
-			if err != nil {
-				return err
-			}
-			fmt.Print(key)
-			return nil
+			return runLauncher()
 		},
 	}
 }

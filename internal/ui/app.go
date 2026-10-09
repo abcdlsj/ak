@@ -4,9 +4,7 @@ package ui
 
 import (
 	"fmt"
-	"os"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -25,28 +23,21 @@ type Selection struct {
 	Variant  string
 }
 
-// RunUI opens the TUI, then execs the provider the user picked.
-func RunUI() error {
-	cfg, err := core.Load()
+// RunUI opens the TUI on the provider focus and returns what the user picked
+// to launch; an empty Provider means nothing was.
+func RunUI(cfg *config.Config, focus string) (Selection, error) {
+	a := newApp(cfg)
+	if focus != "" {
+		a.pages[pageHome].(*providersPage).focus(cfg, focus)
+	}
+	final, err := tea.NewProgram(a, tea.WithAltScreen()).Run()
 	if err != nil {
-		return err
+		return Selection{}, err
 	}
-	final, err := tea.NewProgram(newApp(cfg), tea.WithAltScreen()).Run()
-	if err != nil {
-		return err
+	if a, ok := final.(*app); ok {
+		return a.selection, nil
 	}
-	a, ok := final.(*app)
-	if !ok || a.selection.Provider == "" {
-		return nil
-	}
-	// syscall.Exec lets the engine take over the terminal and process,
-	// leaving no intermediate process behind.
-	bin := core.CommandPath(a.cfg, a.selection.Provider)
-	argv := []string{bin}
-	if a.selection.Variant != "" {
-		argv = append(argv, a.selection.Variant)
-	}
-	return syscall.Exec(bin, argv, os.Environ())
+	return Selection{}, nil
 }
 
 // page is one screen of the app.
@@ -146,7 +137,12 @@ func newApp(cfg *config.Config) *app {
 }
 
 func (a *app) Init() tea.Cmd {
-	return tea.Batch(a.loadUsage(), a.loadStatuses(), a.spinner.Tick, a.poolStatsTick())
+	cmds := []tea.Cmd{a.loadUsage(), a.loadStatuses(), a.spinner.Tick, a.poolStatsTick()}
+	// With nothing configured, start by adding a provider: preset, key, done.
+	if len(a.cfg.Providers) == 0 {
+		cmds = append(cmds, a.open(newFormOverlay(NewDraft(""), false)))
+	}
+	return tea.Batch(cmds...)
 }
 
 // loadUsage rescans the logs; after the first scan only new bytes are read.

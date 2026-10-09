@@ -68,9 +68,8 @@ func (claudeEngine) Launch(name string, p config.Provider, key Secret, ctx Conte
 			}
 		}
 		custom, isCustom := p.Variants[v]
-		// Built-in tiers are always recognised, so `ak-x opus` never reaches
-		// claude as a prompt, but one that changes nothing or only passes the
-		// alias through is not worth offering.
+		// Built-in tiers are always accepted, but one that changes nothing or
+		// only passes the alias through is not worth offering.
 		quiet := !isCustom && (len(delta) == 0 || p.Model == "")
 		variants = append(variants, Variant{Name: v, Env: delta, Shim: custom.Shim, Quiet: quiet})
 	}

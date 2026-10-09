@@ -17,13 +17,13 @@ const hookMarker = "ak-session-attrib"
 
 // newHookCmd manages the SessionStart hook.
 //
-// Claude's session logs do not record which provider a session used, so this
-// hook writes session_id -> AK_PROVIDER; usage aggregation then joins on it to
-// attribute tokens to a provider.
+// Claude's session logs do not record which provider a session used. ak
+// records the id of every session it starts; this hook also writes
+// session_id -> AK_PROVIDER for sessions ak did not name, such as a fork.
 func newHookCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hook",
-		Short: "Install or remove the SessionStart hook required for usage attribution",
+		Short: "Install or remove the optional SessionStart hook for usage attribution",
 	}
 	cmd.AddCommand(newHookInstallCmd(), newHookUninstallCmd())
 	return cmd

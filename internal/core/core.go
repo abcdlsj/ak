@@ -10,7 +10,6 @@ import (
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/provider"
-	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/shim"
 	"github.com/abcdlsj/ak/internal/usage"
 )
@@ -216,7 +215,7 @@ func mutate(cfg *config.Config, change func(*config.Config)) error {
 
 // NewSyncer builds the syncer every caller that generates artifacts uses.
 func NewSyncer(cfg *config.Config) *shim.Syncer {
-	return &shim.Syncer{Cfg: cfg, Resolver: secrets.Default()}
+	return &shim.Syncer{Cfg: cfg}
 }
 
 // Sync regenerates every provider's commands.
