@@ -31,7 +31,7 @@ global, nothing is overwritten, and each shim is a self-contained script that
 
 ```
 go install github.com/abcdlsj/ak@latest
-ak add <name> --kind claude --base-url https://... --key sk-... --model ...
+ak add <name> --kind claude --base-url https://... --key - --model ...
 ak sync
 ```
 
@@ -41,9 +41,10 @@ ak sync
 ak                          open the launcher (enter or 1-9 runs a provider)
 ak list                     list providers
 ak add [name]               add a provider (flags, or a form with no --base-url)
-ak add <name> --preset <id> --key sk-...   start from a built-in vendor preset
+ak add <name> --preset <id> --key -       start from a built-in vendor preset
+                            (--key - asks for the key, so it stays out of shell history)
 ak add pool --member a --member b --strategy rotate   a pool: balance over several providers
-ak serve                    run the pool gateway (required while a pool command runs)
+ak serve                    run the pool gateway (a pool command starts it when it is down)
 ak edit <name> [--model …]  change only the given fields, or open the form
 ak rm <name>                remove a provider and its commands
 ak rename <name> <new>      rename a provider; its command follows
@@ -51,7 +52,8 @@ ak import --from cc-switch  pick which cc-switch providers to copy over
 ak import --from pi         providers from ~/.pi/agent/models.json
 ak sync                     regenerate commands from the config
 ak doctor                   check for anything that would break the commands
-ak usage                    token usage by provider and model
+ak usage [name]             token usage by provider and model
+ak usage --days 7           only the last 7 days (or --since YYYY-MM-DD, --ak-only)
 ak quota                    provider balance and plan usage
 ak check [name...]          send each provider a minimal real request
 ak models <name>            list the models a provider serves
@@ -196,7 +198,7 @@ never writes it into the command.
 ak add pool --kind claude --member kimi --member cpa --strategy order
 ak add pool --kind codex --member cpa --member step --strategy rotate \
   --map step=gpt-5.6-luna
-ak serve            # required while a pool command runs
+ak serve            # optional: a pool command starts it in the background
 ```
 
 | Flag | Meaning |
@@ -225,8 +227,10 @@ them at once; `settings.max_inflight` (256 by default) refuses over that many
 with 503 rather than queueing. Pools do not translate between protocols: every
 member must speak what the engine speaks. To aggregate one relay for both
 engines, register its Anthropic endpoint as a `claude` provider and its OpenAI
-endpoint as a `codex` provider, then pool each kind separately. `ak doctor` warns
-when a pool exists but nothing is listening on the gateway.
+endpoint as a `codex` provider, then pool each kind separately. A pool command
+starts `ak serve` in the background when nothing is listening, logging to
+`~/.local/share/ak/gateway.log`; `ak doctor` warns when a pool exists but
+nothing is listening on the gateway.
 
 With the gateway running, the TUI's Manage page shows a pool as it works: a
 sparkline per member of requests per minute over the last hour, scaled together
@@ -237,8 +241,7 @@ any cooldown. The gateway answers `GET /stats` with the same data, and
 The affinity table is kept on disk, so a restart keeps every conversation on the
 member the vendor still has it cached at. `ak serve` reloads `providers.toml`
 when it changes (or on SIGHUP), so an edited or renamed pool takes effect
-without a restart; `settings.gateway_addr` still needs one. Keep it running
-while a pool command is in use. Normal providers never touch the gateway: they
+without a restart; `settings.gateway_addr` still needs one. Normal providers never touch the gateway: they
 stay direct, with their own key in their own command.
 
 ## Health and models
@@ -333,7 +336,8 @@ quota_cmd = "my-balance-check --json"
 ```
 
 Queries are opt-in per run: ak never calls a balance API on its own. A pool is
-asked through its members.
+asked through its members, and providers sharing one key on one host are asked
+once. A provider no source serves shows `-`, with one hint under the table.
 
 ## Details worth knowing
 
@@ -374,7 +378,9 @@ sessions are attributed by their `provider_id`. An id that the base
 `~/.codex/config.toml` also declares is left alone and reported under the id
 itself, because a log holding nothing but that id cannot say which provider
 ran it; `ak doctor` names the collision. Cost comes from models.dev; models it
-does not know are reported as unpriced rather than billed as zero.
+does not know are reported as unpriced rather than billed as zero. Usage that
+is not an ak provider's (an engine's own login, another tool's provider id)
+is listed apart, under "not in ak"; `--ak-only` leaves it out.
 
 **cc-switch import is selective.** `ak import --from cc-switch` reads
 `~/.cc-switch/cc-switch.db` read-only, prints what it found, then opens a picker

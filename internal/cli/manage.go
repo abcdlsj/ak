@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -12,6 +15,7 @@ import (
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/ui"
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +28,7 @@ type providerFlag struct {
 var providerFlags = []providerFlag{
 	{"kind", "claude", "Engine: claude, codex or pi", func(p *config.Provider, v string) { p.Kind = config.Kind(v) }},
 	{"base-url", "", "API endpoint", func(p *config.Provider, v string) { p.BaseURL = v }},
-	{"key", "", "API key, or a reference: env:NAME, cmd:..., keychain:...", func(p *config.Provider, v string) { p.SetKey(v) }},
+	{"key", "", "API key, a reference (env:NAME, cmd:..., keychain:...), or - to read it from stdin, kept out of shell history", func(p *config.Provider, v string) { p.SetKey(v) }},
 	{"model", "", "Primary model", func(p *config.Provider, v string) { p.Model = v }},
 	{"haiku", "", "haiku-tier model (claude)", func(p *config.Provider, v string) { p.Haiku = v }},
 	{"sonnet", "", "sonnet-tier model (claude)", func(p *config.Provider, v string) { p.Sonnet = v }},
@@ -53,6 +57,36 @@ func addProviderFlags(cmd *cobra.Command, withDefaults bool) {
 	}
 }
 
+// readKeyFlag replaces --key - with a key read from stdin: typed without echo
+// on a terminal, or the first line of a pipe.
+func readKeyFlag(cmd *cobra.Command) error {
+	if v, _ := cmd.Flags().GetString("key"); v != "-" {
+		return nil
+	}
+	var b []byte
+	var err error
+	if term.IsTerminal(os.Stdin.Fd()) {
+		fmt.Fprint(os.Stderr, "API key: ")
+		b, err = term.ReadPassword(os.Stdin.Fd())
+		fmt.Fprintln(os.Stderr)
+	} else {
+		var line string
+		line, err = bufio.NewReader(os.Stdin).ReadString('\n')
+		if errors.Is(err, io.EOF) {
+			err = nil
+		}
+		b = []byte(line)
+	}
+	if err != nil {
+		return fmt.Errorf("read key: %w", err)
+	}
+	key := strings.TrimSpace(string(b))
+	if key == "" {
+		return fmt.Errorf("no key read from stdin")
+	}
+	return cmd.Flags().Set("key", key)
+}
+
 // applyProviderFlags sets fields from flags; onlyChanged skips flags the user
 // did not pass, so an edit leaves every other field alone.
 func applyProviderFlags(cmd *cobra.Command, p *config.Provider, onlyChanged bool) (changed int) {
@@ -74,6 +108,11 @@ func addPoolFlags(cmd *cobra.Command) {
 	cmd.Flags().StringArray("member", nil, "pool member provider name (repeatable)")
 	cmd.Flags().String("strategy", "", "pool strategy: order, rotate or least-used")
 	cmd.Flags().StringArray("map", nil, "pool model mapping member=model (repeatable)")
+	_ = cmd.RegisterFlagCompletionFunc("member", func(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		used, _ := cmd.Flags().GetStringArray("member")
+		return providerNames(used, toComplete), cobra.ShellCompDirectiveNoFileComp
+	})
+	_ = cmd.RegisterFlagCompletionFunc("strategy", cobra.FixedCompletions([]string{"order", "rotate", "least-used"}, cobra.ShellCompDirectiveNoFileComp))
 }
 
 // applyPoolFlags sets the pool fields; onlyChanged skips flags the user did not
@@ -198,10 +237,14 @@ func newAddCmd() *cobra.Command {
 
   ak add kimi --kind claude --base-url https://api.moonshot.cn/anthropic --key sk-... --model kimi-k2.7-code
   ak add kimi --preset kimi-coding --key sk-...   # endpoint and model from a preset
+  ak add kimi --preset kimi-coding --key -        # type the key, out of shell history
   ak add pool --kind claude --member kimi --member cpa --strategy rotate
   ak add        # with no --base-url or --member, opens a form`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := readKeyFlag(cmd); err != nil {
+				return err
+			}
 			cfg, err := loadConfig()
 			if err != nil {
 				return err
@@ -247,20 +290,25 @@ func newAddCmd() *cobra.Command {
 	addPoolFlags(cmd)
 	cmd.Flags().String("settings", "", `claude settings layer as a JSON object, e.g. '{"effortLevel":"low"}'; '' clears it`)
 	cmd.Flags().StringArray("quota-var", nil, "value only the balance query reads, name=value (repeatable; name= removes it)")
-	cmd.Flags().String("preset", "", "Start from a built-in preset (see `ak preset list`); other flags override it")
+	cmd.Flags().String("preset", "", "Start from a built-in preset, listed by 'ak preset list'; other flags override it")
+	_ = cmd.RegisterFlagCompletionFunc("preset", completePresets)
 	return cmd
 }
 
 func newEditCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "edit <name>",
-		Short: "Change a provider",
+		Use:               "edit <name>",
+		ValidArgsFunction: completeFirstProvider,
+		Short:             "Change a provider",
 		Long: `Change a provider and regenerate its command.
 
   ak edit kimi --model kimi-k3    # change only the given fields
   ak edit kimi                    # with no flags, opens a form`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := readKeyFlag(cmd); err != nil {
+				return err
+			}
 			cfg, err := loadConfig()
 			if err != nil {
 				return err
@@ -329,10 +377,11 @@ func runHuh(f *huh.Form) error {
 
 func newRemoveCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "rm <name>",
-		Aliases: []string{"remove"},
-		Short:   "Remove a provider and its generated commands",
-		Args:    cobra.ExactArgs(1),
+		Use:               "rm <name>",
+		ValidArgsFunction: completeFirstProvider,
+		Aliases:           []string{"remove"},
+		Short:             "Remove a provider and its generated commands",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -348,9 +397,10 @@ func newRemoveCmd() *cobra.Command {
 
 func newRenameCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "rename <name> <new-name>",
-		Aliases: []string{"mv"},
-		Short:   "Rename a provider, and so its command",
+		Use:               "rename <name> <new-name>",
+		ValidArgsFunction: completeFirstProvider,
+		Aliases:           []string{"mv"},
+		Short:             "Rename a provider, and so its command",
 		Long: `Rename a provider. Its command becomes ak-<new-name> and the old one is
 removed; the default and usage history follow the new name.`,
 		Args: cobra.ExactArgs(2),
@@ -369,8 +419,9 @@ removed; the default and usage history follow the new name.`,
 
 func newDefaultCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "default [name]",
-		Short: "Show or set the default provider",
+		Use:               "default [name]",
+		ValidArgsFunction: completeFirstProvider,
+		Short:             "Show or set the default provider",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -398,9 +449,10 @@ func newDefaultCmd() *cobra.Command {
 // visible without issuing a real request.
 func newEnvCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "env <name> [variant]",
-		Short: "Print the environment a provider would inject",
-		Args:  cobra.RangeArgs(1, 2),
+		Use:               "env <name> [variant]",
+		ValidArgsFunction: completeFirstProvider,
+		Short:             "Print the environment a provider would inject",
+		Args:              cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {

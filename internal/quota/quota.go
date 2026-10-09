@@ -11,12 +11,14 @@ package quota
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -44,7 +46,13 @@ type Quota struct {
 	Windows  []Window `json:"windows,omitempty"`
 	Detail   string   `json:"detail,omitempty"`
 	Error    string   `json:"error,omitempty"`
+	// NoSource marks a provider no balance source serves, which is a gap in
+	// coverage rather than a failure.
+	NoSource bool `json:"no_source,omitempty"`
 }
+
+// ErrNoSource is returned when no source matches a provider's endpoint.
+var ErrNoSource = errors.New("no balance source")
 
 // Source is a balance API.
 type Source interface {
@@ -67,6 +75,17 @@ func ids(sources []Source) []string {
 	return out
 }
 
+// DedupKey identifies the account a query would ask about: providers sharing
+// it get the same answer, so it need be asked once.
+func DedupKey(p config.Provider, key string) string {
+	vars := make([]string, 0, len(p.QuotaVars))
+	for k, v := range p.QuotaVars {
+		vars = append(vars, k+"="+v)
+	}
+	sort.Strings(vars)
+	return strings.Join([]string{key, hostOf(p.BaseURL), p.Quota, p.QuotaCmd, strings.Join(vars, "&")}, "\x00")
+}
+
 // Query resolves the provider's source and asks it. A provider with quota_cmd
 // uses that instead; the returned Quota always has Provider set, and any
 // failure is in Error rather than returned, so the caller can print one row per
@@ -85,7 +104,7 @@ func Query(ctx context.Context, name string, p config.Provider, key string) Quot
 	}
 	src, err := resolve(p)
 	if err != nil {
-		return Quota{Provider: name, Error: err.Error()}
+		return Quota{Provider: name, Error: err.Error(), NoSource: errors.Is(err, ErrNoSource)}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -111,8 +130,8 @@ func resolve(p config.Provider) (Source, error) {
 				return s, nil
 			}
 		}
-		return nil, fmt.Errorf("no balance source for %s: set quota to %s, or quota_cmd",
-			dash(host), strings.Join(ids(sources), "/"))
+		return nil, fmt.Errorf("%w for %s: set quota to %s, or quota_cmd",
+			ErrNoSource, dash(host), strings.Join(ids(sources), "/"))
 	default:
 		for _, s := range sources {
 			if s.ID() == p.Quota {

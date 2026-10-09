@@ -18,8 +18,9 @@ import (
 func newQuotaCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "quota [name...]",
-		Short: "Query provider balance and plan usage",
+		Use:               "quota [name...]",
+		ValidArgsFunction: completeProviders,
+		Short:             "Query provider balance and plan usage",
 		Long: `Ask each provider's balance API what is left.
 
 The source is detected from the endpoint host (deepseek, openrouter, moonshot,
@@ -45,24 +46,48 @@ names, every provider is asked. A pool is asked through its members.`,
 			}
 			resolver := secrets.Default()
 			results := make([]quota.Quota, len(names))
+			// Providers on the same account (same key, host and source) get
+			// the same answer, so each account is asked once.
+			type job struct {
+				name    string
+				p       config.Provider
+				key     string
+				targets []int
+			}
+			var jobs []*job
+			byKey := map[string]*job{}
+			for i, name := range names {
+				p := cfg.Providers[name]
+				key, err := resolver.Resolve(p)
+				if err != nil {
+					results[i] = quota.Quota{Provider: name, Error: err.Error()}
+					continue
+				}
+				k := quota.DedupKey(p, key)
+				if j := byKey[k]; j != nil {
+					j.targets = append(j.targets, i)
+					continue
+				}
+				j := &job{name: name, p: p, key: key, targets: []int{i}}
+				byKey[k] = j
+				jobs = append(jobs, j)
+			}
 			// Ask in parallel: one slow vendor should not hold up the rest.
 			const parallel = 8
 			sem := make(chan struct{}, parallel)
 			var wg sync.WaitGroup
-			for i, name := range names {
+			for _, j := range jobs {
 				wg.Add(1)
 				sem <- struct{}{}
-				go func(i int, name string) {
+				go func(j *job) {
 					defer wg.Done()
 					defer func() { <-sem }()
-					p := cfg.Providers[name]
-					key, err := resolver.Resolve(p)
-					if err != nil {
-						results[i] = quota.Quota{Provider: name, Error: err.Error()}
-						return
+					q := quota.Query(cmd.Context(), j.name, j.p, j.key)
+					for _, i := range j.targets {
+						q.Provider = names[i]
+						results[i] = q
 					}
-					results[i] = quota.Query(cmd.Context(), name, p, key)
-				}(i, name)
+				}(j)
 			}
 			wg.Wait()
 			if asJSON {
@@ -121,15 +146,25 @@ func quotaTargets(cfg *config.Config, args []string) ([]string, error) {
 func printQuota(results []quota.Quota) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "provider\tsource\tbalance\tusage\tdetail")
+	var noSource int
 	for _, q := range results {
-		if q.Error != "" {
+		switch {
+		case q.NoSource:
+			// Not a failure: say so once below rather than on every row.
+			noSource++
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", q.Provider, "-", "-", "", "")
+		case q.Error != "":
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", q.Provider, dash(q.Source), "✗", "", q.Error)
-			continue
+		default:
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+				q.Provider, dash(q.Source), balanceText(q), usageText(q), q.Detail)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			q.Provider, dash(q.Source), balanceText(q), usageText(q), q.Detail)
 	}
 	w.Flush()
+	if noSource > 0 {
+		fmt.Printf("\n%d without a balance source: set quota = <%s>, or quota_cmd\n",
+			noSource, strings.Join(quota.Sources(), "|"))
+	}
 }
 
 func balanceText(q quota.Quota) string {

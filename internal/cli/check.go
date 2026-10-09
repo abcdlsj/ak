@@ -17,8 +17,9 @@ import (
 func newCheckCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "check [name...]",
-		Short: "Send each provider a minimal real request",
+		Use:               "check [name...]",
+		ValidArgsFunction: completeProviders,
+		Short:             "Send each provider a minimal real request",
 		Long: `Send each provider one minimal, non-streamed request and report whether it
 answers: ok, slow (over 6s), auth (key rejected), model (model not served) or
 fail. Each check spends a few tokens.

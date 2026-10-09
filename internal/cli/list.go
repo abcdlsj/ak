@@ -34,15 +34,16 @@ func newListCmd() *cobra.Command {
 }
 
 type listRow struct {
-	Name     string   `json:"name"`
-	Command  string   `json:"command"`
-	Kind     string   `json:"kind"`
-	Display  string   `json:"display,omitempty"`
-	BaseURL  string   `json:"base_url"`
-	Model    string   `json:"model,omitempty"`
-	Members  []string `json:"members,omitempty"`
-	Strategy string   `json:"strategy,omitempty"`
-	Default  bool     `json:"default,omitempty"`
+	Name       string   `json:"name"`
+	Command    string   `json:"command"`
+	Kind       string   `json:"kind"`
+	Display    string   `json:"display,omitempty"`
+	BaseURL    string   `json:"base_url"`
+	Model      string   `json:"model,omitempty"`
+	PiProvider string   `json:"pi_provider,omitempty"`
+	Members    []string `json:"members,omitempty"`
+	Strategy   string   `json:"strategy,omitempty"`
+	Default    bool     `json:"default,omitempty"`
 }
 
 func listRows(cfg *config.Config) []listRow {
@@ -50,15 +51,16 @@ func listRows(cfg *config.Config) []listRow {
 	for _, name := range cfg.Names() {
 		p := cfg.Providers[name]
 		rows = append(rows, listRow{
-			Name:     name,
-			Command:  cfg.Settings.Prefix + name,
-			Kind:     string(p.Kind),
-			Display:  p.Display,
-			BaseURL:  p.BaseURL,
-			Model:    p.Model,
-			Members:  p.Members,
-			Strategy: p.Strategy,
-			Default:  cfg.Settings.Default == name,
+			Name:       name,
+			Command:    cfg.Settings.Prefix + name,
+			Kind:       string(p.Kind),
+			Display:    p.Display,
+			BaseURL:    p.BaseURL,
+			Model:      p.Model,
+			PiProvider: p.PiProvider,
+			Members:    p.Members,
+			Strategy:   p.Strategy,
+			Default:    cfg.Settings.Default == name,
 		})
 	}
 	return rows
@@ -70,15 +72,34 @@ func printList(cfg *config.Config) {
 		fmt.Println("No providers yet. Add one with `ak add`, or `ak import --from claude-settings`.")
 		return
 	}
+	// A display name is shown only where it says something the name does not,
+	// and the column only when some provider has one.
+	display := func(r listRow) string {
+		if r.Display == r.Name {
+			return ""
+		}
+		return r.Display
+	}
+	withDisplay := false
+	for _, r := range rows {
+		withDisplay = withDisplay || display(r) != ""
+	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "command\tengine\tmodel\tendpoint\tdisplay")
+	header := "command\tengine\tmodel\tendpoint"
+	if withDisplay {
+		header += "\tdisplay"
+	}
+	fmt.Fprintln(w, header)
 	for _, r := range rows {
 		mark := ""
 		if r.Default {
 			mark = " *"
 		}
-		fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\n",
-			r.Command, mark, r.Kind, dash(r.Model), endpoint(r), r.Display)
+		line := fmt.Sprintf("%s%s\t%s\t%s\t%s", r.Command, mark, r.Kind, dash(r.Model), dash(endpoint(r)))
+		if withDisplay {
+			line += "\t" + display(r)
+		}
+		fmt.Fprintln(w, line)
 	}
 	w.Flush()
 	if cfg.Settings.Default != "" {
@@ -102,6 +123,9 @@ func endpoint(r listRow) string {
 			strat = config.StrategyOrder
 		}
 		return "pool(" + strat + ": " + strings.Join(r.Members, ", ") + ")"
+	}
+	if r.BaseURL == "" && r.PiProvider != "" {
+		return "pi:" + r.PiProvider
 	}
 	return r.BaseURL
 }

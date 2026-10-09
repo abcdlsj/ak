@@ -13,8 +13,9 @@ import (
 func newModelsCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "models <name>",
-		Short: "List the models a provider serves",
+		Use:               "models <name>",
+		ValidArgsFunction: completeFirstProvider,
+		Short:             "List the models a provider serves",
 		Long: `Ask the provider's upstream for its model list and print one id per line.
 
 The endpoint is guessed from base_url: {base}/models when it already ends in a
