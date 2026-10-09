@@ -183,8 +183,12 @@ func (p *providersPage) launcherKeys(a *app, key string) tea.Cmd {
 	return nil
 }
 
-// launchProvider launches name, asking for a variant first when it has any.
+// launchProvider launches name. A default variant launches straight away;
+// otherwise it asks for a variant first when the provider has any.
 func launchProvider(a *app, name string) tea.Cmd {
+	if v := a.cfg.Providers[name].DefaultVariant; v != "" {
+		return a.launch(Selection{Provider: name, Variant: v})
+	}
 	variants := variantNames(a.cfg, name)
 	if len(variants) == 0 {
 		return a.launch(Selection{Provider: name})
@@ -402,6 +406,9 @@ func detailPanel(a *app, name string, width int) string {
 	}
 	if vs := variantNames(a.cfg, name); len(vs) > 0 {
 		field("variants", strings.Join(vs, " "))
+	}
+	if p.DefaultVariant != "" {
+		field("default variant", p.DefaultVariant)
 	}
 
 	b.WriteString("\n")

@@ -323,6 +323,9 @@ func validateVariants(name string, p Provider) error {
 	case KindClaude:
 		banned = claudeSubcommands
 	}
+	if p.DefaultVariant != "" && !validVariant(p, p.DefaultVariant) {
+		return fmt.Errorf("provider %q has default_variant %q, which is not a %s variant", name, p.DefaultVariant, p.Kind)
+	}
 	for v := range p.Variants {
 		if !nameRe.MatchString(v) {
 			return fmt.Errorf("provider %q has invalid variant name %q", name, v)
@@ -340,6 +343,23 @@ func validateVariants(name string, p Provider) error {
 		}
 	}
 	return nil
+}
+
+// validVariant reports whether v names a variant the provider's command
+// recognises: a custom variant, or a built-in level or tier of its kind.
+func validVariant(p Provider, v string) bool {
+	if _, ok := p.Variants[v]; ok {
+		return true
+	}
+	switch p.Kind {
+	case KindClaude:
+		return implicitClaudeVariants[v]
+	case KindCodex:
+		return validReasoning[v]
+	case KindPi:
+		return validThinking[v]
+	}
+	return false
 }
 
 // validatePi checks a pi provider: its wire API, and that ak-managed ones name

@@ -62,7 +62,11 @@ func Render(s Spec) string {
 			names[i] = v.Name
 		}
 		b.WriteString("# Variant: consume the first argument only on an exact match\n")
-		b.WriteString("ak_variant=\n")
+		if l.DefaultVariant != "" {
+			fmt.Fprintf(&b, "# Default variant: applied unless the first argument is another variant\nak_variant=%s\n", shellQuote(l.DefaultVariant))
+		} else {
+			b.WriteString("ak_variant=\n")
+		}
 		b.WriteString("if [ $# -gt 0 ]; then\n")
 		fmt.Fprintf(&b, "  case \"$1\" in\n    %s)\n      ak_variant=\"$1\"; shift ;;\n  esac\nfi\n\n",
 			strings.Join(names, "|"))

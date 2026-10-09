@@ -162,3 +162,16 @@ func TestFormCtrlSSaves(t *testing.T) {
 		t.Fatalf("ctrl+s left the form open")
 	}
 }
+
+// A provider with a default variant launches straight away, without the picker.
+func TestDefaultVariantSkipsPicker(t *testing.T) {
+	cfg := testConfig()
+	p := cfg.Providers["beta"]
+	p.DefaultVariant = "low"
+	cfg.Providers["beta"] = p
+	a := newApp(cfg)
+	press(a, "down", "enter")
+	if a.overlay != nil || a.selection.Provider != "beta" || a.selection.Variant != "low" || !a.quitting {
+		t.Fatalf("overlay=%v selection=%+v quitting=%v", a.overlay, a.selection, a.quitting)
+	}
+}

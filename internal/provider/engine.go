@@ -82,6 +82,9 @@ type Launch struct {
 	Args []string
 	// Variants are recognised as the command's first argument.
 	Variants []Variant
+	// DefaultVariant is applied when the command gets no variant argument, so
+	// a provider with a default skips the launcher's picker.
+	DefaultVariant string
 	// Files are extra artifacts, e.g. a codex profile.
 	Files []File
 }

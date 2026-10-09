@@ -78,7 +78,7 @@ func (claudeEngine) Launch(name string, p config.Provider, key Secret, ctx Conte
 	if err != nil {
 		return Launch{}, err
 	}
-	return Launch{Env: base, Args: args, Variants: variants}, nil
+	return Launch{Env: base, Args: args, Variants: variants, DefaultVariant: p.DefaultVariant}, nil
 }
 
 // ClaudeArgs passes the provider's own settings layer as --settings. Inline

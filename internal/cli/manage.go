@@ -32,6 +32,7 @@ var providerFlags = []providerFlag{
 	{"key-field", "", "claude auth variable: auth_token or api_key", func(p *config.Provider, v string) { p.KeyField = v }},
 	{"wire-api", "", "codex wire API: responses or chat", func(p *config.Provider, v string) { p.WireAPI = v }},
 	{"reasoning", "", "codex default reasoning effort", func(p *config.Provider, v string) { p.Reasoning = v }},
+	{"default-variant", "", "Variant applied when launching without one: a thinking/reasoning level or a model tier", func(p *config.Provider, v string) { p.DefaultVariant = v }},
 	{"pi-provider", "", "Existing pi provider id to use (skips models.json)", func(p *config.Provider, v string) { p.PiProvider = v }},
 	{"pi-api", "", "pi wire API: anthropic-messages, openai-completions, openai-responses", func(p *config.Provider, v string) { p.PiAPI = v }},
 	{"pi-auth-header", "", "Send the pi key as Authorization: Bearer (true)", func(p *config.Provider, v string) { p.PiAuthHeader = isTrueFlag(v) }},
@@ -352,7 +353,9 @@ func newEnvCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("provider %q does not exist", name)
 			}
-			variant := ""
+			// Show what a launch would actually use: the provider's default,
+			// unless a variant argument overrides it (pass "" for none).
+			variant := p.DefaultVariant
 			if len(args) > 1 {
 				variant = args[1]
 			}

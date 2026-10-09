@@ -62,7 +62,8 @@ ak-cpapi -p "..."           run pi on that provider
 
 The TUI opens on a launcher: the providers in a list, the cursor on the
 default. `enter` launches the selected one and `1`-`9` launch a row directly,
-asking for a variant first when there are any; `/` filters. Launch, Manage
+asking for a variant first when there are any — unless the provider names a
+`default_variant`, which launches it straight away; `/` filters. Launch, Manage
 and Usage are tabs: `tab` / `shift+tab` cycle them, `m` and `u` jump straight
 to one, and `esc` comes back to Launch:
 
@@ -80,11 +81,19 @@ problem under the list before you run it.
 Custom variants go under the provider:
 
 ```toml
+[providers.bilicodex]
+default_variant = "high"   # launch with this variant; do not ask each time
+
 [providers.bilicodex.variants.fast]
 model = "gpt-5.6-luna"
 reasoning = "low"
 shim = true          # also generate ak-bilicodex-fast
 ```
+
+`default_variant` is a built-in thinking/reasoning level or a model tier, or
+one of the provider's own variants. Without it the launcher asks, and the
+command uses the engine's own default. With it, `ak-cpapi` runs at that level
+unless you name another variant; the launcher's picker is skipped.
 
 Extra environment variables go under `env`, for any kind, on the provider or
 on a variant. A proxy for one provider is just that:

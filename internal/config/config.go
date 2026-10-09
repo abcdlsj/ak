@@ -88,6 +88,10 @@ type Provider struct {
 	// mutually exclusive with APIKey.
 	APIKeyRef string `toml:"api_key_ref,omitempty"`
 	Model     string `toml:"model,omitempty"`
+	// DefaultVariant is applied when the provider launches without an explicit
+	// variant, so the launcher does not ask each time: a pi thinking level, a
+	// codex reasoning effort or a claude model tier. Empty keeps asking.
+	DefaultVariant string `toml:"default_variant,omitempty"`
 
 	// claude-only: three-tier model mapping. Empty values are derived from Model.
 	Haiku  string `toml:"haiku,omitempty"`

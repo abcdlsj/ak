@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -12,23 +13,26 @@ import (
 // Draft is the editable state of a provider, shared by `ak add`, `ak edit`
 // and the TUI.
 type Draft struct {
-	Name       string
-	Kind       string
-	Display    string
-	BaseURL    string
-	Key        string // blank keeps the current key when editing
-	Model      string
-	Haiku      string
-	Sonnet     string
-	Opus       string
-	KeyField   string
-	WireAPI    string
-	Reasoning  string
-	PiProvider string
-	PiAPI      string
-	PiAuth     bool
-	Quota      string
-	QuotaCmd   string
+	Name      string
+	Kind      string
+	Display   string
+	BaseURL   string
+	Key       string // blank keeps the current key when editing
+	Model     string
+	Haiku     string
+	Sonnet    string
+	Opus      string
+	KeyField  string
+	WireAPI   string
+	Reasoning string
+	// DefaultVariant is a thinking/reasoning level or a model tier applied
+	// when the provider launches without one; blank asks each time.
+	DefaultVariant string
+	PiProvider     string
+	PiAPI          string
+	PiAuth         bool
+	Quota          string
+	QuotaCmd       string
 	// Members is the comma-separated member list of a pool; empty makes the
 	// provider a normal upstream.
 	Members  string
@@ -51,7 +55,8 @@ func EditDraft(name string, p config.Provider) *Draft {
 		Name: name, Kind: string(p.Kind), Display: p.Display, BaseURL: p.BaseURL,
 		Model: p.Model, Haiku: p.Haiku, Sonnet: p.Sonnet, Opus: p.Opus,
 		KeyField: p.KeyField, WireAPI: p.WireAPI, Reasoning: p.Reasoning,
-		PiProvider: p.PiProvider, PiAPI: p.PiAPI, PiAuth: p.PiAuthHeader,
+		DefaultVariant: p.DefaultVariant,
+		PiProvider:     p.PiProvider, PiAPI: p.PiAPI, PiAuth: p.PiAuthHeader,
 		Quota: p.Quota, QuotaCmd: p.QuotaCmd,
 		Members: strings.Join(p.Members, ", "), Strategy: p.Strategy,
 		existing: true, orig: name, base: p,
@@ -84,6 +89,7 @@ func (d *Draft) Provider() config.Provider {
 	p.PiProvider = strings.TrimSpace(d.PiProvider)
 	p.PiAPI = strings.TrimSpace(d.PiAPI)
 	p.PiAuthHeader = d.PiAuth
+	p.DefaultVariant = strings.TrimSpace(d.DefaultVariant)
 	// Fields of the other engine are cleared, not carried along; a default
 	// value is left unset.
 	p.KeyField, p.WireAPI, p.Reasoning = "", "", ""
@@ -205,6 +211,8 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 		huh.NewInput().Title("Opus-tier model").Value(&d.Opus).Description("Blank uses the primary model"),
 		huh.NewInput().Title("Sonnet-tier model").Value(&d.Sonnet),
 		huh.NewInput().Title("Haiku-tier model").Value(&d.Haiku),
+		huh.NewSelect[string]().Title("Default variant").Value(&d.DefaultVariant).
+			Options(variantOptions(config.ClaudeTiers(), d.base.Variants)...),
 		huh.NewSelect[string]().Title("Auth variable").Value(&d.KeyField).
 			Options(huh.NewOption("ANTHROPIC_AUTH_TOKEN", "auth_token"), huh.NewOption("ANTHROPIC_API_KEY", "api_key")),
 	).WithHideFunc(isKind(config.KindClaude))
@@ -214,6 +222,8 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 			Options(huh.NewOption("responses", "responses"), huh.NewOption("chat", "chat")),
 		huh.NewSelect[string]().Title("Default reasoning effort").Value(&d.Reasoning).
 			Options(reasoningOptions()...),
+		huh.NewSelect[string]().Title("Default variant").Value(&d.DefaultVariant).
+			Options(variantOptions(config.ReasoningLevels(), d.base.Variants)...),
 	).WithHideFunc(isKind(config.KindCodex))
 
 	pi := huh.NewGroup(
@@ -222,6 +232,8 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 		huh.NewSelect[string]().Title("Wire API").Value(&d.PiAPI).
 			Options(huh.NewOption("anthropic-messages", "anthropic-messages"), huh.NewOption("openai-completions", "openai-completions"), huh.NewOption("openai-responses", "openai-responses")),
 		huh.NewConfirm().Title("Send the key as Authorization: Bearer").Value(&d.PiAuth),
+		huh.NewSelect[string]().Title("Default variant").Value(&d.DefaultVariant).
+			Options(variantOptions(config.ThinkingLevels(), d.base.Variants)...),
 	).WithHideFunc(isKind(config.KindPi))
 
 	return huh.NewForm(huh.NewGroup(basics...), claude, codex, pi).WithShowHelp(true)
@@ -231,6 +243,24 @@ func reasoningOptions() []huh.Option[string] {
 	opts := []huh.Option[string]{huh.NewOption("(codex default)", "")}
 	for _, r := range config.ReasoningLevels() {
 		opts = append(opts, huh.NewOption(r, r))
+	}
+	return opts
+}
+
+// variantOptions lists "ask each time" plus the built-in levels and the
+// provider's custom variants, in a stable order.
+func variantOptions(levels []string, custom map[string]config.Variant) []huh.Option[string] {
+	opts := []huh.Option[string]{huh.NewOption("(ask each launch)", "")}
+	for _, l := range levels {
+		opts = append(opts, huh.NewOption(l, l))
+	}
+	names := make([]string, 0, len(custom))
+	for n := range custom {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		opts = append(opts, huh.NewOption(n, n))
 	}
 	return opts
 }

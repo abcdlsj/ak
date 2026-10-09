@@ -51,8 +51,9 @@ func (codexEngine) Launch(name string, p config.Provider, key Secret, ctx Contex
 		key = Literal(poolKey)
 	}
 	l := Launch{
-		Env:  CodexEnv(name, p, key),
-		Args: CodexArgs(name, p),
+		Env:            CodexEnv(name, p, key),
+		Args:           CodexArgs(name, p),
+		DefaultVariant: p.DefaultVariant,
 	}
 	for _, v := range mergeNames(config.ReasoningLevels(), p.Variants) {
 		l.Variants = append(l.Variants, codexVariant(v, p))

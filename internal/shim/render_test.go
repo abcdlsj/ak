@@ -232,3 +232,27 @@ func TestSyncFixesLooseMode(t *testing.T) {
 		t.Errorf("mode = %v, want %v", fi.Mode().Perm(), shimMode)
 	}
 }
+
+// A default variant is applied when the command gets no variant argument, and
+// an explicit one still overrides it.
+func TestDefaultVariantApplied(t *testing.T) {
+	f := newSyncFixture(t)
+	f.cfg.Providers["cx"] = config.Provider{
+		Kind: config.KindCodex, BaseURL: "https://x", APIKey: "sk-1", Model: "base",
+		DefaultVariant: "high",
+	}
+	f.sync(t, "")
+
+	out := run(t, filepath.Join(f.bin, "ak-cx"), nil, "-p", "hi")
+	if !strings.Contains(out, `-c model_reasoning_effort="high"`) {
+		t.Fatalf("default variant not applied:\n%s", out)
+	}
+	if !strings.Contains(out, "AK_VARIANT=high") {
+		t.Fatalf("AK_VARIANT does not name the default:\n%s", out)
+	}
+
+	out = run(t, filepath.Join(f.bin, "ak-cx"), nil, "low", "-p", "hi")
+	if !strings.Contains(out, `model_reasoning_effort="low"`) || strings.Contains(out, `model_reasoning_effort="high"`) {
+		t.Fatalf("explicit variant did not override the default:\n%s", out)
+	}
+}

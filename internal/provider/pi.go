@@ -61,7 +61,7 @@ func (piEngine) Launch(name string, p config.Provider, key Secret, ctx Context) 
 	if p.Model != "" {
 		args = append(args, "--model", p.Model)
 	}
-	l := Launch{Env: EnvPlan{Set: env.sorted()}, Args: args}
+	l := Launch{Env: EnvPlan{Set: env.sorted()}, Args: args, DefaultVariant: p.DefaultVariant}
 	for _, v := range piVariantNames(p) {
 		l.Variants = append(l.Variants, piVariant(v, p))
 	}
