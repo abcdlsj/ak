@@ -127,3 +127,28 @@ func TestQuickStatusPiProviderNeedsNoKey(t *testing.T) {
 		}
 	}
 }
+
+// A renamed provider's auth.json entry follows its name, and its key survives.
+func TestRenameMovesAuthEntry(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := config.Default()
+	cfg.Providers["old"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://x", APIKey: "sk-1"}
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := Rename(cfg, "old", "new"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := got.Providers["new"]; p.APIKey != "sk-1" || p.AuthKey != "new" {
+		t.Fatalf("renamed provider = %+v", p)
+	}
+	path, _ := config.AuthPath()
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), `"old"`) {
+		t.Fatalf("old entry kept:\n%s", data)
+	}
+}

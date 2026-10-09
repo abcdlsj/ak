@@ -171,9 +171,13 @@ so your `projects`, `skills` and `hooks` keep working, and codex's `env_key`
 reads the key from the process environment: no per-provider `auth.json`, no
 isolated `CODEX_HOME`.
 
-**Keys stay out of the commands.** The key is resolved when ak launches, never
-written to `~/.local/bin`. With `api_key_ref` (`env:NAME`, `cmd:...`,
-`keychain:...`) no plaintext copy is on disk at all.
+**Keys live in their own file.** `providers.toml` holds no key: a provider
+names its entry with `auth_key` (its own name by default), and the key is in
+`~/.config/ak/auth.json` (mode `0600`), which ak rewrites whole on every change,
+dropping entries nothing names. Providers on one account can name the same
+entry. Keys are resolved when ak launches, never written to `~/.local/bin`.
+With `api_key_ref` (`env:NAME`, `cmd:...`, `keychain:...`) no plaintext copy is
+on disk at all.
 
 **Usage is computed from local logs.** `~/.claude/projects` and
 `~/.codex/sessions` are scanned incrementally: the first run reads the whole

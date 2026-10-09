@@ -134,15 +134,27 @@ func runDoctor(cfg *config.Config) error {
 		}
 	}
 
-	// 6. Config file permissions.
-	if path, err := config.Path(); err == nil {
+	// 6. Config file permissions; auth.json holds the plaintext keys.
+	for _, f := range []func() (string, error){config.Path, config.AuthPath} {
+		path, err := f()
+		if err != nil {
+			continue
+		}
 		if fi, err := os.Stat(path); err == nil {
 			if fi.Mode().Perm() != 0o600 {
 				problems++
-				fmt.Printf("✗ %s has mode %o, expected 600 (it holds plaintext keys)\n", path, fi.Mode().Perm())
+				fmt.Printf("✗ %s has mode %o, expected 600\n", path, fi.Mode().Perm())
 			} else {
-				fmt.Println("✓ config file mode is 600")
+				fmt.Printf("✓ %s mode is 600\n", filepath.Base(path))
 			}
+		}
+	}
+
+	// 6b. An auth_key with no entry in auth.json launches with no key.
+	for _, name := range cfg.Names() {
+		if p := cfg.Providers[name]; p.AuthKey != "" && p.APIKey == "" {
+			problems++
+			fmt.Printf("✗ %s names auth_key %q, which auth.json does not hold; set it with `ak edit %s --key -`\n", name, p.AuthKey, name)
 		}
 	}
 

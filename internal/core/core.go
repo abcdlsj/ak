@@ -172,6 +172,10 @@ func Rename(cfg *config.Config, from, to string) error {
 	if p.Kind == config.KindCodex {
 		p.ProviderID = provider.CodexProviderID(from, p)
 	}
+	// Its own auth.json entry follows the name; Save rewrites it.
+	if p.AuthKey == from && p.APIKey != "" {
+		p.AuthKey = ""
+	}
 	err := mutate(cfg, func(c *config.Config) {
 		delete(c.Providers, from)
 		c.Providers[to] = p

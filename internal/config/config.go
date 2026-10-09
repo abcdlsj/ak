@@ -4,6 +4,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -86,7 +87,12 @@ type Provider struct {
 	Kind    Kind   `toml:"kind"`
 	Display string `toml:"display,omitempty"`
 	BaseURL string `toml:"base_url"`
-	APIKey  string `toml:"api_key,omitempty"`
+	// APIKey is the plaintext key. It is never written to providers.toml:
+	// Save stores it in auth.json under AuthKey, and Load reads it back.
+	APIKey string `toml:"-"`
+	// AuthKey names the provider's entry in auth.json. Save sets it to the
+	// provider's name when empty; providers naming one entry share its key.
+	AuthKey string `toml:"auth_key,omitempty"`
 	// APIKeyRef takes the form env:NAME / cmd:... / keychain:... and is
 	// mutually exclusive with APIKey.
 	APIKeyRef string `toml:"api_key_ref,omitempty"`
@@ -263,6 +269,16 @@ func Path() (string, error) {
 	return filepath.Join(dir, "providers.toml"), nil
 }
 
+// AuthPath returns the absolute path of auth.json, which holds the plaintext
+// keys providers.toml refers to by auth_key.
+func AuthPath() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "auth.json"), nil
+}
+
 // DataDir returns the directory holding ak's state (usage aggregates, the
 // session attribution index, the launcher's directory record, the gateway's
 // log). It is the config directory: everything ak keeps is in one place.
@@ -307,7 +323,61 @@ func Load() (*Config, error) {
 	if cfg.Settings.GatewayAddr == "" {
 		cfg.Settings.GatewayAddr = DefaultGatewayAddr
 	}
+	auth, err := loadAuth()
+	if err != nil {
+		return nil, err
+	}
+	// A missing entry leaves the key empty, which health reports as no key.
+	for name, p := range cfg.Providers {
+		if p.AuthKey != "" {
+			p.APIKey = auth[p.AuthKey]
+			cfg.Providers[name] = p
+		}
+	}
 	return cfg, nil
+}
+
+// loadAuth reads auth.json; a missing file holds no keys.
+func loadAuth() (map[string]string, error) {
+	path, err := AuthPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	auth := map[string]string{}
+	if err := json.Unmarshal(data, &auth); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return auth, nil
+}
+
+// authEntries assigns every provider holding a key its auth_key and returns
+// the keys by entry. Two providers naming one entry must hold the same key.
+func authEntries(cfg *Config) (map[string]string, error) {
+	auth := map[string]string{}
+	owner := map[string]string{}
+	for _, name := range cfg.Names() {
+		p := cfg.Providers[name]
+		if p.APIKey == "" {
+			continue
+		}
+		if p.AuthKey == "" {
+			p.AuthKey = name
+			cfg.Providers[name] = p
+		}
+		if prev, ok := auth[p.AuthKey]; ok && prev != p.APIKey {
+			return nil, fmt.Errorf("providers %q and %q share auth_key %q but hold different keys", owner[p.AuthKey], name, p.AuthKey)
+		}
+		auth[p.AuthKey] = p.APIKey
+		owner[p.AuthKey] = name
+	}
+	return auth, nil
 }
 
 // UnknownKeys lists the keys in providers.toml that ak does not know, such as
@@ -337,13 +407,32 @@ func UnknownKeys() ([]string, error) {
 	return keys, nil
 }
 
-// Save writes the config back atomically with mode 0600.
+// Save writes the config back atomically with mode 0600: the keys to
+// auth.json, everything else to providers.toml. auth.json is rewritten whole,
+// so an entry no provider names any more is dropped.
 func Save(cfg *Config) error {
 	path, err := Path()
 	if err != nil {
 		return err
 	}
+	authPath, err := AuthPath()
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	auth, err := authEntries(cfg)
+	if err != nil {
+		return err
+	}
+	authData, err := json.MarshalIndent(auth, "", "  ")
+	if err != nil {
+		return err
+	}
+	// Keys first: a providers.toml naming an entry auth.json lacks would
+	// launch with no key.
+	if err := atomicWrite(authPath, append(authData, '\n'), 0o600); err != nil {
 		return err
 	}
 	data, err := toml.Marshal(cfg)
@@ -416,7 +505,7 @@ func IsKeyRef(s string) bool {
 // SetKey stores a key or a key reference, clearing the other.
 func (p *Provider) SetKey(v string) {
 	if IsKeyRef(v) {
-		p.APIKey, p.APIKeyRef = "", v
+		p.APIKey, p.APIKeyRef, p.AuthKey = "", v, ""
 	} else {
 		p.APIKey, p.APIKeyRef = v, ""
 	}
