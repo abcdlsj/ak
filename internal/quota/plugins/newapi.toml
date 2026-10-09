@@ -1,9 +1,9 @@
 # New API (and One API forks): GET /api/user/self ->
 # {"success":true,"data":{"quota":…,"used_quota":…,"group":"…"}}
 # 500000 quota units are one US dollar. The endpoint wants a system access
-# token and the user id rather than an API key: set AK_QUOTA_TOKEN and
-# AK_QUOTA_USER in the provider's env. Relays have arbitrary hosts, so this is
-# never auto-detected; name it with quota = "newapi".
+# token and the user id rather than an API key: set token and user in the
+# provider's quota_vars. Relays have arbitrary hosts, so this is never
+# auto-detected; name it with quota = "newapi".
 id = "newapi"
 kind = "balance"
 detail = "{{data.group}}"
@@ -11,7 +11,7 @@ ok = { path = "success", equals = true, message = "message" }
 
 [request]
 url = "{{root}}/api/user/self"
-headers = { Authorization = "Bearer {{env.AK_QUOTA_TOKEN|key}}", New-Api-User = "{{env.AK_QUOTA_USER}}" }
+headers = { Authorization = "Bearer {{var.token|key}}", New-Api-User = "{{var.user}}" }
 
 [balance]
 value = "data.quota"

@@ -155,6 +155,11 @@ type Provider struct {
 	// number). It is asked with AK_QUOTA_KEY and AK_QUOTA_BASE_URL set, and
 	// takes precedence over Quota, for vendors ak has no built-in for.
 	QuotaCmd string `toml:"quota_cmd,omitempty"`
+	// QuotaVars are values only the balance query reads, such as a relay's
+	// access token and user id: a plugin names them as {{var.NAME}} and
+	// quota_cmd gets them as AK_QUOTA_VAR_<NAME>. Unlike env they never reach
+	// the engine's environment.
+	QuotaVars map[string]string `toml:"quota_vars,omitempty"`
 	// Pricing overrides the model pricing that models.dev cannot resolve.
 	Pricing *Pricing `toml:"pricing,omitempty"`
 	// Variants are the positional-argument variants of a command.

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"text/tabwriter"
 
@@ -135,20 +137,36 @@ func balanceText(q quota.Quota) string {
 		return "-"
 	}
 	if q.Currency == "" {
-		return fmt.Sprintf("%g", *q.Balance)
+		return amount(*q.Balance)
 	}
-	return fmt.Sprintf("%g %s", *q.Balance, q.Currency)
+	return amount(*q.Balance) + " " + q.Currency
+}
+
+// amount prints money to two decimals, without trailing zeros: 15.986 is
+// 15.99 and 15.00 is 15.
+func amount(v float64) string {
+	s := strconv.FormatFloat(v, 'f', 2, 64)
+	s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	if s == "-0" {
+		return "0"
+	}
+	return s
+}
+
+// percent prints a share to at most one decimal.
+func percent(v float64) string {
+	return strings.TrimSuffix(strconv.FormatFloat(v, 'f', 1, 64), ".0") + "%"
 }
 
 func usageText(q quota.Quota) string {
 	var parts []string
 	if q.Used != nil && q.Limit != nil {
-		parts = append(parts, fmt.Sprintf("%g/%g", *q.Used, *q.Limit))
+		parts = append(parts, amount(*q.Used)+"/"+amount(*q.Limit))
 	} else if q.Used != nil {
-		parts = append(parts, fmt.Sprintf("%g used", *q.Used))
+		parts = append(parts, amount(*q.Used)+" used")
 	}
 	for _, win := range q.Windows {
-		s := fmt.Sprintf("%s %g%%", win.Name, win.Used)
+		s := win.Name + " " + percent(win.Used)
 		if win.Resets != nil {
 			s += " (resets " + win.Resets.Local().Format("01-02 15:04") + ")"
 		}

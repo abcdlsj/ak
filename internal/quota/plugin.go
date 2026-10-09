@@ -29,7 +29,7 @@ type spec struct {
 }
 
 // requestSpec is the one request a plugin makes. URL, header values and body
-// take {{key}}, {{base}}, {{root}} and {{env.NAME}}; a|b falls back to b when a
+// take {{key}}, {{base}}, {{root}}, {{var.NAME}} (quota_vars) and {{env.NAME}}; a|b falls back to b when a
 // is empty. A header that expands to nothing is not sent.
 type requestSpec struct {
 	URL     string            `toml:"url"`
@@ -394,6 +394,9 @@ func requestVar(name string, p config.Provider, key string) string {
 	case "root":
 		return apiRoot(p.BaseURL)
 	}
+	if v, ok := strings.CutPrefix(name, "var."); ok {
+		return p.QuotaVars[v]
+	}
 	if env, ok := strings.CutPrefix(name, "env."); ok {
 		return p.Env[env]
 	}
@@ -406,10 +409,11 @@ func checkTemplate(s string) error {
 		for _, alt := range strings.Split(m[1], "|") {
 			alt = strings.TrimSpace(alt)
 			if alt == "key" || alt == "base" || alt == "root" ||
+				(strings.HasPrefix(alt, "var.") && len(alt) > len("var.")) ||
 				(strings.HasPrefix(alt, "env.") && len(alt) > len("env.")) {
 				continue
 			}
-			return fmt.Errorf("unknown template {{%s}}; use key, base, root or env.NAME", alt)
+			return fmt.Errorf("unknown template {{%s}}; use key, base, root, var.NAME or env.NAME", alt)
 		}
 	}
 	return nil

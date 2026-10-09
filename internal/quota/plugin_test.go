@@ -187,7 +187,7 @@ func TestNewAPI(t *testing.T) {
 		auth, user = r.Header.Get("Authorization"), r.Header.Get("New-Api-User")
 	})
 	p := config.Provider{BaseURL: s.URL + "/v1", Quota: "newapi",
-		Env: map[string]string{"AK_QUOTA_TOKEN": "tok", "AK_QUOTA_USER": "7"}}
+		QuotaVars: map[string]string{"token": "tok", "user": "7"}}
 	q := fetch(t, p)
 	if auth != "Bearer tok" || user != "7" {
 		t.Errorf("Authorization = %q, New-Api-User = %q", auth, user)
@@ -197,7 +197,7 @@ func TestNewAPI(t *testing.T) {
 	}
 
 	// Without a token the key is sent, and an empty user id is left out.
-	p.Env = nil
+	p.QuotaVars = nil
 	fetch(t, p)
 	if auth != "Bearer sk-test" || user != "" {
 		t.Errorf("Authorization = %q, New-Api-User = %q", auth, user)
@@ -370,5 +370,23 @@ func TestPluginValidation(t *testing.T) {
 		if _, err := parsePlugin("f.toml", []byte(body)); err == nil || !strings.HasPrefix(err.Error(), "f.toml: ") {
 			t.Errorf("%s: err = %v", name, err)
 		}
+	}
+}
+
+// quota_vars reach a plugin as {{var.NAME}}; env does not stand in for them.
+func TestQuotaVarsTemplate(t *testing.T) {
+	p := config.Provider{BaseURL: "https://x.example/v1", QuotaVars: map[string]string{"token": "tok"},
+		Env: map[string]string{"token": "from-env"}}
+	if got := requestVar("var.token", p, "k"); got != "tok" {
+		t.Errorf("var.token = %q", got)
+	}
+	if got := requestVar("var.user", p, "k"); got != "" {
+		t.Errorf("var.user = %q", got)
+	}
+	if err := checkTemplate("{{var.token|key}}"); err != nil {
+		t.Error(err)
+	}
+	if err := checkTemplate("{{var.}}"); err == nil {
+		t.Error("empty var name accepted")
 	}
 }

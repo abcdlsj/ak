@@ -278,14 +278,17 @@ For anything else, name a source with `--quota`, turn the query off with
 `--quota off`, write a plugin, or point `quota_cmd` at a script.
 
 **New API relays.** `/api/user/self` wants a system access token and the user
-id, not the API key. Put them in the provider's env (the token falls back to
-the key when unset):
+id, not the API key. Put them in the provider's `quota_vars` (the token falls
+back to the key when unset); unlike `env`, these never reach the engine:
 
 ```toml
 [providers.myrelay]
 quota = "newapi"
-env = { AK_QUOTA_TOKEN = "your-access-token", AK_QUOTA_USER = "42" }
+quota_vars = { token = "your-access-token", user = "42" }
 ```
+
+A plugin reads them as `{{var.NAME}}`, and `quota_cmd` as
+`AK_QUOTA_VAR_<NAME>`.
 
 **Plugins.** A TOML file in `~/.config/ak/quota.d/` adds a source, or replaces
 a built-in with the same `id`. It makes one request and reads the JSON reply by

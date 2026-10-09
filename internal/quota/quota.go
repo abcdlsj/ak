@@ -130,6 +130,9 @@ func runScript(ctx context.Context, p config.Provider, key string) (Quota, error
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", p.QuotaCmd)
 	cmd.Env = append(os.Environ(), "AK_QUOTA_KEY="+key, "AK_QUOTA_BASE_URL="+p.BaseURL)
+	for k, v := range p.QuotaVars {
+		cmd.Env = append(cmd.Env, "AK_QUOTA_VAR_"+strings.ToUpper(k)+"="+v)
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return Quota{}, fmt.Errorf("quota_cmd: %w", err)

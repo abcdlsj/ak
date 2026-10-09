@@ -181,6 +181,11 @@ func validateEnv(name string, p Provider) error {
 			return fmt.Errorf("provider %q has invalid env name %q; use letters, digits and _", name, k)
 		}
 	}
+	for k := range p.QuotaVars {
+		if !envKeyRe.MatchString(k) {
+			return fmt.Errorf("provider %q has invalid quota_vars name %q; use letters, digits and _", name, k)
+		}
+	}
 	for v, variant := range p.Variants {
 		for k := range variant.Env {
 			if !envKeyRe.MatchString(k) {

@@ -107,6 +107,34 @@ func applyPoolFlags(cmd *cobra.Command, p *config.Provider, onlyChanged bool) (c
 	return changed, nil
 }
 
+// applyQuotaVarFlag merges --quota-var name=value pairs into quota_vars; an
+// empty value removes that name.
+func applyQuotaVarFlag(cmd *cobra.Command, p *config.Provider) (int, error) {
+	if !cmd.Flags().Changed("quota-var") {
+		return 0, nil
+	}
+	vals, _ := cmd.Flags().GetStringArray("quota-var")
+	for _, kv := range vals {
+		k, v, ok := strings.Cut(kv, "=")
+		k = strings.TrimSpace(k)
+		if !ok || k == "" {
+			return 0, fmt.Errorf("--quota-var wants name=value, got %q", kv)
+		}
+		if v == "" {
+			delete(p.QuotaVars, k)
+			continue
+		}
+		if p.QuotaVars == nil {
+			p.QuotaVars = map[string]string{}
+		}
+		p.QuotaVars[k] = v
+	}
+	if len(p.QuotaVars) == 0 {
+		p.QuotaVars = nil
+	}
+	return 1, nil
+}
+
 // applySettingsFlag sets the claude settings layer from --settings, a JSON
 // object; an empty value clears it.
 func applySettingsFlag(cmd *cobra.Command, p *config.Provider) (int, error) {
@@ -196,6 +224,9 @@ func newAddCmd() *cobra.Command {
 			if _, err := applySettingsFlag(cmd, &p); err != nil {
 				return err
 			}
+			if _, err := applyQuotaVarFlag(cmd, &p); err != nil {
+				return err
+			}
 			if p.BaseURL == "" && !p.IsPool() && p.PiProvider == "" {
 				d := ui.NewDraft(name)
 				if err := runForm(d, cfg); err != nil {
@@ -215,6 +246,7 @@ func newAddCmd() *cobra.Command {
 	addProviderFlags(cmd, true)
 	addPoolFlags(cmd)
 	cmd.Flags().String("settings", "", `claude settings layer as a JSON object, e.g. '{"effortLevel":"low"}'; '' clears it`)
+	cmd.Flags().StringArray("quota-var", nil, "value only the balance query reads, name=value (repeatable; name= removes it)")
 	cmd.Flags().String("preset", "", "Start from a built-in preset (see `ak preset list`); other flags override it")
 	return cmd
 }
@@ -250,6 +282,11 @@ func newEditCmd() *cobra.Command {
 				return err
 			}
 			changed += n
+			n, err = applyQuotaVarFlag(cmd, &p)
+			if err != nil {
+				return err
+			}
+			changed += n
 			if changed == 0 {
 				d := ui.EditDraft(name, p)
 				if err := runForm(d, cfg); err != nil {
@@ -266,6 +303,7 @@ func newEditCmd() *cobra.Command {
 	addProviderFlags(cmd, false)
 	addPoolFlags(cmd)
 	cmd.Flags().String("settings", "", `claude settings layer as a JSON object, e.g. '{"effortLevel":"low"}'; '' clears it`)
+	cmd.Flags().StringArray("quota-var", nil, "value only the balance query reads, name=value (repeatable; name= removes it)")
 	return cmd
 }
 
