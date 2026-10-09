@@ -39,7 +39,7 @@ var providerFlags = []providerFlag{
 	{"config-dir", "", "Isolate claude's whole config here (CLAUDE_CONFIG_DIR)", func(p *config.Provider, v string) { p.ConfigDir = v }},
 	{"codex-home", "", "Isolate codex's whole home here (CODEX_HOME)", func(p *config.Provider, v string) { p.CodexHome = v }},
 	{"display", "", "Name shown in listings", func(p *config.Provider, v string) { p.Display = v }},
-	{"quota", "", "Balance source: deepseek, openrouter, moonshot, siliconflow, or off", func(p *config.Provider, v string) { p.Quota = v }},
+	{"quota", "", "Balance source id (deepseek, kimi, zhipu, newapi, …), or off", func(p *config.Provider, v string) { p.Quota = v }},
 	{"quota-cmd", "", "Shell command printing the balance as JSON or a number", func(p *config.Provider, v string) { p.QuotaCmd = v }},
 }
 

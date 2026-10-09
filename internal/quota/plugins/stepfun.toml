@@ -1,0 +1,13 @@
+# StepFun: GET https://api.stepfun.com/v1/accounts -> {"balance":…}
+# The .com endpoint serves keys from api.stepfun.ai too.
+id = "stepfun"
+match = ["stepfun"]
+kind = "balance"
+
+[request]
+url = "https://api.stepfun.com/v1/accounts"
+headers = { Authorization = "Bearer {{key}}" }
+
+[balance]
+value = "balance"
+currency = "CNY"

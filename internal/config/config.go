@@ -147,8 +147,8 @@ type Provider struct {
 	// Env holds arbitrary extra environment variables. Merged last, it can
 	// override derived keys.
 	Env map[string]string `toml:"env,omitempty"`
-	// Quota names the balance source to query: a built-in id (deepseek,
-	// openrouter, moonshot, siliconflow) or "off" to disable. Empty
+	// Quota names the balance source to query: a built-in or quota.d plugin
+	// id (deepseek, kimi, zhipu, newapi, …) or "off" to disable. Empty
 	// auto-detects from the endpoint host.
 	Quota string `toml:"quota,omitempty"`
 	// QuotaCmd is a shell command that prints the balance as JSON (or a plain

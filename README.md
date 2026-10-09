@@ -237,8 +237,7 @@ and on its root when the base ends in a compat path such as `/anthropic`.
 ## Balance and quota
 
 `ak quota` asks each provider's balance API what is left. The source is
-detected from the endpoint host, so a DeepSeek, OpenRouter, Moonshot or
-SiliconFlow provider works with nothing extra:
+detected from the endpoint host, so most vendors work with nothing extra:
 
 ```sh
 ak quota                 # every provider
@@ -246,18 +245,68 @@ ak quota deepseek        # one
 ak quota --json          # machine-readable
 ```
 
-| Source | Endpoint host |
-| --- | --- |
-| `deepseek` | `api.deepseek.com` |
-| `openrouter` | `openrouter.ai` |
-| `moonshot` | `api.moonshot.cn`, `api.moonshot.ai` |
-| `siliconflow` | `api.siliconflow.cn` |
+| Source | Endpoint host | Reports |
+| --- | --- | --- |
+| `deepseek` | `api.deepseek.com` | balance |
+| `openrouter` | `openrouter.ai` | balance |
+| `moonshot` | `api.moonshot.cn`, `api.moonshot.ai` | balance |
+| `siliconflow` | `api.siliconflow.cn` | balance |
+| `stepfun` | `api.stepfun.com`, `api.stepfun.ai` | balance |
+| `kimi` | `api.kimi.com` (Kimi For Coding) | 5h and weekly windows |
+| `zhipu` | `open.bigmodel.cn`, `api.z.ai` (GLM Coding Plan) | 5h and weekly windows |
+| `minimax` | `api.minimaxi.com`, `api.minimax.cn` (Coding Plan) | 5h and weekly windows |
+| `minimax-intl` | `api.minimax.io` (Coding Plan) | 5h and weekly windows |
+| `newapi` | never detected; set `quota = "newapi"` | balance |
 
 For anything else, name a source with `--quota`, turn the query off with
-`--quota off`, or point `quota_cmd` at a script. The script prints the answer as
-JSON (a balance, or plan windows: `{"windows":[{"name":"5h","used":40}]}`) or a
-bare number, and is asked with `AK_QUOTA_KEY` and `AK_QUOTA_BASE_URL` in the
-environment:
+`--quota off`, write a plugin, or point `quota_cmd` at a script.
+
+**New API relays.** `/api/user/self` wants a system access token and the user
+id, not the API key. Put them in the provider's env (the token falls back to
+the key when unset):
+
+```toml
+[providers.myrelay]
+quota = "newapi"
+env = { AK_QUOTA_TOKEN = "your-access-token", AK_QUOTA_USER = "42" }
+```
+
+**Plugins.** A TOML file in `~/.config/ak/quota.d/` adds a source, or replaces
+a built-in with the same `id`. It makes one request and reads the JSON reply by
+dotted path (`limits.0.detail.used`; a number indexes an array):
+
+```toml
+# ~/.config/ak/quota.d/myplan.toml
+id = "myplan"
+match = ["api.myplan.dev"]      # endpoint host substrings; omit to name it only
+detail = "{{data.plan}}"         # optional, paths into the reply
+ok = { path = "success", equals = true, message = "msg" }  # optional
+
+[request]
+url = "{{root}}/v1/usage"        # {{key}} {{base}} {{root}} {{env.NAME}}, a|b falls back
+headers = { Authorization = "Bearer {{key}}" }
+
+[[windows]]
+name = "5h"
+used = "data.used"               # or remaining = …, percent = …, percent_left = …
+limit = "data.limit"
+resets = "data.reset_at"         # RFC3339, unix seconds or millis
+
+[[windows]]                      # one window per matching array item
+name = "weekly"
+each = "data.limits"
+where = { type = "WEEKLY" }      # a|b for alternatives
+percent = "percentage"
+```
+
+A balance reads `[balance]` instead: `value`, optional `used`/`limit`,
+`currency` or `currency_path`, and `scale` to divide by. The built-ins in
+`internal/quota/plugins/` use the same format. A file that does not load is
+skipped with a warning naming it, in `ak quota` and `ak doctor`.
+
+**Scripts.** The script prints the answer as JSON (a balance, or plan windows:
+`{"windows":[{"name":"5h","used":40}]}`) or a bare number, and is asked with
+`AK_QUOTA_KEY` and `AK_QUOTA_BASE_URL` in the environment:
 
 ```toml
 [providers.myrelay]

@@ -1,0 +1,13 @@
+# DeepSeek: GET /user/balance ->
+# {"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"…"}]}
+id = "deepseek"
+match = ["deepseek"]
+kind = "balance"
+
+[request]
+url = "{{root}}/user/balance"
+headers = { Authorization = "Bearer {{key}}" }
+
+[balance]
+value = "balance_infos.0.total_balance"
+currency_path = "balance_infos.0.currency"

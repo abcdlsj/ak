@@ -21,9 +21,10 @@ func newQuotaCmd() *cobra.Command {
 		Long: `Ask each provider's balance API what is left.
 
 The source is detected from the endpoint host (deepseek, openrouter, moonshot,
-siliconflow), or named with the provider's quota field; a provider with
-quota_cmd runs that script instead. Given no names, every provider is asked. A
-pool is asked through its members.`,
+siliconflow, stepfun, kimi, zhipu, minimax), or named with the provider's quota
+field (newapi is never detected). TOML plugins in ~/.config/ak/quota.d add or
+override sources. A provider with quota_cmd runs that script instead. Given no
+names, every provider is asked. A pool is asked through its members.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -36,6 +37,9 @@ pool is asked through its members.`,
 			if len(names) == 0 {
 				fmt.Println("No providers to query.")
 				return nil
+			}
+			for _, err := range quota.PluginErrors() {
+				fmt.Fprintln(os.Stderr, "warning: quota plugin skipped:", err)
 			}
 			resolver := secrets.Default()
 			results := make([]quota.Quota, len(names))

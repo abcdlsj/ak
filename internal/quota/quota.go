@@ -1,9 +1,10 @@
 // Package quota queries a provider's balance or plan usage.
 //
 // Sources are auto-detected from the provider's endpoint host, so a plain
-// DeepSeek, OpenRouter, Moonshot or SiliconFlow provider needs no extra
-// configuration; a provider may name one with the `quota` field or point
-// quota_cmd at a script that prints its own answer. Nothing here runs unless a
+// DeepSeek, Kimi, Zhipu or MiniMax provider needs no extra configuration; a
+// provider may name one with the `quota` field or point quota_cmd at a script
+// that prints its own answer. Most sources are TOML plugins (plugins/*.toml,
+// and the user's <config dir>/quota.d/*.toml); the rest are Go. Nothing here runs unless a
 // balance is asked for, so `ak` never makes a network call on its own.
 package quota
 
@@ -45,18 +46,22 @@ type Quota struct {
 	Error    string   `json:"error,omitempty"`
 }
 
-// Source is a built-in balance API.
+// Source is a balance API.
 type Source interface {
 	ID() string
 	// Match reports whether the source serves that endpoint host.
 	Match(host string) bool
-	Fetch(ctx context.Context, base, key string) (Quota, error)
+	Fetch(ctx context.Context, p config.Provider, key string) (Quota, error)
 }
 
-// Sources lists the built-in source ids, sorted by declaration order.
+// Sources lists the known source ids, user plugins first.
 func Sources() []string {
-	out := make([]string, 0, len(builtins))
-	for _, s := range builtins {
+	return ids(current().sources)
+}
+
+func ids(sources []Source) []string {
+	out := make([]string, 0, len(sources))
+	for _, s := range sources {
 		out = append(out, s.ID())
 	}
 	return out
@@ -84,7 +89,7 @@ func Query(ctx context.Context, name string, p config.Provider, key string) Quot
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	q, err := src.Fetch(ctx, p.BaseURL, key)
+	q, err := src.Fetch(ctx, p, key)
 	q.Provider, q.Source = name, src.ID()
 	if err != nil {
 		q.Error = err.Error()
@@ -95,25 +100,26 @@ func Query(ctx context.Context, name string, p config.Provider, key string) Quot
 // resolve picks the source for a provider: the named one, else the first whose
 // host matches, unless the query is turned off.
 func resolve(p config.Provider) (Source, error) {
+	sources := current().sources
 	switch p.Quota {
 	case "off":
 		return nil, fmt.Errorf("quota query is off for this provider")
 	case "":
 		host := hostOf(p.BaseURL)
-		for _, s := range builtins {
+		for _, s := range sources {
 			if s.Match(host) {
 				return s, nil
 			}
 		}
-		return nil, fmt.Errorf("no built-in balance source for %s: set quota to %s, or quota_cmd",
-			dash(host), strings.Join(Sources(), "/"))
+		return nil, fmt.Errorf("no balance source for %s: set quota to %s, or quota_cmd",
+			dash(host), strings.Join(ids(sources), "/"))
 	default:
-		for _, s := range builtins {
+		for _, s := range sources {
 			if s.ID() == p.Quota {
 				return s, nil
 			}
 		}
-		return nil, fmt.Errorf("unknown quota source %q; known: %s", p.Quota, strings.Join(Sources(), ", "))
+		return nil, fmt.Errorf("unknown quota source %q; known: %s", p.Quota, strings.Join(ids(sources), ", "))
 	}
 }
 
@@ -161,14 +167,31 @@ var client = &http.Client{Timeout: 15 * time.Second}
 
 // getJSON GETs a URL with the key as a bearer token and decodes the reply.
 func getJSON(ctx context.Context, rawURL, key string, dst any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	h := http.Header{}
+	if key != "" {
+		h.Set("Authorization", "Bearer "+key)
+	}
+	return doJSON(ctx, http.MethodGet, rawURL, h, "", dst)
+}
+
+// doJSON sends one request and decodes a 200 reply into dst, numbers kept as
+// json.Number.
+func doJSON(ctx context.Context, method, rawURL string, h http.Header, body string, dst any) error {
+	var rd io.Reader
+	if body != "" {
+		rd = strings.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, rd)
 	if err != nil {
 		return err
 	}
-	if key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
+	req.Header = h.Clone()
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json")
 	}
-	req.Header.Set("Accept", "application/json")
+	if body != "" && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -178,7 +201,9 @@ func getJSON(ctx context.Context, rawURL, key string, dst any) error {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
-	return json.NewDecoder(resp.Body).Decode(dst)
+	dec := json.NewDecoder(resp.Body)
+	dec.UseNumber()
+	return dec.Decode(dst)
 }
 
 // apiRoot is the scheme and host of a base URL, with any path dropped, so a

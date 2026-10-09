@@ -1,0 +1,24 @@
+# Kimi For Coding: GET /coding/v1/usages ->
+# {"usage":{"limit":"…","remaining":"…","resetTime":"…"},
+#  "limits":[{"window":{…},"detail":{"limit":"…","remaining":"…","resetTime":"…"}}]}
+# limits holds the five-hour window, usage the weekly one.
+id = "kimi"
+match = ["api.kimi.com"]
+kind = "plan"
+
+[request]
+url = "{{root}}/coding/v1/usages"
+headers = { Authorization = "Bearer {{key}}" }
+
+[[windows]]
+name = "5h"
+each = "limits"
+limit = "detail.limit"
+remaining = "detail.remaining"
+resets = "detail.resetTime"
+
+[[windows]]
+name = "weekly"
+limit = "usage.limit"
+remaining = "usage.remaining"
+resets = "usage.resetTime"
