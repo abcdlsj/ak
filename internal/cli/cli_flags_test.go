@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/quota"
@@ -69,5 +71,41 @@ func TestDescribeProvider(t *testing.T) {
 	}
 	if got := describeProvider(cfg, "p"); !strings.Contains(got, "pool(order: a) · default") {
 		t.Errorf("p: %q", got)
+	}
+}
+
+// wait returns once any target has allowance, sleeping until the reset the
+// vendor gave, and fails at once when nothing can be read.
+func TestWaitQuota(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["a"] = config.Provider{Kind: config.KindClaude}
+	calls := 0
+	reset := time.Now().Add(50 * time.Millisecond)
+	err := waitQuota(context.Background(), cfg, []string{"a"}, time.Hour, func(_ context.Context, n string, _ config.Provider) quota.Quota {
+		calls++
+		if calls == 1 {
+			return quota.Quota{Provider: n, Windows: []quota.Window{{Used: 100, Resets: &reset}}}
+		}
+		return quota.Quota{Provider: n, Windows: []quota.Window{{Used: 10}}}
+	})
+	if err != nil || calls != 2 {
+		t.Fatalf("err %v after %d calls", err, calls)
+	}
+
+	err = waitQuota(context.Background(), cfg, []string{"a"}, time.Hour, func(_ context.Context, n string, _ config.Provider) quota.Quota {
+		return quota.Quota{Provider: n, NoSource: true}
+	})
+	if err == nil {
+		t.Fatal("no source waited")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	zero := 0.0
+	err = waitQuota(ctx, cfg, []string{"a"}, 10*time.Millisecond, func(_ context.Context, n string, _ config.Provider) quota.Quota {
+		return quota.Quota{Provider: n, Balance: &zero}
+	})
+	if err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("timeout: %v", err)
 	}
 }

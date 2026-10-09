@@ -55,6 +55,7 @@ ak doctor                   check for anything that would break the commands
 ak usage [name]             token usage by provider and model
 ak usage --days 7           only the last 7 days (or --since YYYY-MM-DD, --ak-only)
 ak quota                    provider balance and plan usage
+ak quota wait <name>        block until it has allowance again
 ak check [name...]          send each provider a minimal real request
 ak models <name>            list the models a provider serves
 ak-bilicodex                run codex on that provider
@@ -203,9 +204,28 @@ ak serve            # optional: a pool command starts it in the background
 
 | Flag | Meaning |
 | --- | --- |
-| `--member` | a provider in the pool, repeatable and ordered |
-| `--strategy` | `order` (failover, the default), `rotate` (round-robin) or `least-used` |
+| `--member` | a provider in the pool, or another pool; repeatable and ordered |
+| `--strategy` | `order` (failover, the default), `rotate` (round-robin), `least-used` or `smart` |
 | `--map` | `member=model`: ask that member for a different model |
+
+**Smart** reads each member's quota (the same sources as `ak quota`) when the
+gateway starts, every five minutes and on reload, and puts first the member
+with allowance left whose plan window resets soonest, so the least of it is
+lost at the reset. Members with nothing to reset (a balance) or no quota
+source come next, in order, and members with nothing left come last by when
+they are back. Only smart pools make the gateway call a balance API, and
+`ak doctor` names the members a smart pool cannot read.
+
+**Nesting.** A member may itself be a pool of the same kind, which picks among
+its own members by its own strategy, up to four levels deep and never leading
+back to itself. A `--map` deeper down wins over one above it. Health, cooldown
+and conversation affinity are kept per concrete provider of the pool the
+request came to:
+
+```sh
+ak add kimis --kind claude --member kimi-a --member kimi-b --strategy smart
+ak add main  --kind claude --member kimis --member deepseek   # kimis first, then deepseek
+```
 
 The gateway listens on `127.0.0.1:17877` (`settings.gateway_addr` to change it)
 and is loopback-only. A member that fails is set aside for 30 seconds, doubling
@@ -334,6 +354,12 @@ skipped with a warning naming it, in `ak quota` and `ak doctor`.
 [providers.myrelay]
 quota_cmd = "my-balance-check --json"
 ```
+
+`ak quota wait <name>` blocks until the provider has allowance again (for a
+pool, any member), reading the quota again at the reset time the vendor gave,
+or every `--every` (a minute) when there is none; `--timeout` gives up with
+exit 1. `ak quota wait kimi && ak-kimi -p "..."` runs a job the moment the
+window resets.
 
 Queries are opt-in per run: ak never calls a balance API on its own. A pool is
 asked through its members, and providers sharing one key on one host are asked

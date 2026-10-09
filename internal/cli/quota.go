@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"text/tabwriter"
+	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/quota"
@@ -98,7 +101,112 @@ names, every provider is asked. A pool is asked through its members.`,
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.AddCommand(newQuotaWaitCmd())
 	return cmd
+}
+
+func newQuotaWaitCmd() *cobra.Command {
+	var (
+		every   time.Duration
+		timeout time.Duration
+	)
+	cmd := &cobra.Command{
+		Use:   "wait <name>",
+		Short: "Block until a provider has allowance again",
+		Long: `Return as soon as the provider has allowance: no plan window used up and
+no balance at zero. For a pool, as soon as any member does.
+
+  ak quota wait kimi && ak-kimi -p "..."
+  ak quota wait pool --timeout 6h
+
+While it waits it reads the quota again at the reset time the vendor gave, or
+every --every when there is none, and says when on stderr. It exits 1 on
+--timeout, and at once when the provider has no balance source.`,
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeFirstProvider,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			names, err := quotaTargets(cfg, args)
+			if err != nil {
+				return err
+			}
+			ctx := cmd.Context()
+			if timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+			}
+			return waitQuota(ctx, cfg, names, every, func(ctx context.Context, name string, p config.Provider) quota.Quota {
+				key, err := secrets.Default().Resolve(p)
+				if err != nil {
+					return quota.Quota{Provider: name, Error: err.Error()}
+				}
+				return quota.Query(ctx, name, p, key)
+			})
+		},
+	}
+	cmd.Flags().DurationVar(&every, "every", time.Minute, "How often to read the quota when no reset time is known")
+	cmd.Flags().DurationVar(&timeout, "timeout", 0, "Give up after this long (0 waits indefinitely)")
+	return cmd
+}
+
+// quotaPollMax bounds one sleep, so a plan that resets early is noticed.
+const quotaPollMax = 10 * time.Minute
+
+// waitQuota polls the providers' quota until one has allowance. A provider
+// that cannot be read at all (no source) is an error rather than a wait.
+func waitQuota(ctx context.Context, cfg *config.Config, names []string, every time.Duration,
+	ask func(context.Context, string, config.Provider) quota.Quota) error {
+	if every <= 0 {
+		every = time.Minute
+	}
+	for {
+		var soonest *time.Time
+		var reasons []string
+		readable := 0
+		for _, n := range names {
+			q := ask(ctx, n, cfg.Providers[n])
+			if q.NoSource {
+				reasons = append(reasons, n+": no balance source")
+				continue
+			}
+			readable++
+			if q.Error != "" {
+				reasons = append(reasons, n+": "+q.Error)
+				continue
+			}
+			spent, back := q.Spent()
+			if !spent {
+				fmt.Fprintf(os.Stderr, "%s has allowance\n", n)
+				return nil
+			}
+			if back != nil && (soonest == nil || back.Before(*soonest)) {
+				soonest = back
+			}
+			reasons = append(reasons, n+": spent")
+		}
+		if readable == 0 {
+			return fmt.Errorf("cannot read the quota of %s; set quota or quota_cmd", strings.Join(names, ", "))
+		}
+		wait := every
+		if soonest != nil {
+			// A few seconds past the reset, so the vendor has rolled over.
+			wait = max(time.Until(*soonest)+5*time.Second, time.Second)
+		}
+		wait = min(wait, quotaPollMax)
+		fmt.Fprintf(os.Stderr, "%s; checking again at %s\n", strings.Join(reasons, "; "), time.Now().Add(wait).Format("15:04:05"))
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("still no allowance at --timeout")
+			}
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+	}
 }
 
 // quotaTargets expands the requested names into concrete providers: a pool
@@ -119,7 +227,7 @@ func quotaTargets(cfg *config.Config, args []string) ([]string, error) {
 			return fmt.Errorf("provider %q does not exist", n)
 		}
 		if p.IsPool() {
-			for _, m := range p.Members {
+			for _, m := range cfg.Leaves(n) {
 				add(m)
 			}
 			return nil
