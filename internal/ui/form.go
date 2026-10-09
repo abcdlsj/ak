@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/preset"
 	"github.com/charmbracelet/huh"
 )
 
@@ -37,8 +38,16 @@ type Draft struct {
 	// provider a normal upstream.
 	Members  string
 	Strategy string
+	// Preset is the id of the built-in preset a new provider starts from;
+	// blank for none.
+	Preset string
 
 	existing bool
+	// picked is set once the engine and preset were asked before the form,
+	// so the form does not ask for the engine again.
+	picked bool
+	// keyURL is where the chosen preset's vendor hands out keys.
+	keyURL string
 	// orig is the name being edited; Name may differ after a rename.
 	orig string
 	base config.Provider
@@ -151,6 +160,60 @@ func splitMembers(s string) []string {
 // Orig is the name the draft started from, empty for a new provider.
 func (d *Draft) Orig() string { return d.orig }
 
+// IsNew reports whether the draft adds a provider rather than editing one.
+func (d *Draft) IsNew() bool { return !d.existing }
+
+// PresetForm asks a new provider's engine and an optional preset, run before
+// Form so the preset can pre-fill it.
+func (d *Draft) PresetForm() *huh.Form {
+	return huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().Title("Engine").Value(&d.Kind).
+			Options(huh.NewOption("claude", string(config.KindClaude)), huh.NewOption("codex", string(config.KindCodex)), huh.NewOption("pi", string(config.KindPi))),
+		huh.NewSelect[string]().Title("Preset").Value(&d.Preset).
+			Description("Pre-fills the endpoint and model; / filters").
+			OptionsFunc(func() []huh.Option[string] { return presetOptions(config.Kind(d.Kind)) }, &d.Kind).
+			Height(12),
+	)).WithShowHelp(true)
+}
+
+func presetOptions(kind config.Kind) []huh.Option[string] {
+	opts := []huh.Option[string]{huh.NewOption("(none)", "")}
+	for _, p := range preset.ForKind(kind) {
+		opts = append(opts, huh.NewOption(p.Name+" ("+p.ID+")", p.ID))
+	}
+	return opts
+}
+
+// ApplyPreset fills the draft from the chosen preset and marks the engine as
+// chosen. With no preset it changes nothing else. A blank name becomes the
+// preset id.
+func (d *Draft) ApplyPreset() {
+	d.picked = true
+	ps, ok := preset.Lookup(d.Preset, config.Kind(d.Kind))
+	if !ok {
+		d.Preset = ""
+		return
+	}
+	ps.Apply(&d.base)
+	p := d.base
+	d.BaseURL, d.Model = p.BaseURL, p.Model
+	d.Haiku, d.Sonnet, d.Opus = p.Haiku, p.Sonnet, p.Opus
+	d.PiAPI, d.PiAuth = p.PiAPI, p.PiAuthHeader
+	if d.KeyField = p.KeyField; d.KeyField == "" {
+		d.KeyField = "auth_token"
+	}
+	if d.WireAPI = p.WireAPI; d.WireAPI == "" {
+		d.WireAPI = "responses"
+	}
+	if d.Display == "" {
+		d.Display = p.Display
+	}
+	if d.Name == "" {
+		d.Name = ps.ID
+	}
+	d.keyURL = ps.APIKeyURL
+}
+
 // Form builds the provider form. taken reports names already in use.
 func (d *Draft) Form(taken func(string) bool) *huh.Form {
 	isKind := func(k config.Kind) func() bool {
@@ -160,6 +223,9 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 	keyDesc := "Or a reference: env:NAME, cmd:..., keychain:..."
 	if d.existing {
 		keyDesc = "Blank keeps the current key. " + keyDesc
+	}
+	if d.keyURL != "" {
+		keyDesc = "Get one at " + d.keyURL + ". " + keyDesc
 	}
 
 	basics := []huh.Field{
@@ -175,7 +241,7 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 				return nil
 			}),
 	}
-	if !d.existing {
+	if !d.existing && !d.picked {
 		basics = append(basics,
 			huh.NewSelect[string]().Title("Engine").Value(&d.Kind).
 				Options(huh.NewOption("claude", string(config.KindClaude)), huh.NewOption("codex", string(config.KindCodex)), huh.NewOption("pi", string(config.KindPi))),

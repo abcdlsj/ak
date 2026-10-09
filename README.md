@@ -41,6 +41,7 @@ ak sync
 ak                          open the launcher (enter or 1-9 runs a provider)
 ak list                     list providers
 ak add [name]               add a provider (flags, or a form with no --base-url)
+ak add <name> --preset <id> --key sk-...   start from a built-in vendor preset
 ak add pool --member a --member b --strategy rotate   a pool: balance over several providers
 ak serve                    run the pool gateway (required while a pool command runs)
 ak edit <name> [--model …]  change only the given fields, or open the form
@@ -111,6 +112,21 @@ in the environment of `ak serve`.
 `ak` keeps one source of truth in `~/.config/ak/providers.toml` (mode `0600`)
 and derives everything else. Generated shims are marked and idempotent, so
 `ak sync` rewrites only what changed and reclaims what no longer applies.
+
+### Presets
+
+Known vendors come built in, so adding one needs only a name and a key:
+
+```
+ak preset list [--kind claude]        id, engine, endpoint, model, where to get a key
+ak add kimi --preset kimi-coding --kind claude --key sk-...
+```
+
+`--kind` is needed only when the preset exists for more than one engine. Any
+other flag overrides the preset, e.g. `--model`. With no flags, `ak add` and
+the TUI ask for the engine and an optional preset first, then open the form
+pre-filled. The data comes from cc-switch's presets; vendors that need OAuth or
+protocol translation are left out.
 
 ## Sharing or isolating config
 
