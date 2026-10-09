@@ -2,6 +2,7 @@ package cli
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -30,7 +31,11 @@ func TestMatchNamesSkipsUsed(t *testing.T) {
 	for _, n := range []string{"openrouter", "openrouter-claude", "kimi"} {
 		cfg.Providers[n] = config.Provider{Kind: config.KindClaude}
 	}
-	got := matchNames(cfg, []string{"openrouter"}, "open")
+	var got []string
+	for _, c := range matchNames(cfg, []string{"openrouter"}, "open") {
+		name, _, _ := strings.Cut(c, "\t")
+		got = append(got, name)
+	}
 	if !reflect.DeepEqual(got, []string{"openrouter-claude"}) {
 		t.Fatalf("got %v", got)
 	}
@@ -51,5 +56,18 @@ func TestQuotaDedupKey(t *testing.T) {
 func TestListEndpointForPiProvider(t *testing.T) {
 	if got := endpoint(listRow{PiProvider: "commandcode"}); got != "pi:commandcode" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDescribeProvider(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["a"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://x", Model: "m"}
+	cfg.Providers["p"] = config.Provider{Kind: config.KindClaude, Members: []string{"a"}}
+	cfg.Settings.Default = "p"
+	if got := describeProvider(cfg, "a"); !strings.HasPrefix(got, "✗ ") || !strings.Contains(got, "no API key") || !strings.HasSuffix(got, "claude · m") {
+		t.Errorf("a: %q", got)
+	}
+	if got := describeProvider(cfg, "p"); !strings.Contains(got, "pool(order: a) · default") {
+		t.Errorf("p: %q", got)
 	}
 }

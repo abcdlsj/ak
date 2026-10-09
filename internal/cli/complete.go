@@ -38,10 +38,32 @@ func matchNames(cfg *config.Config, used []string, prefix string) []string {
 	var out []string
 	for _, n := range cfg.Names() {
 		if !skip[n] && strings.HasPrefix(n, prefix) {
-			out = append(out, n)
+			out = append(out, n+"\t"+describeProvider(cfg, n))
 		}
 	}
 	return out
+}
+
+// describeProvider is the one-line summary shown beside a completion, in the
+// launcher's order: health, engine, model or pool, default. Health here skips
+// the dry-run sync the TUI does, so Tab stays instant: only a missing key or
+// engine is marked.
+func describeProvider(cfg *config.Config, name string) string {
+	p := cfg.Providers[name]
+	var parts []string
+	if st := core.QuickStatus(cfg, name); !st.OK() {
+		parts = append(parts, "✗ "+strings.Join(st.Problems(), ", "))
+	}
+	parts = append(parts, string(p.Kind))
+	if p.IsPool() {
+		parts = append(parts, endpoint(listRow{Members: p.Members, Strategy: p.Strategy}))
+	} else if p.Model != "" {
+		parts = append(parts, p.Model)
+	}
+	if cfg.Settings.Default == name {
+		parts = append(parts, "default")
+	}
+	return strings.Join(parts, " · ")
 }
 
 // completePresets completes preset ids, each once across engines.
