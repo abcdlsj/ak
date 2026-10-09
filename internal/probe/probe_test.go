@@ -270,3 +270,12 @@ func TestModelsErrorNamesEveryURL(t *testing.T) {
 		t.Fatalf("error leaks the key:\n%s", err)
 	}
 }
+
+// An Anthropic base that already ends in a version still gets /v1/messages,
+// as claude itself would send.
+func TestAnthropicCheckPathIgnoresVersionedBase(t *testing.T) {
+	url, _ := checkRequest("https://x.example/api/v4", wireAnthropic, "m")
+	if url != "https://x.example/api/v4/v1/messages" {
+		t.Errorf("url = %s", url)
+	}
+}

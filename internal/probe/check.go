@@ -100,9 +100,10 @@ func testModel(p config.Provider) string {
 	return ""
 }
 
-// checkRequest builds the smallest request each protocol accepts. A codex or
-// openai-style base URL conventionally already ends in /v1; an Anthropic one
-// does not.
+// checkRequest builds the smallest request each protocol accepts, at the path
+// the engine itself would use: codex and openai-style clients append to a base
+// that already ends in /v1, while claude and the Anthropic SDK always append
+// /v1/messages, whatever the base ends in.
 func checkRequest(base, w, model string) (string, any) {
 	base = trimBase(base)
 	hi := []map[string]string{{"role": "user", "content": "hi"}}
@@ -111,9 +112,6 @@ func checkRequest(base, w, model string) (string, any) {
 		return base + "/chat/completions", map[string]any{"model": model, "messages": hi, "max_tokens": 1}
 	case wireResponses:
 		return base + "/responses", map[string]any{"model": model, "input": "hi", "max_output_tokens": 16}
-	}
-	if endsWithVersion(base) {
-		return base + "/messages", map[string]any{"model": model, "max_tokens": 1, "messages": hi}
 	}
 	return base + "/v1/messages", map[string]any{"model": model, "max_tokens": 1, "messages": hi}
 }
