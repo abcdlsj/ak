@@ -279,3 +279,11 @@ func TestAnthropicCheckPathIgnoresVersionedBase(t *testing.T) {
 		t.Errorf("url = %s", url)
 	}
 }
+
+// OpenRouter answers an unserved model with a 404 naming no "model" field.
+func TestOpenRouterNoEndpointsIsModel(t *testing.T) {
+	st, _ := classify(404, []byte(`{"error":{"message":"No endpoints found for x/y.","code":404}}`), 0, "")
+	if st != StatusModel {
+		t.Errorf("status = %s, want model", st)
+	}
+}

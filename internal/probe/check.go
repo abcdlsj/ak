@@ -45,7 +45,7 @@ type Result struct {
 }
 
 // modelWords spot an error that names the model rather than the request.
-var modelWords = regexp.MustCompile(`(?i)model_not_found|no such model|unknown model|invalid model|unsupported model|model.{0,60}(not found|does not exist|doesn't exist|not exist|not supported|not available|unavailable|not allowed)`)
+var modelWords = regexp.MustCompile(`(?i)model_not_found|no such model|no endpoints found|unknown model|invalid model|unsupported model|model.{0,60}(not found|does not exist|doesn't exist|not exist|not supported|not available|unavailable|not allowed)`)
 
 // Check sends the provider one minimal, non-streamed request and classifies
 // the answer. It spends a few tokens. Provider is left for the caller to set.
