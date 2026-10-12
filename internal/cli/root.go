@@ -110,6 +110,8 @@ Run with no arguments to open the launcher.`,
 		newWhichCmd(),
 		newResolveCmd(),
 		newInitCmd(),
+		newInstallCmd(),
+		newUninstallCmd(),
 	)
 	return root
 }

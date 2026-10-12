@@ -2,14 +2,15 @@
 
 ## Typing claude and codex directly
 
-`ak init` prints shell functions named `claude`, `codex` and `pi`. Each asks
-ak what the command runs on in the current directory and launches that
-provider, or the engine's own command when nothing applies:
-
-```sh
-eval "$(ak init zsh)"          # ~/.zshrc  (bash: eval "$(ak init bash)")
-ak init fish | source          # ~/.config/fish/config.fish
-```
+`ak install` sets up shell functions named `claude`, `codex` and `pi`. Each
+asks ak what the command runs on in the current directory and launches that
+provider, or the engine's own command when nothing applies. The shell comes
+from `$SHELL` (or `--shell zsh|bash|fish`): fish gets
+`~/.config/fish/conf.d/ak.fish`, zsh and bash a marked block in `~/.zshrc` or
+`~/.bashrc` (a symlinked rc is written through the link). The block asks ak
+for the functions on each shell start, so upgrading ak needs no reinstall.
+Running it again changes nothing, and `ak uninstall` takes it out. To wire it
+by hand instead, `ak init zsh|bash|fish` prints the functions.
 
 What a command runs on is decided in this order, first match wins:
 

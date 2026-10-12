@@ -32,10 +32,10 @@ ak kimi
 
 `--key -` asks for the key, so it stays out of shell history.
 
-To keep typing `claude` and `codex`, add the shell functions and bind:
+To keep typing `claude` and `codex`, set up the shell once and bind:
 
 ```
-eval "$(ak init zsh)"        # in ~/.zshrc; bash and fish too
+ak install                   # zsh, bash or fish, from $SHELL; ak uninstall undoes it
 ak bind kimi:high            # claude in this repository (every worktree) runs on kimi
 ak default codex bilicodex   # codex everywhere nothing is bound runs on bilicodex
 ak which                     # what claude / codex / pi run on here, and why
@@ -59,7 +59,7 @@ ak usage | quota | check | models   the parts of status, for scripts
 ak bind / unbind / bindings     what claude/codex/pi typed in a repository run on
 ak default <engine> <name>      what they run on where nothing is bound
 ak which                        what they run on here, and why
-ak init zsh|bash|fish           the shell functions that make the above work
+ak install / uninstall          set up the shell for the above (zsh, bash, fish)
 ak doctor                       anything that would make a launch misroute
 ak-<name> [args...]             the same as ak <name>, for scripts
 ```
@@ -75,5 +75,5 @@ ak-<name> [args...]             the same as ak <name>, for scripts
 
 ## Rolling back
 
-Remove the `ak init` line from your shell rc, delete the `ak-*` commands, `~/.config/ak/`, and the `ak-*` entries in pi's
+Run `ak uninstall`, delete the `ak-*` commands, `~/.config/ak/`, and the `ak-*` entries in pi's
 `models.json` if you used pi. Nothing else was modified.
