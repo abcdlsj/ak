@@ -40,12 +40,12 @@ func Default() (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{Path: filepath.Join(dir, "recent.json"), Repo: gitCommonDir}, nil
+	return &Store{Path: filepath.Join(dir, "recent.json"), Repo: GitCommonDir}, nil
 }
 
 // Remember records provider as the last one launched in dir.
 func (s *Store) Remember(dir, provider string) error {
-	dir = canonical(dir)
+	dir = Canonical(dir)
 	f := s.load()
 	e := entry{Provider: provider, At: time.Now().UTC()}
 	f.Dirs[dir] = e
@@ -73,7 +73,7 @@ func (s *Store) Remember(dir, provider string) error {
 // Lookup returns the provider last launched in dir, else in its repository,
 // skipping any that valid rejects (a provider since removed).
 func (s *Store) Lookup(dir string, valid func(string) bool) string {
-	dir = canonical(dir)
+	dir = Canonical(dir)
 	f := s.load()
 	if e, ok := f.Dirs[dir]; ok && valid(e.Provider) {
 		return e.Provider
@@ -100,8 +100,8 @@ func (s *Store) load() file {
 	return f
 }
 
-// canonical resolves symlinks, so one directory reached two ways is one entry.
-func canonical(dir string) string {
+// Canonical resolves symlinks, so one directory reached two ways is one entry.
+func Canonical(dir string) string {
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
@@ -111,12 +111,12 @@ func canonical(dir string) string {
 	return dir
 }
 
-// gitCommonDir is the repository's shared .git dir, the same for every
+// GitCommonDir is the repository's shared .git dir, the same for every
 // worktree of it.
-func gitCommonDir(dir string) string {
+func GitCommonDir(dir string) string {
 	out, err := exec.Command("git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
 	if err != nil {
 		return ""
 	}
-	return canonical(strings.TrimSpace(string(out)))
+	return Canonical(strings.TrimSpace(string(out)))
 }

@@ -20,10 +20,10 @@ func TestRememberLookup(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Store{Path: filepath.Join(root, "data", "recent.json"), Repo: func(dir string) string {
-		if dir == canonical(other) {
+		if dir == Canonical(other) {
 			return ""
 		}
-		return canonical(repo)
+		return Canonical(repo)
 	}}
 	all := func(string) bool { return true }
 

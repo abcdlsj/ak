@@ -420,9 +420,15 @@ removed; the default and usage history follow the new name.`,
 
 func newDefaultCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:               "default [name]",
+		Use:               "default [name] | default <engine> [provider[:variant]|native]",
 		ValidArgsFunction: completeFirstProvider,
-		Short:             "Show or set the default provider",
+		Short:             "Show or set the default provider, or what an engine's own command runs on",
+		Long: `default with a provider sets the one the launcher opens on.
+
+default <engine> <provider[:variant]> sets what claude, codex or pi, typed
+where no binding applies, runs on through the shell functions of ak init;
+native puts the engine's own command back.`,
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -431,10 +437,37 @@ func newDefaultCmd() *cobra.Command {
 			if len(args) == 0 {
 				if cfg.Settings.Default == "" {
 					fmt.Println("No default provider set.")
+				} else {
+					fmt.Printf("default provider: %s\n", cfg.Settings.Default)
+				}
+				for _, k := range config.Kinds {
+					if t := cfg.Settings.EngineDefault(k); t != "" {
+						fmt.Printf("%s runs on: %s\n", k, t)
+					}
+				}
+				return nil
+			}
+			// An engine name is an engine unless it is also a provider's name
+			// and no target follows, which keeps `ak default <name>` as it was.
+			if k, ok := parseKind(args[0]); ok {
+				if _, isProvider := cfg.Providers[args[0]]; len(args) == 2 || !isProvider {
+					if len(args) == 1 {
+						t := cfg.Settings.EngineDefault(k)
+						if t == "" {
+							t = "native"
+						}
+						fmt.Printf("%s runs on: %s\n", k, t)
+						return nil
+					}
+					if err := core.SetEngineDefault(cfg, k, args[1]); err != nil {
+						return err
+					}
+					fmt.Printf("%s now runs %s where nothing is bound\n", k, describeTarget(args[1]))
 					return nil
 				}
-				fmt.Printf("default provider: %s\n", cfg.Settings.Default)
-				return nil
+			}
+			if len(args) == 2 {
+				return fmt.Errorf("unknown engine %q; one of %s", args[0], kindList())
 			}
 			if err := core.SetDefault(cfg, args[0]); err != nil {
 				return err

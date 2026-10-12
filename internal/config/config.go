@@ -58,17 +58,54 @@ type Config struct {
 
 // Settings holds global settings.
 type Settings struct {
-	BinDir    string `toml:"bin_dir"`
-	Prefix    string `toml:"prefix"`
-	Default   string `toml:"default,omitempty"`
-	ClaudeBin string `toml:"claude_bin,omitempty"`
-	CodexBin  string `toml:"codex_bin,omitempty"`
-	PiBin     string `toml:"pi_bin,omitempty"`
+	BinDir  string `toml:"bin_dir"`
+	Prefix  string `toml:"prefix"`
+	Default string `toml:"default,omitempty"`
+	// DefaultClaude, DefaultCodex and DefaultPi are what the engine's own
+	// command (claude, codex, pi) runs on through `ak init`'s shell functions
+	// where no binding applies: a provider[:variant] of that kind. Empty
+	// keeps the engine's own command.
+	DefaultClaude string `toml:"default_claude,omitempty"`
+	DefaultCodex  string `toml:"default_codex,omitempty"`
+	DefaultPi     string `toml:"default_pi,omitempty"`
+	ClaudeBin     string `toml:"claude_bin,omitempty"`
+	CodexBin      string `toml:"codex_bin,omitempty"`
+	PiBin         string `toml:"pi_bin,omitempty"`
 	// GatewayAddr is the listen address of the pool gateway, host:port.
 	GatewayAddr string `toml:"gateway_addr,omitempty"`
 	// MaxInflight bounds how many requests the gateway handles at once; over
 	// it a request is refused with 503 rather than queued. 0 means no bound.
 	MaxInflight int `toml:"max_inflight"`
+}
+
+// Kinds are the engines, in display order.
+var Kinds = []Kind{KindClaude, KindCodex, KindPi}
+
+// EngineDefault returns the target the engine's own command runs on where no
+// binding applies, or "".
+func (s Settings) EngineDefault(k Kind) string {
+	switch k {
+	case KindClaude:
+		return s.DefaultClaude
+	case KindCodex:
+		return s.DefaultCodex
+	case KindPi:
+		return s.DefaultPi
+	}
+	return ""
+}
+
+// EngineDefaultPtr returns the field holding k's engine default, or nil.
+func (s *Settings) EngineDefaultPtr(k Kind) *string {
+	switch k {
+	case KindClaude:
+		return &s.DefaultClaude
+	case KindCodex:
+		return &s.DefaultCodex
+	case KindPi:
+		return &s.DefaultPi
+	}
+	return nil
 }
 
 // GatewayURL returns the loopback base URL of the pool gateway, without a

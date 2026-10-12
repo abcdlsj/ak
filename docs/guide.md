@@ -1,5 +1,40 @@
 # Guide
 
+## Typing claude and codex directly
+
+`ak init` prints shell functions named `claude`, `codex` and `pi`. Each asks
+ak what the command runs on in the current directory and launches that
+provider, or the engine's own command when nothing applies:
+
+```sh
+eval "$(ak init zsh)"          # ~/.zshrc  (bash: eval "$(ak init bash)")
+ak init fish | source          # ~/.config/fish/config.fish
+```
+
+What a command runs on is decided in this order, first match wins:
+
+1. `AK=<provider[:variant]>` for one invocation: `AK=deepseek claude -p "..."`.
+   `AK=native claude` runs the engine's own command.
+2. A binding: `ak bind kimi:high` in a repository binds the provider's engine
+   there, for every worktree of it. Outside a repository it binds the
+   directory and those below it. `ak bind native` keeps the engines' own
+   commands there even when a default is set (`--engine` limits it to one).
+3. The engine default: `ak default claude kimi`, `ak default codex bilicodex`.
+   `ak default claude native` clears it.
+4. The engine's own command, with its own settings, as if ak were not there.
+
+`ak which` shows what each engine runs on here and which rule chose it;
+`ak bindings` lists them all and `ak unbind [engine]` removes the one here.
+Bindings live in `~/.config/ak/bindings.json`; nothing is written into the
+repositories. A binding or default naming a provider that is gone, or one of
+another kind, stops the command with the fix rather than quietly running the
+engine's own; `ak rename` and `ak rm` carry them along, and `ak doctor` names
+any left over.
+
+The functions exist only in interactive shells, so scripts, editors and other
+tools still run the engines' own commands. `ak <name>` keeps working
+alongside.
+
 ## Launching
 
 ```

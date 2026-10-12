@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/abcdlsj/ak/internal/bind"
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/provider"
@@ -230,6 +231,20 @@ func runDoctor(cfg *config.Config) error {
 			warnings++
 			fmt.Printf("! smart pool %s cannot read the quota of %s; they rank after members with allowance that resets\n",
 				name, strings.Join(blind, ", "))
+		}
+	}
+
+	// 13. A binding to a provider since removed, or of the wrong kind, makes
+	// the engine's command fail where it applies.
+	if store, err := bind.Default(); err == nil {
+		for _, b := range store.List() {
+			if b.Target == bind.Native {
+				continue
+			}
+			if err := config.ValidateTarget(cfg, config.Kind(b.Engine), b.Target); err != nil {
+				problems++
+				fmt.Printf("✗ %s bound at %s: %v; `ak unbind %s` there\n", b.Engine, displayPlace(b.Place), err, b.Engine)
+			}
 		}
 	}
 

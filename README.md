@@ -30,7 +30,19 @@ ak add kimi --preset kimi-coding --kind claude --key -   # or add one directly
 ak kimi
 ```
 
-`--key -` asks for the key, so it stays out of shell history. `ak preset list`
+`--key -` asks for the key, so it stays out of shell history.
+
+To keep typing `claude` and `codex`, add the shell functions and bind:
+
+```
+eval "$(ak init zsh)"        # in ~/.zshrc; bash and fish too
+ak bind kimi:high            # claude in this repository (every worktree) runs on kimi
+ak default codex bilicodex   # codex everywhere nothing is bound runs on bilicodex
+ak which                     # what claude / codex / pi run on here, and why
+```
+
+Where nothing is bound and no engine default is set, `claude` and `codex` stay
+the engines' own, with their own settings. `ak preset list`
 shows the built-in vendors; `ak import --from cc-switch` (or `--from pi`)
 copies providers you already have.
 
@@ -44,13 +56,17 @@ ak list                         providers
 ak add / edit / rm / rename     change providers (flags, or a form)
 ak import --from cc-switch|pi   copy providers over
 ak usage | quota | check | models   the parts of status, for scripts
+ak bind / unbind / bindings     what claude/codex/pi typed in a repository run on
+ak default <engine> <name>      what they run on where nothing is bound
+ak which                        what they run on here, and why
+ak init zsh|bash|fish           the shell functions that make the above work
 ak doctor                       anything that would make a launch misroute
 ak-<name> [args...]             the same as ak <name>, for scripts
 ```
 
 ## More
 
-- [Guide](docs/guide.md): variants, the launcher, environment, presets,
+- [Guide](docs/guide.md): typing `claude` and `codex` directly, variants, the launcher, environment, presets,
   sharing or isolating config, pi, how usage is attributed.
 - [Pools](docs/pools.md): one provider spread over several, with failover,
   rotation and a quota-aware strategy.
@@ -59,5 +75,5 @@ ak-<name> [args...]             the same as ak <name>, for scripts
 
 ## Rolling back
 
-Delete the `ak-*` commands, `~/.config/ak/`, and the `ak-*` entries in pi's
+Remove the `ak init` line from your shell rc, delete the `ak-*` commands, `~/.config/ak/`, and the `ak-*` entries in pi's
 `models.json` if you used pi. Nothing else was modified.

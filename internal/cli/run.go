@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -73,7 +74,15 @@ func execProvider(cfg *config.Config, name, variant string, args []string) error
 	if err != nil {
 		return fmt.Errorf("resolve the key for %s: %w", name, err)
 	}
-	o := launch.Options{Environ: os.Environ(), Key: key}
+	// The one-shot override picked this launch; the engine's children must
+	// not inherit it.
+	environ := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, overrideEnv+"=") {
+			environ = append(environ, kv)
+		}
+	}
+	o := launch.Options{Environ: environ, Key: key}
 	if p.Kind == config.KindClaude {
 		if id, err := launch.NewSessionID(); err == nil {
 			o.SessionID = id

@@ -16,6 +16,8 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 // pick, kept free for ak's use.
 var Reserved = map[string]bool{
 	"help": true, "completion": true, "run": true, "pick": true,
+	// native is the bind target that keeps the engine's own command.
+	"native": true,
 }
 
 // Reserve adds command names to Reserved.
@@ -60,6 +62,33 @@ func Validate(cfg *Config) error {
 		if _, ok := cfg.Providers[d]; !ok {
 			return fmt.Errorf("settings.default points at unknown provider %q", d)
 		}
+	}
+	for _, k := range Kinds {
+		if t := cfg.Settings.EngineDefault(k); t != "" {
+			if err := ValidateTarget(cfg, k, t); err != nil {
+				return fmt.Errorf("settings.default_%s: %w", k, err)
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateTarget checks that target, a provider[:variant], names a provider
+// of kind k and, when given, one of its variants.
+func ValidateTarget(cfg *Config, k Kind, target string) error {
+	name, variant, explicit := strings.Cut(target, ":")
+	if name == "" || explicit && variant == "" {
+		return fmt.Errorf("invalid target %q; use <provider> or <provider>:<variant>", target)
+	}
+	p, ok := cfg.Providers[name]
+	if !ok {
+		return fmt.Errorf("provider %q does not exist", name)
+	}
+	if p.Kind != k {
+		return fmt.Errorf("provider %q runs %s, not %s", name, p.Kind, k)
+	}
+	if variant != "" && !validVariant(p, variant) {
+		return fmt.Errorf("provider %q has no variant %q", name, variant)
 	}
 	return nil
 }

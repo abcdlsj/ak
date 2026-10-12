@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
+	"github.com/abcdlsj/ak/internal/bind"
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/shim"
@@ -54,13 +56,48 @@ func Remove(cfg *config.Config, name string) error {
 	if pool, ok := onlyMemberOf(cfg, name); ok {
 		return fmt.Errorf("provider %q is the only member of pool %q; remove the pool first", name, pool)
 	}
-	return mutate(cfg, func(c *config.Config) {
+	err := mutate(cfg, func(c *config.Config) {
 		delete(c.Providers, name)
 		if c.Settings.Default == name {
 			c.Settings.Default = ""
 		}
+		for _, k := range config.Kinds {
+			if f := c.Settings.EngineDefaultPtr(k); targetName(*f) == name {
+				*f = ""
+			}
+		}
 		dropMember(c, name)
 	})
+	if err != nil {
+		return err
+	}
+	if s, err := bind.Default(); err == nil {
+		if err := s.Drop(name); err != nil {
+			return fmt.Errorf("drop the bindings of %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// targetName is the provider a provider[:variant] target names.
+func targetName(target string) string {
+	name, _, _ := strings.Cut(target, ":")
+	return name
+}
+
+// SetEngineDefault sets what engine k's own command runs on where no binding
+// applies: a provider[:variant] of that kind, or "" (or native) for the
+// engine's own command.
+func SetEngineDefault(cfg *config.Config, k config.Kind, target string) error {
+	if target == bind.Native {
+		target = ""
+	}
+	if target != "" {
+		if err := config.ValidateTarget(cfg, k, target); err != nil {
+			return err
+		}
+	}
+	return mutate(cfg, func(c *config.Config) { *c.Settings.EngineDefaultPtr(k) = target })
 }
 
 // onlyMemberOf reports the pool that names provider as its only member.
@@ -182,10 +219,20 @@ func Rename(cfg *config.Config, from, to string) error {
 		if c.Settings.Default == from {
 			c.Settings.Default = to
 		}
+		for _, k := range config.Kinds {
+			if f := c.Settings.EngineDefaultPtr(k); targetName(*f) == from {
+				*f = to + strings.TrimPrefix(*f, from)
+			}
+		}
 		renameMember(c, from, to)
 	})
 	if err != nil {
 		return err
+	}
+	if s, err := bind.Default(); err == nil {
+		if err := s.Rename(from, to); err != nil {
+			return fmt.Errorf("rename the bindings of %s: %w", from, err)
+		}
 	}
 	return usage.RenameProvider(from, to)
 }

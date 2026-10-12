@@ -152,3 +152,28 @@ func TestRenameMovesAuthEntry(t *testing.T) {
 		t.Fatalf("old entry kept:\n%s", data)
 	}
 }
+
+func TestEngineDefaultFollowsRenameAndRemove(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := config.Default()
+	cfg.Providers["a"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://a", APIKey: "k"}
+	cfg.Providers["c"] = config.Provider{Kind: config.KindCodex, BaseURL: "https://c", APIKey: "k"}
+	if err := SetEngineDefault(cfg, config.KindClaude, "c"); err == nil {
+		t.Fatal("a codex provider cannot be claude's default")
+	}
+	if err := SetEngineDefault(cfg, config.KindClaude, "a:opus"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Rename(cfg, "a", "z"); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Settings.DefaultClaude; got != "z:opus" {
+		t.Fatalf("after rename: %q", got)
+	}
+	if err := Remove(cfg, "z"); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Settings.DefaultClaude; got != "" {
+		t.Fatalf("after remove: %q", got)
+	}
+}

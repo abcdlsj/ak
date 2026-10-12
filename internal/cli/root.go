@@ -104,6 +104,12 @@ Run with no arguments to open the launcher.`,
 		newModelsCmd(),
 		newPresetCmd(),
 		newStatusCmd(),
+		newBindCmd(),
+		newUnbindCmd(),
+		newBindingsCmd(),
+		newWhichCmd(),
+		newResolveCmd(),
+		newInitCmd(),
 	)
 	return root
 }
