@@ -20,7 +20,7 @@ What a command runs on is decided in this order, first match wins:
    there, for every worktree of it. Outside a repository it binds the
    directory and those below it. `ak bind native` keeps the engines' own
    commands there even when a default is set (`--engine` limits it to one).
-3. The engine default: `ak default claude kimi`, `ak default codex bilicodex`.
+3. The engine default: `ak default claude kimi`, `ak default codex relay`.
    `ak default claude native` clears it.
 4. The engine's own command, with its own settings, as if ak were not there.
 
@@ -91,17 +91,17 @@ engine fail with a 401.
 Custom variants go under the provider:
 
 ```toml
-[providers.bilicodex]
+[providers.relay]
 default_variant = "high"   # launch with this variant unless another is named
 
-[providers.bilicodex.variants.fast]
+[providers.relay.variants.fast]
 model = "gpt-5.6-luna"
 reasoning = "low"
-shim = true          # also generate ak-bilicodex-fast
+shim = true          # also generate ak-relay-fast
 ```
 
 `default_variant` is a built-in thinking/reasoning level or a model tier, or
-one of the provider's own variants. With it, `ak bilicodex` runs at that level
+one of the provider's own variants. With it, `ak relay` runs at that level
 unless you name another variant, and the launcher's picker is skipped.
 
 ### Environment
@@ -110,7 +110,7 @@ Extra environment variables go under `env`, for any kind, on the provider or
 on a variant. A proxy for one provider is just that:
 
 ```toml
-[providers.bilicodex.env]
+[providers.relay.env]
 HTTPS_PROXY = "http://127.0.0.1:7890"
 ```
 
@@ -161,12 +161,12 @@ of separation are available when that is too much sharing:
 effortLevel = "low"
 statusLine = { type = "command", command = "~/bin/stepfun-status" }
 
-[providers.bili-claude]
-config_dir = "~/.claude-bili"     # its own login, MCP, plugins and sessions
+[providers.work]
+config_dir = "~/.claude-work"     # its own login, MCP, plugins and sessions
 ```
 
 Or `ak edit stepfunclaude --settings '{"effortLevel":"low"}'`,
-`ak edit bili-claude --config-dir ~/.claude-bili`. A settings layer cannot
+`ak edit work --config-dir ~/.claude-work`. A settings layer cannot
 remove what the shared file sets, and it may not set the endpoint or key in
 its `env`: those come from the provider. A separate directory starts empty,
 so sign in, MCP servers and plugins are set up there again; `ak usage`

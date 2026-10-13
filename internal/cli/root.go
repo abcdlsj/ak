@@ -4,6 +4,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -11,10 +12,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version is injected at build time.
+// Version is injected at build time; `go install ...@vX` leaves it to the
+// module version.
 var Version = "dev"
 
 func init() {
+	if Version == "dev" {
+		if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			Version = bi.Main.Version
+		}
+	}
 	// Every command name is reserved, so `ak <name>` always means one thing.
 	for _, c := range newRoot().Commands() {
 		config.Reserve(c.Name())
