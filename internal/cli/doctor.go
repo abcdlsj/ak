@@ -159,6 +159,13 @@ func runDoctor(cfg *config.Config) error {
 		}
 	}
 
+	// 6c. A default left pointing at a provider that is gone or of another
+	// kind; the command that would use it stops with the same message.
+	for _, err := range config.ValidateDefaults(cfg) {
+		problems++
+		fmt.Printf("✗ %v; fix it with `ak default`\n", err)
+	}
+
 	// 7. A codex provider_id that the base config also uses cannot be told
 	// apart in the session logs, so its usage is reported under the raw id.
 	if names := codexIDCollisions(cfg); len(names) > 0 {
@@ -237,7 +244,12 @@ func runDoctor(cfg *config.Config) error {
 	// 13. A binding to a provider since removed, or of the wrong kind, makes
 	// the engine's command fail where it applies.
 	if store, err := bind.Default(); err == nil {
-		for _, b := range store.List() {
+		list, err := store.List()
+		if err != nil {
+			problems++
+			fmt.Printf("✗ bindings: %v\n", err)
+		}
+		for _, b := range list {
 			if b.Target == bind.Native {
 				continue
 			}

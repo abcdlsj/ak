@@ -58,19 +58,28 @@ func Validate(cfg *Config) error {
 	if err := validateCommandNames(cfg); err != nil {
 		return err
 	}
+	return nil
+}
+
+// ValidateDefaults checks the defaults in settings. It is kept out of
+// Validate so a default left pointing at nothing does not stop every
+// command, including the ones that fix it; the command that would use it
+// reports it, and so does doctor.
+func ValidateDefaults(cfg *Config) []error {
+	var errs []error
 	if d := cfg.Settings.Default; d != "" {
 		if _, ok := cfg.Providers[d]; !ok {
-			return fmt.Errorf("settings.default points at unknown provider %q", d)
+			errs = append(errs, fmt.Errorf("settings.default points at unknown provider %q", d))
 		}
 	}
 	for _, k := range Kinds {
 		if t := cfg.Settings.EngineDefault(k); t != "" {
 			if err := ValidateTarget(cfg, k, t); err != nil {
-				return fmt.Errorf("settings.default_%s: %w", k, err)
+				errs = append(errs, fmt.Errorf("settings.default_%s: %w", k, err))
 			}
 		}
 	}
-	return nil
+	return errs
 }
 
 // ValidateTarget checks that target, a provider[:variant], names a provider

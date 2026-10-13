@@ -177,3 +177,25 @@ func TestEngineDefaultFollowsRenameAndRemove(t *testing.T) {
 		t.Fatalf("after remove: %q", got)
 	}
 }
+
+// A default pointing at nothing must not stop the commands that fix it.
+func TestDanglingDefaultStillLoads(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := config.Default()
+	cfg.Providers["a"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://a", APIKey: "k"}
+	cfg.Settings.DefaultClaude = "gone"
+	cfg.Settings.Default = "gone"
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if errs := config.ValidateDefaults(cfg); len(errs) != 2 {
+		t.Fatalf("defaults reported: %v", errs)
+	}
+	if err := SetEngineDefault(cfg, config.KindClaude, "native"); err != nil {
+		t.Fatalf("clearing the default: %v", err)
+	}
+}

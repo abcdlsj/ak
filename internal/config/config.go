@@ -428,7 +428,13 @@ func authEntries(cfg *Config) (map[string]string, error) {
 			cfg.Providers[name] = p
 		}
 		if prev, ok := auth[p.AuthKey]; ok && prev != p.APIKey {
-			return nil, fmt.Errorf("providers %q and %q share auth_key %q but hold different keys", owner[p.AuthKey], name, p.AuthKey)
+			// A provider whose key was changed apart from the others sharing
+			// the entry moves to an entry of its own.
+			if prev, ok := auth[name]; ok && prev != p.APIKey {
+				return nil, fmt.Errorf("providers %q and %q share auth_key %q but hold different keys", owner[p.AuthKey], name, p.AuthKey)
+			}
+			p.AuthKey = name
+			cfg.Providers[name] = p
 		}
 		auth[p.AuthKey] = p.APIKey
 		owner[p.AuthKey] = name

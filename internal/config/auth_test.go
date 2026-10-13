@@ -61,7 +61,8 @@ func TestSaveKeepsKeysOutOfToml(t *testing.T) {
 	}
 }
 
-// Providers may share an entry, but not hold different keys under it.
+// Providers may share an entry; one whose key changes apart from the others
+// moves to an entry of its own, and the rest keep theirs.
 func TestSharedAuthKey(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cfg := Default()
@@ -74,9 +75,23 @@ func TestSharedAuthKey(t *testing.T) {
 		t.Fatalf("auth.json = %v", m)
 	}
 	p := cfg.Providers["b"]
-	p.APIKey = "k2"
+	p.SetKey("k2")
 	cfg.Providers["b"] = p
-	if err := Save(cfg); err == nil || !strings.Contains(err.Error(), "share auth_key") {
-		t.Fatalf("conflict not rejected: %v", err)
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if m := readAuth(t); m["vendor"] != "k1" || m["b"] != "k2" || cfg.Providers["b"].AuthKey != "b" {
+		t.Fatalf("auth.json = %v, b's auth_key %q", m, cfg.Providers["b"].AuthKey)
+	}
+	// Moving never loses a key, even when the entry it lands on is shared.
+	cfg.Providers["b"] = Provider{Kind: KindCodex, BaseURL: "https://x", APIKey: "k3", AuthKey: "vendor"}
+	cfg.Providers["c"] = Provider{Kind: KindCodex, BaseURL: "https://x", APIKey: "k4", AuthKey: "b"}
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"a": "k1", "b": "k3", "c": "k4"} {
+		if got := readAuth(t)[cfg.Providers[name].AuthKey]; got != want {
+			t.Errorf("%s: key %q, want %q", name, got, want)
+		}
 	}
 }
