@@ -32,6 +32,16 @@ another kind, stops the command with the fix rather than quietly running the
 engine's own; `ak rename` and `ak rm` carry them along, and `ak doctor` names
 any left over.
 
+Arguments every launch of an engine should get go in `[settings]`:
+`claude_args`, `codex_args` and `pi_args`. ak puts them in front of the
+typed arguments whenever it launches that engine, on a provider or natively:
+
+```toml
+[settings]
+claude_args = ['--dangerously-skip-permissions']
+codex_args = ['--dangerously-bypass-approvals-and-sandbox']
+```
+
 The functions exist only in interactive shells, so scripts, editors and other
 tools still run the engines' own commands. `ak <name>` keeps working
 alongside.

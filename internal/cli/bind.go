@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/abcdlsj/ak/internal/bind"
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/launch"
 	"github.com/spf13/cobra"
 )
 
@@ -322,6 +324,49 @@ func newResolveCmd() *cobra.Command {
 	}
 }
 
+// newEngineCmd is what the shell functions run for an engine command: it
+// resolves what the command runs on here and replaces ak with it, the
+// provider or the engine's own command, either with the engine arguments in
+// settings.
+func newEngineCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "__engine <engine> [args...]",
+		Hidden:             true,
+		Args:               cobra.MinimumNArgs(1),
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			k, ok := parseKind(args[0])
+			if !ok {
+				return fmt.Errorf("unknown engine %q", args[0])
+			}
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			store, err := bind.Default()
+			if err != nil {
+				return err
+			}
+			wd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			r, err := resolveEngine(cfg, store, k, wd)
+			if err != nil {
+				return fmt.Errorf("%w; fix it with `ak bind`, `ak unbind` or `ak default %s`, or run it natively with AK=native %s", err, k, k)
+			}
+			if r.Target != "" {
+				return runTarget(r.Target, args[1:])
+			}
+			plan, err := launch.Native(cfg, k, args[1:], withoutOverride(os.Environ()))
+			if err != nil {
+				return err
+			}
+			return syscall.Exec(plan.Bin, plan.Argv, plan.Env)
+		},
+	}
+}
+
 func newInitCmd() *cobra.Command {
 	var engines []string
 	cmd := &cobra.Command{
@@ -368,29 +413,12 @@ func shellInit(shell string, kinds []config.Kind) (string, error) {
 	case "zsh", "bash":
 		b.WriteString("# ak: route engine commands by directory; see `ak init --help`.\n")
 		for _, k := range kinds {
-			fmt.Fprintf(&b, `%[1]s() {
-  local __ak_target
-  __ak_target="$(command ak __resolve %[1]s)" || return
-  if [ -n "$__ak_target" ]; then
-    command ak run "$__ak_target" "$@"
-  else
-    command %[1]s "$@"
-  fi
-}
-`, k)
+			fmt.Fprintf(&b, "%[1]s() { command ak __engine %[1]s \"$@\"; }\n", k)
 		}
 	case "fish":
 		b.WriteString("# ak: route engine commands by directory; see `ak init --help`.\n")
 		for _, k := range kinds {
-			fmt.Fprintf(&b, `function %[1]s
-    set -l __ak_target (command ak __resolve %[1]s); or return
-    if test -n "$__ak_target"
-        command ak run $__ak_target $argv
-    else
-        command %[1]s $argv
-    end
-end
-`, k)
+			fmt.Fprintf(&b, "function %[1]s --wraps %[1]s\n    command ak __engine %[1]s $argv\nend\n", k)
 		}
 	default:
 		return "", fmt.Errorf("unsupported shell %q; one of zsh, bash, fish", shell)

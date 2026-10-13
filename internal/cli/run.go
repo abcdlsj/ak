@@ -56,6 +56,17 @@ func launcherFocus(cfg *config.Config) string {
 	return cfg.Settings.Default
 }
 
+// withoutOverride drops the one-shot override from environ.
+func withoutOverride(environ []string) []string {
+	out := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		if !strings.HasPrefix(kv, overrideEnv+"=") {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 // execProvider replaces ak with the provider's engine. What it cannot launch
 // is caught here, with the fix, rather than surfacing later as the engine's
 // own error (a 401 for a missing key).
@@ -76,13 +87,7 @@ func execProvider(cfg *config.Config, name, variant string, args []string) error
 	}
 	// The one-shot override picked this launch; the engine's children must
 	// not inherit it.
-	environ := make([]string, 0, len(os.Environ()))
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, overrideEnv+"=") {
-			environ = append(environ, kv)
-		}
-	}
-	o := launch.Options{Environ: environ, Key: key}
+	o := launch.Options{Environ: withoutOverride(os.Environ()), Key: key}
 	if p.Kind == config.KindClaude {
 		if id, err := launch.NewSessionID(); err == nil {
 			o.SessionID = id

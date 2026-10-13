@@ -104,6 +104,7 @@ func Build(cfg *config.Config, name, variant string, args []string, o Options) (
 	} else {
 		delete(env, envVariant)
 	}
+	argv = append(argv, cfg.Settings.EngineArgs(p.Kind)...)
 	keys := make([]string, 0, len(set))
 	for _, kv := range set {
 		env[kv.Key] = kv.Value
@@ -119,6 +120,21 @@ func Build(cfg *config.Config, name, variant string, args []string, o Options) (
 	plan.Argv = append(argv, args...)
 	plan.Env = envList(env)
 	return plan, nil
+}
+
+// Native computes a launch of engine k's own command, untouched but for the
+// engine arguments in settings.
+func Native(cfg *config.Config, k config.Kind, args []string, environ []string) (Plan, error) {
+	eng := provider.EngineFor(k)
+	if eng == nil {
+		return Plan{}, fmt.Errorf("unsupported engine %q", k)
+	}
+	bin, err := findBin(eng, cfg.Settings, envMap(environ))
+	if err != nil {
+		return Plan{}, err
+	}
+	argv := append([]string{bin}, cfg.Settings.EngineArgs(k)...)
+	return Plan{Bin: bin, Argv: append(argv, args...), Env: environ}, nil
 }
 
 func findVariant(vs []provider.Variant, name string) *provider.Variant {

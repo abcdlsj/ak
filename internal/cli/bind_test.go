@@ -70,7 +70,7 @@ func TestShellInitRuns(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, k := range config.Kinds {
-			if !strings.Contains(out, "command ak __resolve "+string(k)) {
+			if !strings.Contains(out, "command ak __engine "+string(k)) {
 				t.Errorf("%s: no function for %s:\n%s", sh, k, out)
 			}
 		}

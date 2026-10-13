@@ -217,3 +217,25 @@ func TestPiLaunch(t *testing.T) {
 		t.Fatalf("key not exported: %v", p.Env)
 	}
 }
+
+// The engine arguments in settings go before the user's, on a provider and
+// natively alike.
+func TestEngineArgs(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Settings.ClaudeArgs = []string{"--dangerously-skip-permissions"}
+	cfg.Providers["cl"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://y", APIKey: "k"}
+	cfg.Providers["cx"] = config.Provider{Kind: config.KindCodex, BaseURL: "https://x", APIKey: "k"}
+	if got := argsOf(build(t, cfg, "cl", Options{}, "-p", "hi")); !strings.HasSuffix(got, "--dangerously-skip-permissions -p hi") {
+		t.Errorf("provider launch: %s", got)
+	}
+	if got := argsOf(build(t, cfg, "cx", Options{})); strings.Contains(got, "dangerously") {
+		t.Errorf("claude arguments reached codex: %s", got)
+	}
+	p, err := Native(cfg, config.KindClaude, []string{"-c"}, []string{"HOME=/h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Bin != cfg.Settings.ClaudeBin || argsOf(p) != "--dangerously-skip-permissions -c" || len(p.Env) != 1 {
+		t.Errorf("native launch: %s %v", argsOf(p), p.Env)
+	}
+}

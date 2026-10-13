@@ -68,9 +68,15 @@ type Settings struct {
 	DefaultClaude string `toml:"default_claude,omitempty"`
 	DefaultCodex  string `toml:"default_codex,omitempty"`
 	DefaultPi     string `toml:"default_pi,omitempty"`
-	ClaudeBin     string `toml:"claude_bin,omitempty"`
-	CodexBin      string `toml:"codex_bin,omitempty"`
-	PiBin         string `toml:"pi_bin,omitempty"`
+	// ClaudeArgs, CodexArgs and PiArgs are put in front of the user's own
+	// arguments on every launch of that engine through ak: a provider, the
+	// shell functions of ak init, natively or not.
+	ClaudeArgs []string `toml:"claude_args,omitempty"`
+	CodexArgs  []string `toml:"codex_args,omitempty"`
+	PiArgs     []string `toml:"pi_args,omitempty"`
+	ClaudeBin  string   `toml:"claude_bin,omitempty"`
+	CodexBin   string   `toml:"codex_bin,omitempty"`
+	PiBin      string   `toml:"pi_bin,omitempty"`
 	// GatewayAddr is the listen address of the pool gateway, host:port.
 	GatewayAddr string `toml:"gateway_addr,omitempty"`
 	// MaxInflight bounds how many requests the gateway handles at once; over
@@ -93,6 +99,19 @@ func (s Settings) EngineDefault(k Kind) string {
 		return s.DefaultPi
 	}
 	return ""
+}
+
+// EngineArgs returns the arguments every launch of engine k gets.
+func (s Settings) EngineArgs(k Kind) []string {
+	switch k {
+	case KindClaude:
+		return s.ClaudeArgs
+	case KindCodex:
+		return s.CodexArgs
+	case KindPi:
+		return s.PiArgs
+	}
+	return nil
 }
 
 // EngineDefaultPtr returns the field holding k's engine default, or nil.
