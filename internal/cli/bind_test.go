@@ -78,11 +78,20 @@ func TestShellInitRuns(t *testing.T) {
 	if _, err := shellInit("tcsh", config.Kinds); err == nil {
 		t.Error("an unknown shell must be refused")
 	}
-	// The bash functions must at least parse.
-	if bash, err := exec.LookPath("bash"); err == nil {
-		out, _ := shellInit("bash", config.Kinds)
-		if b, err := exec.Command(bash, "-n", "-c", out).CombinedOutput(); err != nil {
-			t.Fatalf("bash -n: %v\n%s", err, b)
+	// The functions must define even over an alias of the same name.
+	for _, sh := range []string{"bash", "zsh"} {
+		bin, err := exec.LookPath(sh)
+		if err != nil {
+			continue
+		}
+		out, _ := shellInit(sh, config.Kinds)
+		script := "alias claude='echo aliased'\n"
+		if sh == "bash" {
+			script = "shopt -s expand_aliases\n" + script
+		}
+		script += out + "typeset -f claude | grep -q __engine && typeset -f pi | grep -q __engine"
+		if b, err := exec.Command(bin, "-c", script).CombinedOutput(); err != nil {
+			t.Errorf("%s: %v\n%s", sh, err, b)
 		}
 	}
 }

@@ -6,6 +6,7 @@ package bind
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -63,7 +64,10 @@ func (s *Store) Place(dir string) string {
 // Set binds engine to target at dir's place and returns the place.
 func (s *Store) Set(dir, engine, target string) (string, error) {
 	place := s.Place(dir)
-	f := s.load()
+	f, err := s.load()
+	if err != nil {
+		return place, err
+	}
 	if f.Bindings[place] == nil {
 		f.Bindings[place] = map[string]string{}
 	}
@@ -75,7 +79,10 @@ func (s *Store) Set(dir, engine, target string) (string, error) {
 // at dir's place, and reports whether anything was removed.
 func (s *Store) Unset(dir, engine string) (string, bool, error) {
 	place := s.Place(dir)
-	f := s.load()
+	f, err := s.load()
+	if err != nil {
+		return place, false, err
+	}
 	m := f.Bindings[place]
 	if len(m) == 0 {
 		return place, false, nil
@@ -98,28 +105,35 @@ func (s *Store) Unset(dir, engine string) (string, bool, error) {
 }
 
 // Lookup returns engine's binding in effect at dir: its repository's, else
-// the nearest bound directory at or above dir.
-func (s *Store) Lookup(dir, engine string) (Binding, bool) {
+// the nearest bound directory at or above dir. A record that cannot be read
+// is an error, not "nothing bound": the command would quietly run elsewhere.
+func (s *Store) Lookup(dir, engine string) (Binding, bool, error) {
 	dir = recent.Canonical(dir)
-	f := s.load()
+	f, err := s.load()
+	if err != nil {
+		return Binding{}, false, err
+	}
 	if repo := s.Repo(dir); repo != "" {
 		if t, ok := f.Bindings[repo][engine]; ok {
-			return Binding{Place: repo, Engine: engine, Target: t}, true
+			return Binding{Place: repo, Engine: engine, Target: t}, true, nil
 		}
 	}
 	for d := dir; ; d = filepath.Dir(d) {
 		if t, ok := f.Bindings[d][engine]; ok {
-			return Binding{Place: d, Engine: engine, Target: t}, true
+			return Binding{Place: d, Engine: engine, Target: t}, true, nil
 		}
 		if filepath.Dir(d) == d {
-			return Binding{}, false
+			return Binding{}, false, nil
 		}
 	}
 }
 
 // List returns every binding, sorted by place then engine.
-func (s *Store) List() []Binding {
-	f := s.load()
+func (s *Store) List() ([]Binding, error) {
+	f, err := s.load()
+	if err != nil {
+		return nil, err
+	}
 	var out []Binding
 	for place, m := range f.Bindings {
 		for engine, t := range m {
@@ -132,7 +146,7 @@ func (s *Store) List() []Binding {
 		}
 		return out[i].Engine < out[j].Engine
 	})
-	return out
+	return out, nil
 }
 
 // Rename points every binding of provider from at to, keeping its variant.
@@ -162,7 +176,10 @@ func (s *Store) rewrite(change func(string) (string, bool)) error {
 	if _, err := os.Stat(s.Path); os.IsNotExist(err) {
 		return nil
 	}
-	f := s.load()
+	f, err := s.load()
+	if err != nil {
+		return err
+	}
 	changed := false
 	for place, m := range f.Bindings {
 		for engine, t := range m {
@@ -186,24 +203,29 @@ func (s *Store) rewrite(change func(string) (string, bool)) error {
 	return s.save(f)
 }
 
-func (s *Store) load() file {
+// load reads the record; a missing one holds no bindings. A damaged one is
+// an error, so a write never replaces it with an empty record.
+func (s *Store) load() (file, error) {
 	f := file{}
-	if data, err := os.ReadFile(s.Path); err == nil {
-		_ = json.Unmarshal(data, &f)
+	data, err := os.ReadFile(s.Path)
+	switch {
+	case os.IsNotExist(err):
+	case err != nil:
+		return f, err
+	default:
+		if err := json.Unmarshal(data, &f); err != nil {
+			return f, fmt.Errorf("parse %s: %w; fix or remove it", s.Path, err)
+		}
 	}
 	if f.Bindings == nil {
 		f.Bindings = map[string]map[string]string{}
 	}
-	return f
+	return f, nil
 }
 
+// save writes the record whole. Places that do not exist right now are kept:
+// a repository on a volume that is not mounted is still bound.
 func (s *Store) save(f file) error {
-	// Forget places that are gone, so the record does not grow forever.
-	for place := range f.Bindings {
-		if _, err := os.Stat(place); os.IsNotExist(err) {
-			delete(f.Bindings, place)
-		}
-	}
 	f.Version = 1
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {

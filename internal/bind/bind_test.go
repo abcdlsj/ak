@@ -37,15 +37,15 @@ func TestBindRepoCoversWorktrees(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, d := range []string{"repo", "wt"} {
-		b, ok := s.Lookup(filepath.Join(root, d), "claude")
+		b, ok, _ := s.Lookup(filepath.Join(root, d), "claude")
 		if !ok || b.Target != "kimi:high" {
 			t.Errorf("%s: %+v %v", d, b, ok)
 		}
 	}
-	if _, ok := s.Lookup(filepath.Join(root, "repo"), "codex"); ok {
+	if _, ok, _ := s.Lookup(filepath.Join(root, "repo"), "codex"); ok {
 		t.Error("another engine is not bound")
 	}
-	if _, ok := s.Lookup(filepath.Join(root, "plain"), "claude"); ok {
+	if _, ok, _ := s.Lookup(filepath.Join(root, "plain"), "claude"); ok {
 		t.Error("outside the repository nothing is bound")
 	}
 }
@@ -55,7 +55,7 @@ func TestBindDirectoryCoversBelow(t *testing.T) {
 	if _, err := s.Set(filepath.Join(root, "plain"), "codex", Native); err != nil {
 		t.Fatal(err)
 	}
-	b, ok := s.Lookup(filepath.Join(root, "plain", "deep"), "codex")
+	b, ok, _ := s.Lookup(filepath.Join(root, "plain", "deep"), "codex")
 	if !ok || b.Target != Native {
 		t.Fatalf("below a bound directory: %+v %v", b, ok)
 	}
@@ -65,7 +65,7 @@ func TestBindDirectoryCoversBelow(t *testing.T) {
 	if _, removed, err := s.Unset(filepath.Join(root, "plain"), ""); err != nil || !removed {
 		t.Fatalf("unset at the place: %v %v", removed, err)
 	}
-	if _, ok := s.Lookup(filepath.Join(root, "plain", "deep"), "codex"); ok {
+	if _, ok, _ := s.Lookup(filepath.Join(root, "plain", "deep"), "codex"); ok {
 		t.Fatal("still bound after unset")
 	}
 }
@@ -79,7 +79,7 @@ func TestRenameAndDrop(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := map[string]string{}
-	for _, b := range s.List() {
+	for _, b := range must(t, s.List) {
 		got[b.Engine+"@"+filepath.Base(filepath.Dir(b.Place))+"/"+filepath.Base(b.Place)] = b.Target
 	}
 	if got["claude@repo/.git"] != "k2:opus" || got["codex@repo/.git"] != "kimicodex" {
@@ -88,8 +88,51 @@ func TestRenameAndDrop(t *testing.T) {
 	if err := s.Drop("k2"); err != nil {
 		t.Fatal(err)
 	}
-	list := s.List()
+	list := must(t, s.List)
 	if len(list) != 1 || list[0].Target != "kimicodex" {
 		t.Fatalf("drop: %+v", list)
+	}
+}
+
+func must(t *testing.T, list func() ([]Binding, error)) []Binding {
+	t.Helper()
+	l, err := list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
+
+// A damaged record is reported and left alone, never replaced by an empty
+// one; places that do not exist right now stay bound.
+func TestDamagedAndMissing(t *testing.T) {
+	s, root := newStore(t)
+	gone := filepath.Join(root, "unmounted")
+	if err := os.MkdirAll(gone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Set(gone, "claude", "kimi"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Set(filepath.Join(root, "plain"), "codex", "cx"); err != nil {
+		t.Fatal(err)
+	}
+	if len(must(t, s.List)) != 2 {
+		t.Fatalf("a missing place was dropped: %+v", must(t, s.List))
+	}
+	if err := os.WriteFile(s.Path, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Lookup(root, "claude"); err == nil {
+		t.Error("lookup in a damaged record must fail")
+	}
+	if _, err := s.Set(root, "claude", "kimi"); err == nil {
+		t.Error("set over a damaged record must fail")
+	}
+	if data, _ := os.ReadFile(s.Path); string(data) != "{broken" {
+		t.Errorf("damaged record rewritten: %s", data)
 	}
 }

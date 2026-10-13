@@ -36,7 +36,11 @@ func resolveEngine(cfg *config.Config, store *bind.Store, k config.Kind, dir str
 	case os.Getenv(overrideEnv) != "":
 		r = resolution{Target: os.Getenv(overrideEnv), Source: "$" + overrideEnv}
 	default:
-		if b, ok := store.Lookup(dir, string(k)); ok {
+		b, ok, err := store.Lookup(dir, string(k))
+		if err != nil {
+			return resolution{}, err
+		}
+		if ok {
 			r = resolution{Target: b.Target, Source: "bound at " + displayPlace(b.Place)}
 		} else if t := cfg.Settings.EngineDefault(k); t != "" {
 			r = resolution{Target: t, Source: "default_" + string(k)}
@@ -189,7 +193,7 @@ func newUnbindCmd() *cobra.Command {
 					if engine != "" && string(k) != engine {
 						continue
 					}
-					if b, ok := store.Lookup(wd, string(k)); ok {
+					if b, ok, _ := store.Lookup(wd, string(k)); ok {
 						fmt.Printf("%s here follows %s, bound at %s\n", k, b.Target, displayPlace(b.Place))
 					}
 				}
@@ -220,7 +224,10 @@ func newBindingsCmd() *cobra.Command {
 					fmt.Printf("%-7s %-24s default\n", k, t)
 				}
 			}
-			list := store.List()
+			list, err := store.List()
+			if err != nil {
+				return err
+			}
 			for _, b := range list {
 				fmt.Printf("%-7s %-24s %s\n", b.Engine, b.Target, displayPlace(b.Place))
 			}
@@ -413,7 +420,9 @@ func shellInit(shell string, kinds []config.Kind) (string, error) {
 	case "zsh", "bash":
 		b.WriteString("# ak: route engine commands by directory; see `ak init --help`.\n")
 		for _, k := range kinds {
-			fmt.Fprintf(&b, "%[1]s() { command ak __engine %[1]s \"$@\"; }\n", k)
+			// The function keyword form, so an alias of the same name does
+			// not turn the definition into a syntax error.
+			fmt.Fprintf(&b, "unalias %[1]s 2>/dev/null\nfunction %[1]s { command ak __engine %[1]s \"$@\"; }\n", k)
 		}
 	case "fish":
 		b.WriteString("# ak: route engine commands by directory; see `ak init --help`.\n")
