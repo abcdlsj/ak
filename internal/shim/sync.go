@@ -199,8 +199,7 @@ func (s *Syncer) writeFile(path, content string, mode os.FileMode) Result {
 	existing, err := os.ReadFile(path)
 	switch {
 	case err == nil && string(existing) == content:
-		// Same content, but an older ak may have left it with a looser mode
-		// (commands once held a plaintext key).
+		// Same content but another mode: restore the mode alone.
 		if fi, serr := os.Stat(path); serr == nil && fi.Mode().Perm() != mode.Perm() {
 			if s.DryRun {
 				return Result{Path: path, Action: ActionUpdated}

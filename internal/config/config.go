@@ -367,6 +367,9 @@ func Load() (*Config, error) {
 	if err := toml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	if cfg.Version > Version {
+		return nil, fmt.Errorf("%s has format version %d, newer than this ak reads (%d); upgrade ak", path, cfg.Version, Version)
+	}
 	if cfg.Providers == nil {
 		cfg.Providers = map[string]Provider{}
 	}

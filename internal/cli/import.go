@@ -258,8 +258,7 @@ func importCodexa(cfg *config.Config) error {
 		return err
 	}
 
-	fmt.Printf("\nimported %d provider(s). ~/.codex/profiles/ and the codex-* commands are untouched.\n", len(got))
-	fmt.Println("Once `ak-<name>` behaves as expected, `ak prune-codexa` removes the legacy commands (dry-run by default).")
+	fmt.Printf("\nimported %d provider(s). ~/.codex/profiles/ is untouched.\n", len(got))
 	return nil
 }
 
