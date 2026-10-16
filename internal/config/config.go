@@ -178,6 +178,12 @@ type Provider struct {
 	ProviderID string `toml:"provider_id,omitempty"`
 	WireAPI    string `toml:"wire_api,omitempty"`
 	Reasoning  string `toml:"reasoning,omitempty"`
+	// ModelCatalog is a codex model catalog JSON this provider loads as
+	// -c model_catalog_json, giving a model codex has no metadata for its
+	// context window and reasoning levels. Codex replaces its whole built-in
+	// catalog with the file, so set it only where the provider's model needs
+	// it. Empty keeps the built-in catalog.
+	ModelCatalog string `toml:"model_catalog,omitempty"`
 
 	// pi-only. PiProvider names a provider pi already knows (its own config or
 	// a package); when set, ak passes --provider through and writes nothing,

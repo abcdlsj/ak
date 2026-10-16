@@ -266,3 +266,28 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// TestCodexArgsModelCatalog guards the optional model_catalog override: a
+// provider that sets it passes the path through as model_catalog_json, and one
+// that does not leaves codex's built-in catalog alone.
+func TestCodexArgsModelCatalog(t *testing.T) {
+	p := config.Provider{
+		Kind: config.KindCodex, BaseURL: "https://x/v1", Model: "m",
+		ModelCatalog: "~/.codex/model-catalogs/deepseek.json",
+	}
+	joined := ""
+	for _, a := range CodexArgs("dsccodex", p) {
+		joined += a + " "
+	}
+	for _, want := range []string{`model_catalog_json="`, `model-catalogs/deepseek.json"`} {
+		if !contains(joined, want) {
+			t.Errorf("model catalog override is missing %q:\n%s", want, joined)
+		}
+	}
+	plain := config.Provider{Kind: config.KindCodex, BaseURL: "https://x/v1", Model: "m"}
+	for _, a := range CodexArgs("plain", plain) {
+		if contains(a, "model_catalog_json") {
+			t.Errorf("a provider without model_catalog must not set it: %q", a)
+		}
+	}
+}

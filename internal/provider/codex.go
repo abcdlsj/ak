@@ -97,6 +97,9 @@ func CodexArgs(name string, p config.Provider) []string {
 	if p.Reasoning != "" {
 		args = append(args, codexRaw("model_reasoning_effort", tomlString(p.Reasoning))...)
 	}
+	if p.ModelCatalog != "" {
+		args = append(args, codexRaw("model_catalog_json", tomlString(config.ExpandHome(p.ModelCatalog)))...)
+	}
 	return append(args, codexRaw("model_providers", table)...)
 }
 

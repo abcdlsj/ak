@@ -215,7 +215,10 @@ alone.
 endpoint and model as `-c` overrides on top of your base `~/.codex/config.toml`,
 so your `projects`, `skills` and `hooks` keep working, and codex's `env_key`
 reads the key from the process environment: no per-provider `auth.json`, no
-isolated `CODEX_HOME`.
+isolated `CODEX_HOME`. A provider whose model codex has no metadata for can set
+`model_catalog` to a JSON catalog, passed as `-c model_catalog_json`. Codex
+replaces its whole built-in catalog with that file, so set it only on the
+provider whose model needs it.
 
 **Keys live in their own file.** `providers.toml` holds no key: a provider
 names its entry with `auth_key` (its own name by default), and the key is in
