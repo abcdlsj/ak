@@ -70,6 +70,7 @@ ak usage | quota | check | models   the parts of status, for scripts
 ak bind / unbind / bindings     what claude/codex/pi typed in a repository run on
 ak default <engine> <name>      what they run on where nothing is bound
 ak which                        what they run on here, and why
+ak acp <engine>                 that engine's ACP server on the provider here
 ak install / uninstall          set up the shell for the above (zsh, bash, fish)
 ak doctor                       anything that would make a launch misroute
 ak-<name> [args...]             the same as ak <name>, for scripts
