@@ -74,7 +74,7 @@ func TestCodexVariants(t *testing.T) {
 		Variants: map[string]config.Variant{"fast": {Model: "gpt-fast", Reasoning: "low"}},
 	}
 	p := build(t, cfg, "cx:fast", Options{Key: "sk-1"}, "hello")
-	if a := argsOf(p); !strings.Contains(a, `-c model="gpt-fast" -c model_reasoning_effort="low" hello`) ||
+	if a := argsOf(p); !strings.Contains(a, `-c model="gpt-fast" -c model_reasoning_effort="low" --no-daemon hello`) ||
 		!strings.Contains(a, `model_provider="cx"`) {
 		t.Fatalf("args = %s", a)
 	}
@@ -92,6 +92,28 @@ func TestCodexVariants(t *testing.T) {
 	}
 	if _, err := Build(cfg, "cx", "nope", nil, Options{}); err == nil || !strings.Contains(err.Error(), "available") {
 		t.Fatalf("unknown variant: %v", err)
+	}
+}
+
+// A codex provider launch opts out of the shared background server: its -c
+// overrides force embedded mode anyway, so --no-daemon only states the intent
+// and keeps codex from printing a fallback notice. A subcommand that needs the
+// shared server, and the engine's own command, are left alone.
+func TestCodexNoDaemon(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Providers["cx"] = config.Provider{Kind: config.KindCodex, BaseURL: "https://x", APIKey: "k"}
+	if got := argsOf(build(t, cfg, "cx", Options{})); !strings.Contains(got, "--no-daemon") {
+		t.Errorf("codex launch is missing --no-daemon: %s", got)
+	}
+	if got := argsOf(build(t, cfg, "cx", Options{}, "agents")); strings.Contains(got, "--no-daemon") {
+		t.Errorf("agents rejects --no-daemon: %s", got)
+	}
+	native, err := Native(cfg, config.KindCodex, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := argsOf(native); strings.Contains(got, "--no-daemon") {
+		t.Errorf("native codex must keep the shared server: %s", got)
 	}
 }
 

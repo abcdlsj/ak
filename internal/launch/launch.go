@@ -105,6 +105,9 @@ func Build(cfg *config.Config, name, variant string, args []string, o Options) (
 		delete(env, envVariant)
 	}
 	argv = append(argv, cfg.Settings.EngineArgs(p.Kind)...)
+	if p.Kind == config.KindCodex {
+		argv = append(argv, codexDaemonArgs(args)...)
+	}
 	keys := make([]string, 0, len(set))
 	for _, kv := range set {
 		env[kv.Key] = kv.Value
@@ -124,6 +127,23 @@ func Build(cfg *config.Config, name, variant string, args []string, o Options) (
 
 // Native computes a launch of engine k's own command, untouched but for the
 // engine arguments in settings.
+// codexSharedServerSubcommands are the codex subcommands that need the shared
+// background server and reject --no-daemon.
+var codexSharedServerSubcommands = map[string]bool{
+	"agents": true, "queue": true, "remote-control": true,
+}
+
+// codexDaemonArgs returns --no-daemon unless args ask for a subcommand that
+// needs the shared server. Every ak codex launch passes -c overrides, which
+// force embedded mode anyway; the flag states that intent so codex does not
+// print a notice about leaving the shared server.
+func codexDaemonArgs(args []string) []string {
+	if len(args) > 0 && codexSharedServerSubcommands[args[0]] {
+		return nil
+	}
+	return []string{"--no-daemon"}
+}
+
 func Native(cfg *config.Config, k config.Kind, args []string, environ []string) (Plan, error) {
 	eng := provider.EngineFor(k)
 	if eng == nil {
