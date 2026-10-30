@@ -313,8 +313,19 @@ func (c *Config) Names() []string {
 	return names
 }
 
-// Dir returns the config directory, ~/.config/ak.
+// DirEnv names the variable that relocates the config directory. A process
+// whose HOME is not the user's, such as an ACP adapter a client starts in a
+// sandboxed home, sets it to reach the user's providers.
+const DirEnv = "AK_CONFIG_DIR"
+
+// Dir returns the config directory: $AK_CONFIG_DIR, else ~/.config/ak.
 func Dir() (string, error) {
+	if dir := os.Getenv(DirEnv); dir != "" {
+		if !filepath.IsAbs(dir) {
+			return "", fmt.Errorf("%s must be an absolute path, got %q", DirEnv, dir)
+		}
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

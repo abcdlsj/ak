@@ -53,7 +53,9 @@ pick in this directory: the same `AK` override, binding and engine default as
 `claude` typed here, with the provider's environment passed to the adapter. A
 client that would otherwise launch `claude-agent-acp` itself (a chat pane, an
 editor) runs `ak acp claude` instead and reaches the same provider ak would.
-`AK_CLAUDE_ACP_BIN` overrides the adapter executable. An engine whose adapter
+`AK_CLAUDE_ACP_BIN` overrides the adapter executable. A client that starts the
+adapter under its own `HOME` sets `AK_CONFIG_DIR` to the absolute path of the
+user's `~/.config/ak` so ak still finds the providers and keys. An engine whose adapter
 does not read the provider environment (codex, whose provider lives in
 arguments) is refused rather than pointed at the wrong provider.
 

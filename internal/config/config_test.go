@@ -18,6 +18,24 @@ func TestUnknownKeys(t *testing.T) {
 	}
 }
 
+// AK_CONFIG_DIR replaces ~/.config/ak for every file ak keeps there, so a
+// process started under another HOME still reaches the user's providers.
+func TestConfigDirOverride(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Setenv(DirEnv, dir)
+	if got, err := Path(); err != nil || got != filepath.Join(dir, "providers.toml") {
+		t.Fatalf("Path() = %q, %v", got, err)
+	}
+	if got, err := AuthPath(); err != nil || got != filepath.Join(dir, "auth.json") {
+		t.Fatalf("AuthPath() = %q, %v", got, err)
+	}
+	t.Setenv(DirEnv, "relative/ak")
+	if _, err := Dir(); err == nil {
+		t.Fatal("a relative AK_CONFIG_DIR was accepted")
+	}
+}
+
 // A default_variant must name a variant the provider's command recognises.
 func TestValidateDefaultVariant(t *testing.T) {
 	ok := []Provider{
