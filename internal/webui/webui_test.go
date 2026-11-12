@@ -190,6 +190,18 @@ func TestStaleLoginFormIsAnsweredWithAFreshOne(t *testing.T) {
 	}
 }
 
+// The icon is embedded and served, and the pages point the tab at it.
+func TestIcon(t *testing.T) {
+	s := newSite(t, true)
+	rec := s.do("GET", "/ui/static/icon.svg", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Type"), "image/svg") {
+		t.Fatalf("icon: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if page := s.do("GET", "/ui/login", nil).Body.String(); !strings.Contains(page, `rel="icon"`) {
+		t.Error("the login page names no icon")
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	s := newSite(t, true)
 	for range maxFailures {

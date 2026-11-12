@@ -186,6 +186,9 @@ board's look, so the two read as one product: on water.css (v2.1.7, MIT,
 vendored and embedded) sits a small sheet of ak's own, in Avenir Next with
 system fallbacks. A page is a heading with a rule, cards or a table.
 
+Its mark is a pixel `k` on the same 5-pixel grid as the numbers, the
+favicon and the header's; the login page is that mark above a quiet card.
+
 - **Accounts**: the board's cards, one per account: its hue from the
   vendor's id, each window's share used as the board's pixel number with a
   tick bar under it, amber past 80% and red once spent, the balance below.

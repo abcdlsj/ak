@@ -53,9 +53,9 @@
 body {
   font-family: 'Avenir Next', Avenir, ui-sans-serif, system-ui, -apple-system,
     'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-  max-width: 68rem;
+  max-width: 62rem;
   margin: 0 auto;
-  padding: 0 1.5rem 4rem;
+  padding: 1.5rem 1.5rem 4rem;
 }
 
 .mono, code, pre, .num { font-family: var(--mono); font-variant-numeric: tabular-nums }
@@ -66,6 +66,7 @@ body {
 .dim { color: var(--text-muted) }
 
 /* Header: the brand, the pages as quiet tabs, and the way out. */
+.logo { display: block; image-rendering: pixelated }
 header.top {
   display: flex;
   align-items: center;
@@ -74,7 +75,7 @@ header.top {
   margin-bottom: 1.5rem;
   border-bottom: 1px solid var(--border);
 }
-header.top .brand { font-weight: 700; letter-spacing: .01em }
+header.top .brand { display: flex; align-items: center; font-weight: 700; letter-spacing: .01em }
 header.top nav { display: flex; gap: .2rem; flex: 1 }
 header.top nav a {
   color: var(--text-muted);
@@ -152,9 +153,15 @@ h3 { font-size: .95rem; margin: 0 0 .8rem }
 .panel.narrow { max-width: 34rem }
 .panels .stack { max-width: 26rem }
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; align-items: start }
-.gate { max-width: 26rem; margin: 13vh auto 0 }
-.gate-head { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .8rem }
-.gate-head .mark { color: var(--action); font-size: .7rem }
+.gate {
+  max-width: 26rem;
+  margin: 0 auto;
+  min-height: 74vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.gate-head { display: flex; align-items: center; gap: .5rem; margin-bottom: .8rem }
 .gate-head .brand { font-size: 1.05rem }
 .gate-note { color: var(--text-muted); font-size: .8rem }
 .gate .panel { padding: 1.4rem 1.4rem 1.5rem }
@@ -330,7 +337,8 @@ td.bar-cell { width: 8rem }
 
 @media (max-width: 40rem) {
   body { padding: 0 1rem 3rem }
-  header.top { flex-wrap: wrap; gap: .5rem 1rem }
+  .logo { display: block; image-rendering: pixelated }
+header.top { flex-wrap: wrap; gap: .5rem 1rem }
   header.top nav { order: 3; width: 100% }
   td.bar-cell { display: none }
 }
