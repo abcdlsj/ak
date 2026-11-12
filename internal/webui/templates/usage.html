@@ -1,15 +1,56 @@
 {{define "content"}}
 <h1>Usage</h1>
-<p class="tabs"><a href="/ui/usage?days=7"{{if eq .Days 7}} class="on"{{end}}>7 days</a> <a href="/ui/usage?days=30"{{if eq .Days 30}} class="on"{{end}}>30 days</a></p>
+<p class="lede">What each token, account and route asked for.</p>
+
+<div class="row-head">
+  <nav class="tabs">
+    <a href="/ui/usage?days=7"{{if eq .Days 7}} class="on"{{end}}>7 days</a>
+    <a href="/ui/usage?days=30"{{if eq .Days 30}} class="on"{{end}}>30 days</a>
+  </nav>
+</div>
+
+<div class="tiles">
+{{range .Tiles}}{{template "tile" .}}{{end}}
+</div>
+
+<h2>Tokens by day</h2>
+<div class="heat-wrap">
+  <div class="heat">
+    <div class="heat-days" aria-hidden="true"><span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span></div>
+    <div class="heat-grid" role="img" aria-label="tokens a day over the last {{.Days}} days">
+    {{range .Heat}}<span class="heat-cell l{{.Level}}"{{with .Label}} title="{{.}}"{{end}}></span>{{end}}
+    </div>
+  </div>
+  <p class="note">
+    <span>less</span>
+    <span class="heat-cell l0"></span><span class="heat-cell l1"></span><span class="heat-cell l2"></span><span class="heat-cell l3"></span><span class="heat-cell l4"></span>
+    <span>more</span>
+    {{with .Peak}}<span class="dot">·</span> peak {{.}}{{end}}
+  </p>
+</div>
+
 {{range .Tables}}
 <h2>{{.Title}}</h2>
 {{if .Groups}}
-<table>
-<tr><th></th><th class="num">requests</th><th class="num">failed</th><th class="num">input</th><th class="num">output</th><th class="num">cache read</th><th class="num">cache write</th></tr>
-{{range .Groups}}
-<tr><td>{{.Name}}</td><td class="num">{{num .Requests}}</td><td class="num">{{num .Failed}}</td><td class="num">{{num .Input}}</td><td class="num">{{num .Output}}</td><td class="num">{{num .CacheRead}}</td><td class="num">{{num .CacheWrite}}</td></tr>
-{{end}}
+<table class="grid">
+  <thead><tr><th></th><th class="right">requests</th><th class="right">failed</th><th class="right">input</th><th class="right">output</th><th class="right">cache read</th><th class="right">cache write</th><th></th></tr></thead>
+  <tbody>
+  {{range .Groups}}
+  <tr>
+    <td><b>{{.Name}}</b></td>
+    <td class="right mono">{{num .Requests}}</td>
+    <td class="right mono">{{num .Failed}}</td>
+    <td class="right mono">{{human .Input}}</td>
+    <td class="right mono">{{human .Output}}</td>
+    <td class="right mono">{{human .CacheRead}}</td>
+    <td class="right mono">{{human .CacheWrite}}</td>
+    <td class="bar-cell"><div class="bar" style="--w:{{.Bar}}%"></div></td>
+  </tr>
+  {{end}}
+  </tbody>
 </table>
-{{else}}<p class="dim">Nothing yet.</p>{{end}}
+{{else}}
+{{template "empty" "Nothing in this range."}}
+{{end}}
 {{end}}
 {{end}}

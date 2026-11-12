@@ -121,7 +121,8 @@ func TestLoginAndSession(t *testing.T) {
 	req := httptest.NewRequest("GET", "/ui/login", nil)
 	rec := httptest.NewRecorder()
 	s.h.ServeHTTP(rec, req)
-	if h := rec.Header(); !strings.Contains(h.Get("Content-Security-Policy"), "default-src 'self'") || h.Get("X-Frame-Options") != "DENY" {
+	if h := rec.Header(); !strings.Contains(h.Get("Content-Security-Policy"), "default-src 'self'") ||
+		!strings.Contains(h.Get("Content-Security-Policy"), "style-src 'self' 'unsafe-inline'") || h.Get("X-Frame-Options") != "DENY" {
 		t.Errorf("security headers: %v", h)
 	}
 
@@ -212,7 +213,8 @@ func TestPages(t *testing.T) {
 		t.Fatalf("the service was not reloaded with the account: %+v", a)
 	}
 	page := s.do("GET", "/ui/accounts", nil).Body.String()
-	if !strings.Contains(page, "command-code") || !strings.Contains(page, `value="85"`) || strings.Contains(page, "sk-secret") {
+	if !strings.Contains(page, "command-code") || !strings.Contains(page, `data-pct="85"`) ||
+		!strings.Contains(page, `class="pix"`) || !strings.Contains(page, "--fill:85%") || strings.Contains(page, "sk-secret") {
 		t.Errorf("accounts page:\n%s", page)
 	}
 

@@ -1,0 +1,26 @@
+{{define "meter"}}
+<div class="meter{{with .Level}} {{.}}{{end}}" data-pct="{{.Pct}}">
+  <div class="meter-name"><b>{{.Name}}</b>{{with .Reset}}<span class="when">{{.}}</span>{{end}}</div>
+  <div class="value" role="img" aria-label="{{.Pct}}% used">{{pix (print .Pct)}}<span class="pct">%</span></div>
+  <div class="ticks" style="--fill:{{.Fill}}%"></div>
+</div>
+{{end}}
+
+{{define "amount"}}
+<div class="meter amount">
+  <div class="meter-name"><b>{{.Name}}</b>{{with .Note}}<span class="when">{{.}}</span>{{end}}</div>
+  <div class="value" role="img" aria-label="{{.Label}}">{{pix .Value}}</div>
+</div>
+{{end}}
+
+{{define "tile"}}
+<div class="tile"><span class="tile-label">{{.Label}}</span><span class="tile-value">{{.Value}}</span>{{with .Note}}<span class="tile-note">{{.}}</span>{{end}}</div>
+{{end}}
+
+{{define "chips"}}
+{{range .}}<span class="chip">{{.}}</span>{{end}}
+{{end}}
+
+{{define "empty"}}
+<p class="empty">{{.}}</p>
+{{end}}

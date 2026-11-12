@@ -1,23 +1,45 @@
 {{define "content"}}
 <h1>Tokens</h1>
-{{with .Token}}<p class="flash">Token: <code class="select">{{.}}</code></p>{{end}}
-{{if .Tokens}}
-<table>
-<tr><th>name</th><th>routes</th><th>created</th><th></th></tr>
-{{range .Tokens}}
-<tr><td>{{.Name}}</td><td>{{if .Routes}}{{join .Routes ", "}}{{else}}<span class="dim">all</span>{{end}}</td><td class="num">{{.Created}}</td>
-<td><form method="post" action="/ui/tokens/revoke" data-confirm="Revoke {{.Name}}? Its machine stops working at once."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><button class="link bad">Revoke</button></form></td></tr>
+<p class="lede">One per machine. A token is shown once; only its hash is kept.</p>
+
+{{with .Token}}
+<div class="issued">
+  <span class="tile-label">issued token — copy it now, it is not shown again</span>
+  <code class="select">{{.}}</code>
+</div>
 {{end}}
+
+{{if .Tokens}}
+<table class="grid">
+  <thead><tr><th>machine</th><th>routes</th><th class="right">created</th><th></th></tr></thead>
+  <tbody>
+  {{range .Tokens}}
+  <tr>
+    <td><b>{{.Name}}</b></td>
+    <td>{{if .Routes}}{{template "chips" .Routes}}{{else}}<span class="note">all</span>{{end}}</td>
+    <td class="right mono">{{.Created}}</td>
+    <td class="right"><form method="post" action="/ui/tokens/revoke" data-confirm="Revoke {{.Name}}? Its machine stops working at once."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><button class="link bad">Revoke</button></form></td>
+  </tr>
+  {{end}}
+  </tbody>
 </table>
-{{else}}<p class="dim">No tokens yet.</p>{{end}}
+{{else}}
+{{template "empty" "No tokens yet."}}
+{{end}}
 
 <h2>Issue a token</h2>
-<form method="post" action="/ui/tokens/add" class="stack narrow">
+<section class="panel narrow">
+<form method="post" action="/ui/tokens/add" class="stack">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <label>Machine <input name="name" required pattern="[a-z0-9][a-z0-9._\-]*"></label>
-  <fieldset><legend>Limit to (none: all)</legend>
-  {{range .Targets}}<label class="check"><input type="checkbox" name="routes" value="{{.}}"> {{.}}</label>{{end}}
+  <fieldset>
+    <legend>Limit to routes and accounts</legend>
+    <div class="checks">
+    {{range .Targets}}<label class="check"><input type="checkbox" name="routes" value="{{.}}"> <span class="mono">{{.}}</span></label>{{end}}
+    </div>
   </fieldset>
   <button>Issue</button>
+  <p class="note">None checked: the token may use every route.</p>
 </form>
+</section>
 {{end}}

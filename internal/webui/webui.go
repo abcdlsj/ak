@@ -62,10 +62,10 @@ type UI struct {
 func New(b Backend) *UI {
 	u := &UI{b: b, sessions: newSessions(), pages: map[string]*template.Template{},
 		devices: newDevices(), now: time.Now}
-	funcs := template.FuncMap{"join": strings.Join, "num": number, "pct": func(f float64) int { return int(f + 0.5) },
-		"money": func(f *float64) string { return fmt.Sprintf("%.2f", *f) }}
+	funcs := template.FuncMap{"join": strings.Join, "num": number, "human": humanize, "pix": pix}
 	for _, p := range []string{"login", "setup", "accounts", "device", "routes", "tokens", "usage"} {
-		u.pages[p] = template.Must(template.New("layout.html").Funcs(funcs).ParseFS(templateFS, "templates/layout.html", "templates/"+p+".html"))
+		u.pages[p] = template.Must(template.New("layout.html").Funcs(funcs).ParseFS(templateFS,
+			"templates/layout.html", "templates/components.html", "templates/"+p+".html"))
 	}
 	return u
 }
@@ -73,7 +73,9 @@ func New(b Backend) *UI {
 // ServeHTTP serves /ui/.
 func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
-	h.Set("Content-Security-Policy", "default-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	// Inline styles carry the bars' shares and heatmap nothing else; the
+	// values are numbers this package computes, never text from a request.
+	h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "same-origin")
@@ -247,11 +249,17 @@ func (c *call) change(do func(cfg *config.Config) error) error {
 	return nil
 }
 
-// accountView is an account as the Accounts page shows it.
+// accountView is an account as the Accounts page shows it: the board's card,
+// as markup.
 type accountView struct {
 	Name, Vendor, User string
 	Users              []string
-	Quota              quota.Quota
+	Hue                int
+	Meters             []meterView
+	Balance            *amountView
+	Err                string
+	NoSource           bool
+	NoQuota            bool
 }
 
 func (c *call) accounts() {
@@ -264,7 +272,15 @@ func (c *call) accounts() {
 	for i, n := range names {
 		a := cfg.Accounts[n]
 		v, _ := vendor.Lookup(a.Vendor)
-		views[i] = accountView{Name: n, Vendor: v.Name, User: a.User, Users: cfg.UsersOf(n), Quota: qs[i]}
+		q := qs[i]
+		views[i] = accountView{Name: n, Vendor: v.Name, User: a.User, Users: cfg.UsersOf(n),
+			Hue: hueOf(v.ID), Meters: meters(q), Err: q.Error, NoSource: q.NoSource}
+		if q.Balance != nil {
+			amount := money(*q.Balance)
+			views[i].Balance = &amountView{Name: "Balance", Note: q.Currency, Value: amount,
+				Label: amount + " " + q.Currency}
+		}
+		views[i].NoQuota = views[i].Err == "" && !q.NoSource && len(views[i].Meters) == 0 && views[i].Balance == nil
 	}
 	type vendorOpt struct {
 		ID, Name string
@@ -314,8 +330,8 @@ func (c *call) removeAccount() {
 
 // routeView is a route as the Routes page shows it.
 type routeView struct {
-	Name, Model, Strategy string
-	Members               []string
+	Name, Model, Strategy, Kind string
+	Members                     []string
 }
 
 func (c *call) routes() {
@@ -323,7 +339,16 @@ func (c *call) routes() {
 	var views []routeView
 	for _, n := range cfg.Service.RouteNames() {
 		r := cfg.Service.Routes[n]
-		views = append(views, routeView{Name: n, Model: r.Model, Members: r.Members, Strategy: r.Strategy})
+		v := routeView{Name: n, Model: r.Model, Members: r.Members, Strategy: r.Strategy, Kind: "alias"}
+		if r.IsPool() {
+			v.Kind = "pool"
+			if v.Strategy == "" {
+				v.Strategy = config.StrategyOrder
+			}
+		} else {
+			v.Strategy = ""
+		}
+		views = append(views, v)
 	}
 	c.u.render(c.w, "routes", map[string]any{"Routes": views, "Accounts": cfg.AccountNames(),
 		"Strategies": []string{config.StrategyOrder, config.StrategyRotate, config.StrategyLeastUsed, config.StrategySmart}}, c)
@@ -417,6 +442,7 @@ func (c *call) revokeToken() {
 
 // usageGroup is one row of a usage table.
 type usageGroup struct {
+	Bar      int // how full the row's bar is, against the largest row
 	Name     string
 	Requests int64
 	Failed   int64
@@ -458,16 +484,34 @@ func (c *call) usage() {
 			}
 			return out[i].Name < out[j].Name
 		})
+		most := maxRequests(out)
+		for i := range out {
+			out[i].Bar = barWidth(out[i].Requests, most)
+		}
 		return out
 	}
-	c.u.render(c.w, "usage", map[string]any{"Days": days, "Tables": []struct {
-		Title  string
-		Groups []usageGroup
-	}{
-		{"By token", by(func(r gateway.UsageRow) string { return r.Token })},
-		{"By account", by(func(r gateway.UsageRow) string { return r.Account })},
-		{"By route", by(func(r gateway.UsageRow) string { return r.Route })},
-	}}, c)
+	heat, peak := heatCells(rows, days, c.u.now())
+	totals := totalsOf(rows)
+	c.u.render(c.w, "usage", map[string]any{
+		"Days": days,
+		"Heat": heat,
+		"Peak": peak,
+		"Tiles": []tileView{
+			{Label: "Requests", Value: number(totals.Requests)},
+			{Label: "Failed", Value: number(totals.Failed)},
+			{Label: "Input", Value: humanize(totals.Input)},
+			{Label: "Output", Value: humanize(totals.Output)},
+			{Label: "Cache", Value: humanize(totals.Cache)},
+		},
+		"Tables": []struct {
+			Title  string
+			Groups []usageGroup
+		}{
+			{"By token", by(func(r gateway.UsageRow) string { return r.Token })},
+			{"By account", by(func(r gateway.UsageRow) string { return r.Account })},
+			{"By route", by(func(r gateway.UsageRow) string { return r.Route })},
+		},
+	}, c)
 }
 
 // field is a trimmed form value.
@@ -479,22 +523,6 @@ func done(err error, ok string) string {
 		return "Not saved: " + err.Error()
 	}
 	return ok
-}
-
-// number prints a count with thin grouping: 12 345.
-func number(n int64) string {
-	s := fmt.Sprint(n)
-	if n < 0 {
-		return s
-	}
-	var b strings.Builder
-	for i, ch := range s {
-		if i > 0 && (len(s)-i)%3 == 0 {
-			b.WriteRune(' ')
-		}
-		b.WriteRune(ch)
-	}
-	return b.String()
 }
 
 var errNoDevice = errors.New("this vendor has no device sign-in")

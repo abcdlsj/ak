@@ -181,16 +181,25 @@ while no token is defined, and a request without a known token gets 401.
 bcrypt hash. With no password set the UI shows only how to set one.
 
 The UI is served by `ak serve` itself under `/ui/`: Go `html/template`,
-a little vanilla JS, embedded, no build step, in ak's look (plain, calm,
-monospace numbers). Pages:
+a little vanilla JS, embedded, no build step. It wears the TUI quota
+board's look, so the two read as one product: on water.css (v2.1.7, MIT,
+vendored and embedded) sits a small sheet of ak's own, in Avenir Next with
+system fallbacks. A page is a heading with a rule, cards or a table.
 
-- **Accounts**: every account with its vendor and quota as bars; sign in to
-  a vendor by device code or by pasting a key; remove one no provider,
-  route or token uses.
-- **Routes**: aliases and pools, added, edited and removed.
+- **Accounts**: the board's cards, one per account: its hue from the
+  vendor's id, each window's share used as the board's pixel number with a
+  tick bar under it, amber past 80% and red once spent, the balance below.
+  Sign in to a vendor by device code or by pasting a key; remove one no
+  provider, route or token uses.
+- **Routes**: aliases and pools as a table, members as chips, with the
+  model-name legend beside the form that adds them.
 - **Tokens**: issue one (shown once), limit it to routes, revoke it.
-- **Usage**: requests and tokens by token, account and route, last 7 or 30
-  days.
+- **Usage**: counts as tiles, tokens a day as a calendar in four shades, and
+  requests and tokens by token, account and route over 7 or 30 days, each
+  row with a bar against the largest.
+
+Pages follow the system's light or dark preference. The bars' shares are the
+only inline styles, and their values are numbers the server computes.
 
 The session is a random id in a cookie `ak_session`: HttpOnly,
 SameSite=Strict, Secure when the request came over TLS or with
@@ -279,8 +288,10 @@ message rather than failing to parse it.
   upstream.
 - Bodies are bounded (128 MB), as are streams that stall; in-flight
   requests are bounded by `settings.max_inflight`.
-- UI responses carry `Content-Security-Policy: default-src 'self'`,
-  `X-Frame-Options: DENY` and `Referrer-Policy: same-origin`.
+- UI responses carry `Content-Security-Policy: default-src 'self';
+  style-src 'self' 'unsafe-inline'` (inline styles are the bars' widths and
+  heatmap colours, never text from a request), `X-Frame-Options: DENY` and
+  `Referrer-Policy: same-origin`.
 
 ## What reuses what
 

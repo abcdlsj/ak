@@ -1,28 +1,54 @@
 {{define "content"}}
 <h1>Routes</h1>
-<p class="dim">Besides <code>&lt;account&gt;</code> and <code>&lt;account&gt;/&lt;model&gt;</code>, a route is a model name of its own: an alias of another, or a pool over several.</p>
+<p class="lede">A model name of its own: an alias of another, or a pool over several.</p>
+
 {{if .Routes}}
-<table>
-<tr><th>name</th><th>kind</th><th>to</th><th>strategy</th><th></th></tr>
-{{range .Routes}}
-<tr><td><code>{{.Name}}</code></td>
-<td>{{if .Members}}pool{{else}}alias{{end}}</td>
-<td>{{if .Members}}{{join .Members ", "}}{{else}}{{.Model}}{{end}}</td>
-<td>{{if .Members}}{{or .Strategy "order"}}{{end}}</td>
-<td><form method="post" action="/ui/routes/remove" data-confirm="Remove route {{.Name}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><button class="link bad">Remove</button></form></td></tr>
-{{end}}
+<table class="grid">
+  <thead><tr><th>name</th><th>kind</th><th>to</th><th>strategy</th><th></th></tr></thead>
+  <tbody>
+  {{range .Routes}}
+  <tr>
+    <td><b class="mono">{{.Name}}</b></td>
+    <td><span class="chip">{{.Kind}}</span></td>
+    <td class="mono">{{if .Members}}{{template "chips" .Members}}{{else}}{{.Model}}{{end}}</td>
+    <td>{{with .Strategy}}<span class="chip">{{.}}</span>{{end}}</td>
+    <td class="right"><form method="post" action="/ui/routes/remove" data-confirm="Remove route {{.Name}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><button class="link bad">Remove</button></form></td>
+  </tr>
+  {{end}}
+  </tbody>
 </table>
-{{else}}<p class="dim">No routes yet.</p>{{end}}
+{{else}}
+{{template "empty" "No routes yet."}}
+{{end}}
 
 <h2>Add or change a route</h2>
-<form method="post" action="/ui/routes/save" class="stack narrow">
+<div class="cols">
+<section class="panel">
+<form method="post" action="/ui/routes/save" class="stack">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
-  <label>Name <input name="name" required pattern="[a-z0-9][a-z0-9._\-]*"></label>
-  <label>Kind <select name="type"><option value="alias">alias</option><option value="pool">pool</option></select></label>
+  <div class="duo">
+    <label>Name <input name="name" required pattern="[a-z0-9][a-z0-9._\-]*"></label>
+    <label>Kind <select name="type"><option value="alias">alias</option><option value="pool">pool</option></select></label>
+  </div>
   <label>Alias of <input name="model" placeholder="command-code/deepseek/deepseek-v4.1-flash"></label>
   <label>Pool members, one per line <textarea name="members" rows="4" placeholder="bili/glm-5&#10;command-code"></textarea></label>
   <label>Strategy <select name="strategy">{{range .Strategies}}<option>{{.}}</option>{{end}}</select></label>
   <button>Save</button>
-  <p class="dim small">Accounts: {{join .Accounts ", "}}</p>
 </form>
+<p class="note">Accounts: {{template "chips" .Accounts}}</p>
+</section>
+
+<section class="panel">
+  <h3>Model names</h3>
+  <table class="grid">
+    <thead><tr><th>name</th><th>means</th></tr></thead>
+    <tbody>
+    <tr><td class="mono">&lt;account&gt;</td><td>the account's vendor's default model, for the protocol asked</td></tr>
+    <tr><td class="mono">&lt;account&gt;/&lt;model&gt;</td><td>any model at that account; the model goes upstream as is</td></tr>
+    <tr><td class="mono">&lt;alias&gt;</td><td>another model name, from a route</td></tr>
+    <tr><td class="mono">&lt;pool&gt;</td><td>several model names with failover or rotation</td></tr>
+    </tbody>
+  </table>
+</section>
+</div>
 {{end}}
