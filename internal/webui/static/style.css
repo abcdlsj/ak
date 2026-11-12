@@ -12,6 +12,7 @@
   --heat2: #4ac26b;
   --heat3: #2da44e;
   --heat4: #116329;
+  --cell: 12px;
   --action: #0969da;
   --on-action: #fff;
   --mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -98,6 +99,7 @@ h2 {
   margin: 2.5rem 0 .6rem;
 }
 h2::after { content: ""; flex: 1; height: 1px; background: var(--border) }
+.h2-note { font-weight: 400; font-size: .76rem; letter-spacing: 0; text-transform: none; color: var(--text-muted) }
 h3 { font-size: .95rem; margin: 0 0 .8rem }
 
 /* Cards: the board's, as a grid. */
@@ -150,8 +152,28 @@ h3 { font-size: .95rem; margin: 0 0 .8rem }
 .panel.narrow { max-width: 34rem }
 .panels .stack { max-width: 26rem }
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; align-items: start }
-.gate { max-width: 26rem; margin: 3rem auto 0 }
-.gate .lede { margin-bottom: 1.5rem }
+.gate { max-width: 26rem; margin: 13vh auto 0 }
+.gate-head { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .8rem }
+.gate-head .mark { color: var(--action); font-size: .7rem }
+.gate-head .brand { font-size: 1.05rem }
+.gate-note { color: var(--text-muted); font-size: .8rem }
+.gate .panel { padding: 1.4rem 1.4rem 1.5rem }
+.gate h1 { font-size: 1.3rem }
+.gate .lede { font-size: .85rem; margin: .2rem 0 1.1rem }
+.gate .stack > button { width: 100%; align-self: stretch }
+.gate .flash { font-size: .85rem; margin-bottom: .8rem }
+.gate .hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .4rem;
+  margin: 1.1rem 0 0;
+  padding-top: .9rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: .78rem;
+}
+.gate .hint code { font-size: .8rem; color: var(--text-main) }
 
 .stack { display: flex; flex-direction: column; gap: .8rem; margin: 0 }
 .stack label { display: flex; flex-direction: column; gap: .3rem; font-size: .88rem; color: var(--text-muted) }
@@ -208,33 +230,54 @@ button.link.bad { color: var(--bad) }
 .tile-value { font-size: 1.5rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums }
 .tile-note { font-size: .78rem; color: var(--text-muted) }
 
-/* Usage per day: one column a week, the shade by that day's tokens. */
-.heat { display: flex; gap: .45rem; align-items: flex-start; padding-bottom: .5rem }
+/* Usage a day: GitHub's year, one column a week, one row a weekday, the
+   months above the columns they start. */
+.heat { display: flex; gap: .5rem; align-items: flex-start }
 .heat-days {
   display: grid;
-  grid-template-rows: repeat(7, 14px);
+  grid-template-rows: repeat(7, var(--cell));
   gap: 3px;
   align-items: center;
+  padding-top: 1.15rem;
   color: var(--text-muted);
-  font-size: .68rem;
+  font-size: .66rem;
   text-align: right;
 }
+.heat-main { min-width: 0; display: flex; flex-direction: column; gap: .35rem; overflow-x: auto }
+.heat-months {
+  display: grid;
+  gap: 3px;
+  font-size: .66rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.heat-months span { white-space: nowrap }
 .heat-grid {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: 14px;
-  grid-template-rows: repeat(7, 14px);
+  grid-auto-columns: var(--cell);
+  grid-template-rows: repeat(7, var(--cell));
   gap: 3px;
-  overflow-x: auto;
 }
-.heat-cell { width: 14px; height: 14px; border-radius: 3px; background: var(--heat0); display: inline-block }
+.heat-cell {
+  width: var(--cell);
+  height: var(--cell);
+  border-radius: 2px;
+  background: var(--heat0);
+  display: inline-block;
+}
 .heat-cell.l-1 { visibility: hidden }
 .heat-cell.l1 { background: var(--heat1) }
 .heat-cell.l2 { background: var(--heat2) }
 .heat-cell.l3 { background: var(--heat3) }
 .heat-cell.l4 { background: var(--heat4) }
-.heat-wrap .note { display: flex; align-items: center; gap: .3rem; margin-top: .2rem }
-.heat-wrap .note .dot { margin: 0 .4rem; color: var(--border) }
+.heat-legend { display: flex; align-items: center; gap: .45rem; margin: .15rem 0 0; font-size: .78rem; color: var(--text-muted) }
+.heat-legend .value { display: flex; align-items: flex-end; gap: .15rem; color: var(--ok) }
+.heat-legend .value .pix { height: 1.3rem }
+.heat-legend .unit { font-size: .9rem; color: var(--ok); margin-bottom: .1rem }
+.heat-legend .note { margin: 0 }
+.heat-legend .spacer { flex: 1 }
 
 /* Tabs above a page's own content. */
 .tabs { display: flex; gap: .2rem }

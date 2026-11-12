@@ -9,9 +9,8 @@
 <script src="/ui/static/app.js" defer></script>
 </head>
 <body>
-<header class="top">
+{{if .Signed}}<header class="top">
   <span class="brand">ak</span>
-  {{if .Signed}}
   <nav>
     <a href="/ui/accounts"{{if eq .Page "accounts" "device"}} class="on"{{end}}>Accounts</a>
     <a href="/ui/routes"{{if eq .Page "routes"}} class="on"{{end}}>Routes</a>
@@ -22,8 +21,7 @@
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <button class="link">Log out</button>
   </form>
-  {{end}}
-</header>
+</header>{{end}}
 <main>
 {{with .Flash}}<p class="flash">{{.}}</p>{{end}}
 {{template "content" .}}

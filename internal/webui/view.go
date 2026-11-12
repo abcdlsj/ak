@@ -129,6 +129,20 @@ func humanize(n int64) string {
 	return trimZero(float64(n)/1e9) + "G"
 }
 
+// size splits a count into the digits a pixel number draws and the unit
+// after them: the font has no letters.
+func size(n int64) (string, string) {
+	switch {
+	case n < 1_000:
+		return strconv.FormatInt(n, 10), ""
+	case n < 1_000_000:
+		return trimZero(float64(n) / 1e3), "k"
+	case n < 1_000_000_000:
+		return trimZero(float64(n) / 1e6), "M"
+	}
+	return trimZero(float64(n) / 1e9), "G"
+}
+
 func trimZero(f float64) string {
 	s := strconv.FormatFloat(f, 'f', 1, 64)
 	return strings.TrimSuffix(s, ".0")
@@ -193,11 +207,26 @@ func levelName(used float64) string {
 	return ""
 }
 
-// heatCells is the last n days of usage as a calendar, one cell per day, the
-// shade by that day's tokens, and the peak day's caption. Levels are quantiles
-// of the days with usage, so a few busy days do not flatten the rest into one
-// shade. The first cell is padded to its weekday, so a column is a week.
-func heatCells(rows []gateway.UsageRow, n int, now time.Time) ([]heatCell, string) {
+// heatMonth is a month's name above the week it starts, one-based column.
+type heatMonth struct {
+	Label string
+	Col   int
+}
+
+// heatYear is the last twelve months of usage as GitHub draws its year: one
+// column a week, one row a weekday, from the Sunday of the week a year ago to
+// today, the months above the columns they start. Shades are quantiles of the
+// days with usage, so a few busy days do not flatten the rest into one.
+type heatYear struct {
+	Cells  []heatCell
+	Months []heatMonth
+	Cols   int
+	Total  string // the digits to draw big, and
+	Unit   string // what they count in
+	Peak   string
+}
+
+func buildHeatYear(rows []gateway.UsageRow, now time.Time) heatYear {
 	per := map[string]int64{}
 	for _, r := range rows {
 		per[r.Day] += r.Input + r.Output + r.CacheRead + r.CacheWrite
@@ -226,33 +255,59 @@ func heatCells(rows []gateway.UsageRow, n int, now time.Time) ([]heatCell, strin
 		return min(lv, heatSteps)
 	}
 
-	first := now.AddDate(0, 0, -(n - 1))
-	out := make([]heatCell, 0, n+6)
-	for range int(first.Weekday()) {
-		out = append(out, heatCell{Level: -1})
-	}
+	// Start on the Sunday of the week a year ago, so a column is a week.
+	start := now.AddDate(0, 0, -364)
+	start = start.AddDate(0, 0, -int(start.Weekday()))
+	column := func(d time.Time) int { return int(d.Sub(start).Hours()/24) / 7 }
+
+	var out []heatCell
+	var total, peak int64
 	var peakDay string
-	var peak int64
-	for i := n - 1; i >= 0; i-- {
-		d := now.AddDate(0, 0, -i)
+	for d := start; !d.After(now); d = d.AddDate(0, 0, 1) {
 		key := d.Format(time.DateOnly)
 		v := per[key]
+		total += v
 		if v > peak {
 			peak, peakDay = v, d.Format("01-02")
 		}
-		out = append(out, heatCell{
-			Date: key, Level: level(v),
-			Label: d.Format("01-02") + ": " + humanize(v) + " tokens",
-		})
+		out = append(out, heatCell{Date: key, Level: level(v),
+			Label: d.Format("01-02") + ": " + humanize(v) + " tokens"})
 	}
-	if peak == 0 {
-		return out, ""
+	// Complete the last week, so its column is not short.
+	for len(out)%7 != 0 {
+		out = append(out, heatCell{Level: -1})
 	}
-	return out, humanize(peak) + " on " + peakDay
+
+	// A month is named above the week it starts in; one that would run into
+	// the name before it is left out, since the next says enough.
+	var months []heatMonth
+	named := map[string]bool{}
+	for d := start; !d.After(now); d = d.AddDate(0, 0, 1) {
+		m := d.Format("Jan")
+		if named[m] || d.Day() > 7 {
+			continue
+		}
+		named[m] = true
+		col := column(d) + 1
+		if n := len(months); n > 0 && col-months[n-1].Col < 3 {
+			continue
+		}
+		months = append(months, heatMonth{Label: m, Col: col})
+	}
+
+	num, unit := size(total)
+	hy := heatYear{Cells: out, Months: months, Cols: len(out) / 7, Total: num, Unit: unit}
+	if peak > 0 {
+		hy.Peak = humanize(peak) + " on " + peakDay
+	}
+	return hy
 }
 
 // heatSteps is the number of shades above "no record".
 const heatSteps = 4
+
+// usageYear is how far back the calendar reads: the year the service keeps.
+const usageYear = 366
 
 // heatCell is one day of the calendar.
 type heatCell struct {

@@ -1,14 +1,22 @@
 {{define "content"}}
-<section class="gate">
-  <h1>Log in</h1>
-  <p class="lede">The admin password opens the service's pages, nothing else.</p>
-  {{with .Error}}<p class="flash bad">{{.}}</p>{{end}}
-  {{if .CSRF}}
-  <form method="post" action="/ui/login" class="stack">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <label>Admin password <input type="password" name="password" autocomplete="current-password" required autofocus></label>
-    <button>Log in</button>
-  </form>
-  {{end}}
-</section>
+<div class="gate">
+  <div class="gate-head">
+    <span class="mark">■</span>
+    <span class="brand">ak</span>
+    <span class="gate-note">the service's console</span>
+  </div>
+  <section class="panel">
+    <h1>Sign in</h1>
+    <p class="lede">The admin password opens these pages, nothing else.</p>
+    {{with .Error}}<p class="flash bad">{{.}}</p>{{end}}
+    {{if .CSRF}}
+    <form method="post" action="/ui/login" class="stack">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label>Admin password <input type="password" name="password" autocomplete="current-password" required autofocus></label>
+      <button>Log in</button>
+    </form>
+    {{end}}
+    <p class="hint"><span>set on the server with</span> <code>ak serve admin set-password</code></p>
+  </section>
+</div>
 {{end}}

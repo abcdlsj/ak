@@ -13,20 +13,25 @@
 {{range .Tiles}}{{template "tile" .}}{{end}}
 </div>
 
-<h2>Tokens by day</h2>
-<div class="heat-wrap">
-  <div class="heat">
-    <div class="heat-days" aria-hidden="true"><span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span></div>
-    <div class="heat-grid" role="img" aria-label="tokens a day over the last {{.Days}} days">
-    {{range .Heat}}<span class="heat-cell l{{.Level}}"{{with .Label}} title="{{.}}"{{end}}></span>{{end}}
+<h2>Tokens a day<span class="h2-note">{{with .Heat}}the last 12 months{{end}}</span></h2>
+<div class="heat">
+  <div class="heat-days" aria-hidden="true"><span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span></div>
+  <div class="heat-main">
+    <div class="heat-months" style="grid-template-columns:repeat({{.Heat.Cols}},var(--cell))">
+      {{range .Heat.Months}}<span style="grid-column:{{.Col}} / span 4">{{.Label}}</span>{{end}}
     </div>
+    <div class="heat-grid" role="img" aria-label="tokens a day over the last 12 months">
+    {{range .Heat.Cells}}<span class="heat-cell l{{.Level}}"{{with .Label}} title="{{.}}"{{end}}></span>{{end}}
+    </div>
+    <p class="heat-legend">
+      <span class="value" role="img" aria-label="{{.Heat.Total}}{{.Heat.Unit}} tokens in the last 12 months">{{pix .Heat.Total}}<span class="unit">{{.Heat.Unit}}</span></span>
+      <span class="note">tokens in the last 12 months{{with .Heat.Peak}} · peak {{.}}{{end}}</span>
+      <span class="spacer"></span>
+      <span class="note">less</span>
+      <span class="heat-cell l0"></span><span class="heat-cell l1"></span><span class="heat-cell l2"></span><span class="heat-cell l3"></span><span class="heat-cell l4"></span>
+      <span class="note">more</span>
+    </p>
   </div>
-  <p class="note">
-    <span>less</span>
-    <span class="heat-cell l0"></span><span class="heat-cell l1"></span><span class="heat-cell l2"></span><span class="heat-cell l3"></span><span class="heat-cell l4"></span>
-    <span>more</span>
-    {{with .Peak}}<span class="dot">·</span> peak {{.}}{{end}}
-  </p>
 </div>
 
 {{range .Tables}}

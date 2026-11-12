@@ -13,8 +13,9 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 )
 
-// usageDays is how long the service keeps its daily usage.
-const usageDays = 90
+// usageDays is how long the service keeps its daily usage: a year and a day,
+// so the UI can draw a whole year as a calendar.
+const usageDays = 366
 
 // Tokens are a reply's token counts. Input excludes what was read from or
 // written to the cache, which are counted apart, whatever the protocol.

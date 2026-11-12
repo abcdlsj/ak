@@ -87,29 +87,75 @@ func TestHueOf(t *testing.T) {
 	}
 }
 
-// The calendar is the last n days, padded to the first day's weekday, with
-// no usage a shade of its own and the peak named.
-func TestHeatCells(t *testing.T) {
+// The calendar is GitHub's year: whole weeks from the Sunday of the week a
+// year ago, the months above their columns, and the total split for the pixel
+// font.
+func TestHeatYear(t *testing.T) {
 	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.Local)
 	rows := []gateway.UsageRow{
 		{Day: "2026-11-12", Input: 900, Output: 100},
 		{Day: "2026-11-10", Input: 10},
 	}
-	cells, peak := heatCells(rows, 7, now)
-	lead := int(now.AddDate(0, 0, -6).Weekday())
-	if len(cells) != 7+lead {
-		t.Fatalf("%d cells, want %d (7 days and %d padding)", len(cells), 7+lead, lead)
+	h := buildHeatYear(rows, now)
+	if len(h.Cells)%7 != 0 {
+		t.Fatalf("%d cells, not whole weeks", len(h.Cells))
 	}
-	if cells[0].Level != -1 {
-		t.Errorf("the padding is visible: %+v", cells[0])
+	if got := len(h.Cells) / 7; got != h.Cols {
+		t.Errorf("Cols = %d, but %d columns of cells", h.Cols, got)
 	}
-	last := cells[len(cells)-1]
-	if last.Date != "2026-11-12" || last.Level == 0 {
-		t.Errorf("today: %+v", last)
+	if h.Cols < 52 || h.Cols > 54 {
+		t.Errorf("%d weeks a year, want 52 to 54", h.Cols)
 	}
-	if peak != "1k on 11-12" {
-		t.Errorf("peak = %q", peak)
+	start := mustDate(t, h.Cells[0].Date)
+	if start.Weekday() != time.Sunday {
+		t.Errorf("the first cell is a %v, not a Sunday", start.Weekday())
 	}
+	today := -1
+	for i, c := range h.Cells {
+		if c.Date == "2026-11-12" {
+			today = i
+		}
+	}
+	if today < 0 || today%7 != int(now.Weekday()) {
+		t.Errorf("today is at %d, not in its weekday row", today)
+	}
+	if last := h.Cells[len(h.Cells)-1]; last.Level != -1 {
+		t.Errorf("the last week is not padded: %+v", last)
+	}
+	if h.Total != "1" || h.Unit != "k" {
+		t.Errorf("total = %q %q, want 1 k", h.Total, h.Unit)
+	}
+	if h.Peak != "1k on 11-12" {
+		t.Errorf("peak = %q", h.Peak)
+	}
+	// A month is named once, above the week it starts in.
+	named := map[string]bool{}
+	prev := 0
+	for _, m := range h.Months {
+		if named[m.Label] {
+			t.Errorf("%s is named twice", m.Label)
+		}
+		named[m.Label] = true
+		if m.Col <= prev {
+			t.Errorf("months out of order: %+v", h.Months)
+		}
+		prev = m.Col
+	}
+	if len(h.Months) < 10 {
+		t.Errorf("%d months named, want most of a year", len(h.Months))
+	}
+}
+
+func mustDate(t *testing.T, s string) time.Time {
+	t.Helper()
+	if s == "" {
+		t.Fatal("a padded cell was taken for a date")
+	}
+	d, err := time.Parse(time.DateOnly, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
 }
 
 func TestBarWidth(t *testing.T) {

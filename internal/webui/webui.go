@@ -490,12 +490,10 @@ func (c *call) usage() {
 		}
 		return out
 	}
-	heat, peak := heatCells(rows, days, c.u.now())
 	totals := totalsOf(rows)
 	c.u.render(c.w, "usage", map[string]any{
 		"Days": days,
-		"Heat": heat,
-		"Peak": peak,
+		"Heat": buildHeatYear(c.u.b.Usage(usageYear), c.u.now()),
 		"Tiles": []tileView{
 			{Label: "Requests", Value: number(totals.Requests)},
 			{Label: "Failed", Value: number(totals.Failed)},

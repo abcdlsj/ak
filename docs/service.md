@@ -194,9 +194,11 @@ system fallbacks. A page is a heading with a rule, cards or a table.
 - **Routes**: aliases and pools as a table, members as chips, with the
   model-name legend beside the form that adds them.
 - **Tokens**: issue one (shown once), limit it to routes, revoke it.
-- **Usage**: counts as tiles, tokens a day as a calendar in four shades, and
-  requests and tokens by token, account and route over 7 or 30 days, each
-  row with a bar against the largest.
+- **Usage**: counts as tiles; the year's tokens a day as GitHub draws it, a
+  column a week, the months above, four shades by quantile, the year's total
+  in the pixel font and the peak day named; then requests and tokens by
+  token, account and route over 7 or 30 days, each row with a bar against
+  the largest.
 
 Pages follow the system's light or dark preference. The bars' shares are the
 only inline styles, and their values are numbers the server computes.
@@ -235,7 +237,7 @@ The server reads each account's quota at most once a minute, whoever asks.
 ## Deploying
 
 One binary, its state in `AK_CONFIG_DIR`: `providers.toml`, `auth.json`,
-`service-usage.json` (90 days of usage by day, token, route and account) and
+`service-usage.json` (366 days of usage by day, token, route and account) and
 the affinity tables. `deploy/` holds a systemd unit (`ak.service`), a
 `Dockerfile`, a `Caddyfile` and an `nginx.conf`. TLS is the reverse proxy's
 job: ak has no ACME. Run `ak serve` with `service.addr` on loopback and let
