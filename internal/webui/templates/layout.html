@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ak · {{.Page}}</title>
+<title>AK · {{title .Page}}</title>
 <link rel="icon" type="image/svg+xml" href="/ui/static/icon.svg">
 <link rel="stylesheet" href="/ui/static/water.css">
 <link rel="stylesheet" href="/ui/static/style.css">
@@ -11,7 +11,7 @@
 </head>
 <body>
 {{if .Signed}}<header class="top">
-  <a class="brand" href="/ui/accounts" aria-label="ak"><img class="logo" src="/ui/static/icon.svg" alt="" width="21" height="21"></a>
+  <a class="brand" href="/ui/accounts" aria-label="AK"><img class="logo" src="/ui/static/icon.svg" alt="" width="21" height="21"></a>
   <nav>
     <a href="/ui/accounts"{{if eq .Page "accounts" "device"}} class="on"{{end}}>Accounts</a>
     <a href="/ui/routes"{{if eq .Page "routes"}} class="on"{{end}}>Routes</a>
@@ -27,11 +27,12 @@
 {{with .Flash}}<p class="flash">{{.}}</p>{{end}}
 {{template "content" .}}
 </main>
-{{if .Signed}}
 <footer class="foot">
-  <span>ak serve</span>
-  {{with .Addr}}<span class="dim">·</span><span class="mono">{{.}}</span>{{end}}
+  <span>serve by AK</span>
+  <span class="dim">·</span>
+  <span class="mono">{{.Version}}</span>
+  <span class="dim">·</span>
+  <a href="https://github.com/abcdlsj/ak" target="_blank" rel="noopener noreferrer">github.com/abcdlsj/ak</a>
 </footer>
-{{end}}
 </body>
 </html>

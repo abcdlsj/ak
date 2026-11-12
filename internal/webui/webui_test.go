@@ -103,6 +103,18 @@ func (s *site) post(page, action string, form url.Values) *httptest.ResponseReco
 	return s.do("POST", action, form)
 }
 
+// The footer says what serves the page, and where it lives.
+func TestFooter(t *testing.T) {
+	s := newSite(t, true)
+	s.login(password)
+	page := s.do("GET", "/ui/accounts", nil).Body.String()
+	for _, want := range []string{"serve by AK", "github.com/abcdlsj/ak", ">dev<"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the footer lacks %q", want)
+		}
+	}
+}
+
 func TestSetupWithoutPassword(t *testing.T) {
 	s := newSite(t, false)
 	if rec := s.do("GET", "/ui/accounts", nil); !strings.Contains(rec.Body.String(), "ak serve admin set-password") {

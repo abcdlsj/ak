@@ -29,6 +29,7 @@ import (
 	"github.com/abcdlsj/ak/internal/login"
 	"github.com/abcdlsj/ak/internal/quota"
 	"github.com/abcdlsj/ak/internal/vendor"
+	"github.com/abcdlsj/ak/internal/version"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -67,6 +68,7 @@ func New(b Backend) *UI {
 	funcs := template.FuncMap{
 		"join": strings.Join, "num": number, "human": humanize, "pix": pix,
 		"contains": func(list []string, s string) bool { return slices.Contains(list, s) },
+		"title":    func(s string) string { return strings.ToUpper(s[:1]) + s[1:] },
 	}
 	for _, p := range []string{"login", "setup", "accounts", "device", "routes", "tokens", "usage"} {
 		u.pages[p] = template.Must(template.New("layout.html").Funcs(funcs).ParseFS(templateFS,
@@ -214,11 +216,11 @@ func (u *UI) render(w http.ResponseWriter, page string, data map[string]any, c *
 		data = map[string]any{}
 	}
 	data["Page"] = page
+	data["Version"] = version.Display()
 	if c != nil {
 		data["CSRF"] = c.ss.csrf
 		data["Flash"], data["Token"] = u.sessions.take(c.ss)
 		data["Signed"] = true
-		data["Addr"] = u.b.Config().Service.Addr
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := u.pages[page].Execute(w, data); err != nil {

@@ -1,13 +1,19 @@
 {{define "content"}}
 <div class="gate">
-  <div class="gate-head">
-    <span class="brand"><img class="logo" src="/ui/static/icon.svg" alt="ak" width="30" height="30"></span>
-    <span class="gate-note">the service's console</span>
-  </div>
+  <section class="hero">
+    <div class="gate-head">
+      <span class="brand"><img class="logo" src="/ui/static/icon.svg" alt="AK" width="30" height="30"></span>
+      <span class="gate-note">the service's console</span>
+    </div>
+    <h1>One base URL for every&nbsp;agent.</h1>
+    <p>AK is running, but nobody may open these pages yet: set an admin password on the server, then reload.</p>
+  </section>
+
   <section class="panel">
-    <h1>No admin password yet</h1>
-    <p class="lede">Set one on the server, then reload this page.</p>
+    <h2>Set the password</h2>
+    <p class="lede">On the server, as the user that runs AK:</p>
     <pre><code>ak serve admin set-password</code></pre>
+    <p class="hint"><span>then reload this page</span></p>
   </section>
 </div>
 {{end}}

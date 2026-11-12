@@ -4,24 +4,15 @@ package cli
 import (
 	"fmt"
 	"os"
-	"runtime/debug"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/abcdlsj/ak/internal/version"
 	"github.com/spf13/cobra"
 )
 
-// Version is injected at build time; `go install ...@vX` leaves it to the
-// module version.
-var Version = "dev"
-
 func init() {
-	if Version == "dev" {
-		if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-			Version = bi.Main.Version
-		}
-	}
 	// Every command name is reserved, so `ak <name>` always means one thing.
 	for _, c := range newRoot().Commands() {
 		config.Reserve(c.Name())
@@ -75,7 +66,7 @@ exclusive, which suits running multiple worktrees, sessions and agents in
 parallel. Each provider also gets an ak-<name> command for scripts.
 
 Run with no arguments to open the launcher.`,
-		Version:           Version,
+		Version:           version.Version,
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		ValidArgsFunction: completeTarget,
