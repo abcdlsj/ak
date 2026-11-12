@@ -65,7 +65,7 @@ func Validate(cfg *Config) error {
 	if err := validateCommandNames(cfg); err != nil {
 		return err
 	}
-	return nil
+	return validateService(cfg)
 }
 
 // ValidateDefaults checks the defaults in settings. It is kept out of

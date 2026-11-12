@@ -56,6 +56,8 @@ type Config struct {
 	Settings  Settings            `toml:"settings"`
 	Accounts  map[string]Account  `toml:"accounts,omitempty"`
 	Providers map[string]Provider `toml:"providers"`
+	// Service is what `ak serve` answers other machines with.
+	Service Service `toml:"service,omitempty"`
 }
 
 // Settings holds global settings.
