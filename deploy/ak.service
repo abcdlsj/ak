@@ -1,0 +1,40 @@
+# systemd unit for ak as a service. Install:
+#   sudo useradd --system --home /var/lib/ak --shell /usr/sbin/nologin ak
+#   sudo install -m 0755 ak /usr/local/bin/ak
+#   sudo install -m 0644 deploy/ak.service /etc/systemd/system/ak.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now ak
+# Configure as the ak user, e.g.:
+#   sudo -u ak AK_CONFIG_DIR=/var/lib/ak ak serve admin set-password
+[Unit]
+Description=ak service: one base URL for every agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ak
+Group=ak
+Environment=AK_CONFIG_DIR=/var/lib/ak
+Environment=HOME=/var/lib/ak
+StateDirectory=ak
+StateDirectoryMode=0700
+ExecStart=/usr/local/bin/ak serve
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2s
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

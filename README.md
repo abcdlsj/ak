@@ -23,7 +23,7 @@ pane keeps talking to what it started with.
 
 ## Get started
 
-Needs Go 1.27+ and the engines you use (`claude`, `codex`, `pi`) on PATH.
+Needs Go 1.27.3+ and the engines you use (`claude`, `codex`, `pi`) on PATH.
 Prebuilt binaries are on the [releases](https://github.com/abcdlsj/ak/releases) page.
 
 ```
@@ -76,6 +76,9 @@ ak bind / unbind / bindings     what claude/codex/pi typed in a repository run o
 ak default <engine> <name>      what they run on where nothing is bound
 ak which                        what they run on here, and why
 ak acp <engine>                 that engine's ACP server on the provider here
+ak serve                        the pool gateway; with service.addr, the service for other machines
+ak serve token add|list|revoke  the service's tokens, one per machine
+ak remote add <name> <url>      use an ak service as a vendor and account
 ak install / uninstall          set up the shell for the above (zsh, bash, fish)
 ak doctor                       anything that would make a launch misroute
 ak-<name> [args...]             the same as ak <name>, for scripts
@@ -88,6 +91,10 @@ ak-<name> [args...]             the same as ak <name>, for scripts
   is attributed.
 - [Pools](docs/pools.md): one provider spread over several, with failover,
   rotation and a quota-aware strategy.
+- [ak as a service](docs/service.md): one server holding every
+  subscription, one base URL and token per machine, the model name picking
+  the subscription; Anthropic and OpenAI protocols translated as needed; a
+  small web UI; `deploy/` has a systemd unit, a Dockerfile and proxy configs.
 - [Health, balance and usage](docs/status.md): `ak status`, `ak check`,
   `ak quota` and its plugins.
 

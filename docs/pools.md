@@ -55,7 +55,8 @@ unread for 60 seconds, a stream stalled for 2 minutes, each ends rather than
 hangs. A member's `max_concurrency` queues extra requests instead of sending
 them at once; `settings.max_inflight` (256 by default) refuses over that many
 with 503 rather than queueing. Pools do not translate between protocols: every
-member must speak what the engine speaks. To aggregate one relay for both
+member must speak what the engine speaks (the service's routes do; see
+[service.md](service.md)). To aggregate one relay for both
 engines, register its Anthropic endpoint as a `claude` provider and its OpenAI
 endpoint as a `codex` provider, then pool each kind separately. Launching a pool
 starts `ak serve` in the background when nothing is listening, logging to

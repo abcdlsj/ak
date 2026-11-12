@@ -5,8 +5,7 @@ Each machine you own then points its agents (claude, codex, pi, any
 OpenAI- or Anthropic-compatible tool) at one base URL with one token, and
 picks a subscription by the model name. Clients hold no upstream key.
 
-This page is the design; the sections that describe behaviour are kept
-current as it lands.
+This page describes the design and what was built from it.
 
 ## Model names
 
@@ -106,8 +105,11 @@ On `service.addr`:
 
 A token is sent as `Authorization: Bearer <token>` or `x-api-key: <token>`,
 the two ways the engines send a key. Each `/v1/models` entry carries an
-`ak.protocols` object saying, per protocol, whether the route answers it
-`native` or `translated`.
+`ak.protocols` object saying, per protocol (`anthropic`, `responses`,
+`chat`), whether the route answers it `native`, `translated`, or `mixed`
+(a pool with members of both). `/v1/models` lists the routes, each account,
+and each account's engines' default models as `<account>/<model>`; any other
+`<account>/<model>` is accepted too.
 
 ## Translation
 
@@ -161,7 +163,7 @@ upstream error, and alone it is answered with 400 naming the reason.
 
 ```
 ak serve token add laptop [--route main --route bili]   prints the token once
-ak serve token list                                       name, routes, created, last used
+ak serve token list                                       name, routes, created
 ak serve token revoke laptop
 ```
 
@@ -183,7 +185,8 @@ a little vanilla JS, embedded, no build step, in ak's look (plain, calm,
 monospace numbers). Pages:
 
 - **Accounts**: every account with its vendor and quota as bars; sign in to
-  a vendor by device code or by pasting a key; remove one no route uses.
+  a vendor by device code or by pasting a key; remove one no provider,
+  route or token uses.
 - **Routes**: aliases and pools, added, edited and removed.
 - **Tokens**: issue one (shown once), limit it to routes, revoke it.
 - **Usage**: requests and tokens by token, account and route, last 7 or 30
@@ -209,34 +212,58 @@ ak quota                                             # home's accounts among the
 ```
 
 `ak remote add` checks the server answers `/v1/models` with the token, then
-writes the vendor `vendors.d/home.toml` (claude at the URL, codex and pi at
-`<url>/v1`, `quota = "ak"`) and the account `home` on it with the token as
-its key. Everything after that is ak's usual flow: providers, bindings, the
+writes the vendor `vendors.d/home.toml` (claude and pi at the URL on
+Anthropic Messages, codex at `<url>/v1` on Responses, `quota = "ak"`) and the
+account `home` on it with the token as its key. The vendor has no default
+model, so a provider on it names its route with `--model`. Everything after that is ak's usual flow: providers, bindings, the
 launcher. `ak remote list` lists them, `ak remote rm home` removes the
 vendor and the account once no provider runs on it.
 
 The quota source `ak` asks `/ak/v1/quota`, and `ak quota` and
 `ak quota board` show each of the server's accounts as `home/<account>`.
+The server reads each account's quota at most once a minute, whoever asks.
 
 ## Deploying
 
-One binary, its state in `AK_CONFIG_DIR`. `deploy/` holds a systemd unit,
-a Dockerfile and a Caddyfile. TLS is the reverse proxy's job: ak has no
-ACME. Run `ak serve` with `service.addr` on loopback and let Caddy or nginx
-terminate TLS and forward to it; streams need the proxy not to buffer
-(nginx: `proxy_buffering off`).
+One binary, its state in `AK_CONFIG_DIR`: `providers.toml`, `auth.json`,
+`service-usage.json` (90 days of usage by day, token, route and account) and
+the affinity tables. `deploy/` holds a systemd unit (`ak.service`), a
+`Dockerfile`, a `Caddyfile` and an `nginx.conf`. TLS is the reverse proxy's
+job: ak has no ACME. Run `ak serve` with `service.addr` on loopback and let
+Caddy or nginx terminate TLS and forward to it; streams need the proxy not to
+buffer (Caddy: `flush_interval -1`; nginx: `proxy_buffering off`).
+
+On the server:
+
+```sh
+ak login command-code --key -            # each subscription, as on a laptop
+ak serve admin set-password
+ak serve token add laptop                # prints the token once
+# providers.toml: [service] addr = "127.0.0.1:8787", routes as above
+systemctl enable --now ak                # deploy/ak.service
+```
+
+On each machine:
+
+```sh
+ak remote add home https://ak.example.com --token -
+ak add --account home --kind claude --model main
+```
+
+Any other tool takes `https://ak.example.com` (Anthropic) or
+`https://ak.example.com/v1` (OpenAI) as its base URL and the token as its key.
 
 ## Failure behaviour
 
 | Case | Answer |
 | --- | --- |
 | upstream down or 5xx | the same member once more, then the next member of a pool; alone, 502 |
-| spent quota (402, 429, quota words) | the member cools off; a pool fails over; smart ranks it last; alone, the upstream's error |
+| spent quota (402, 429, quota words) | the member cools off; a pool fails over; smart ranks it last; alone, 502 with the upstream's reason |
 | unknown model | 404 naming it, in the client's protocol, pointing at `/v1/models` |
 | no token, unknown or revoked token | 401 |
 | a model outside the token's routes | 403 |
 | a request bifrost cannot convert | the next member; alone, 400 with the reason |
-| `count_tokens` with no Anthropic upstream | 404 saying so |
+| `count_tokens` with no Anthropic upstream | 400 saying so; nothing is sent upstream |
 | a translated stream that breaks | an error event in the client's protocol, then the end |
 
 Errors are written in the client's protocol, so the agent shows the
@@ -269,7 +296,8 @@ message rather than failing to parse it.
 
 ## Implementation plan
 
-Each step is one commit, with `gofmt`, `go vet` and `go test` green.
+Each step is one commit, with `gofmt`, `go vet` and `go test` green. All
+nine are done.
 
 1. This document.
 2. `internal/translate` over bifrost, tests for every pair, plain and
