@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/probe"
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/spf13/cobra"
@@ -39,17 +40,28 @@ on its root. The first that answers with a list wins.`,
 			}
 			ids, err := probe.Models(cmd.Context(), p, key)
 			if err != nil {
-				return fmt.Errorf("%s: %w", name, err)
+				return fmt.Errorf("%s: %s", name, out.Reason(err.Error()))
 			}
 			if asJSON {
 				return json.NewEncoder(os.Stdout).Encode(ids)
 			}
-			for _, id := range ids {
-				fmt.Println(id)
-			}
+			printModels(ids)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	return cmd
+}
+
+// printModels lists the ids the provider serves.
+func printModels(ids []string) {
+	if len(ids) == 0 {
+		out.Empty(os.Stdout, "The provider listed no models.", "")
+		return
+	}
+	rows := make([][]string, len(ids))
+	for i, id := range ids {
+		rows[i] = []string{id}
+	}
+	out.Table(os.Stdout, []string{"model"}, rows)
 }

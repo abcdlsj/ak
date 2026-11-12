@@ -6,11 +6,11 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/login"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/x/term"
@@ -55,12 +55,13 @@ sign-in when it has one, a device sign-in, or pasting a key.`,
 				return err
 			}
 			if users := cfg.UsersOf(name); len(users) > 0 {
-				fmt.Printf("providers on it: %s\n", strings.Join(users, ", "))
+				out.Hint(os.Stdout, "providers on it: %s", strings.Join(users, ", "))
 				return runSync(cfg, false)
 			}
-			fmt.Println("add a provider on it:")
+			fmt.Println()
+			out.Hint(os.Stdout, "add a provider on it, one per engine:")
 			for _, k := range v.Kinds() {
-				fmt.Printf("  ak add <name> --account %s --kind %s\n", name, k)
+				out.Hint(os.Stdout, "  `ak add <name> --account %s --kind %s`", name, k)
 			}
 			return nil
 		},
@@ -92,7 +93,7 @@ func signIn(cmd *cobra.Command, cfg *config.Config, v vendor.Vendor, name, metho
 	if err := core.SignIn(cfg, name, v.ID, c); err != nil {
 		return err
 	}
-	fmt.Printf("signed in to %s as account %s%s\n", v.Name, name, userSuffix(cfg.Accounts[name].User))
+	out.Done(os.Stdout, "signed in to %s as %s%s", v.Name, name, userSuffix(cfg.Accounts[name].User))
 	return nil
 }
 
@@ -132,14 +133,7 @@ func runLogin(ctx context.Context, v vendor.Vendor, l vendor.Login, key string) 
 	case vendor.LoginFile:
 		return login.File(l)
 	case vendor.LoginDevice:
-		return login.Device(ctx, *l.Device, func(p login.Prompt) {
-			fmt.Fprintf(os.Stderr, "Approve the sign-in at %s", p.URL)
-			if p.Code != "" {
-				fmt.Fprintf(os.Stderr, " (code %s)", p.Code)
-			}
-			fmt.Fprintln(os.Stderr, "; waiting…")
-			login.OpenBrowser(p.URL)
-		})
+		return login.Device(ctx, *l.Device, promptDevice)
 	}
 	if key == "" {
 		if v.APIKeyURL != "" {
@@ -151,6 +145,18 @@ func runLogin(ctx context.Context, v vendor.Vendor, l vendor.Login, key string) 
 		}
 	}
 	return login.Credentials{Key: key}, nil
+}
+
+// promptDevice asks the user to approve a device sign-in: the URL on its own
+// line and the code bold, so both are easy to copy.
+func promptDevice(p login.Prompt) {
+	fmt.Fprintln(os.Stderr, "Approve the sign-in at")
+	fmt.Fprintln(os.Stderr, p.URL)
+	if p.Code != "" {
+		fmt.Fprintln(os.Stderr, "code "+out.Bold(p.Code))
+	}
+	fmt.Fprintln(os.Stderr, out.Dim("waiting…"))
+	login.OpenBrowser(p.URL)
 }
 
 func newLogoutCmd() *cobra.Command {
@@ -181,16 +187,16 @@ func newAccountsCmd() *cobra.Command {
 				return err
 			}
 			if len(cfg.Accounts) == 0 {
-				fmt.Println("No accounts yet. Run `ak login <vendor>`; `ak vendor list` lists them.")
+				out.Empty(os.Stdout, "No accounts yet.", "Sign in with `ak login <vendor>`; `ak vendor list` lists the vendors.")
 				return nil
 			}
-			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "account\tvendor\tuser\tkey\tproviders")
+			rows := make([][]string, 0, len(cfg.Accounts))
 			for _, n := range cfg.AccountNames() {
 				a := cfg.Accounts[n]
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", n, a.Vendor, dash(a.User), accountKey(a), dash(strings.Join(cfg.UsersOf(n), ", ")))
+				rows = append(rows, []string{n, a.Vendor, out.Or(a.User), accountKey(a), out.Or(strings.Join(cfg.UsersOf(n), ", "))})
 			}
-			return w.Flush()
+			out.Table(os.Stdout, []string{"account", "vendor", "user", "key", "providers"}, rows)
+			return nil
 		},
 	}
 	cmd.AddCommand(&cobra.Command{
@@ -213,11 +219,11 @@ func newAccountsCmd() *cobra.Command {
 func accountKey(a config.Account) string {
 	switch {
 	case a.APIKeyRef != "":
-		return "ref " + a.APIKeyRef
+		return out.Mark(out.Fine) + " ref " + a.APIKeyRef
 	case a.APIKey != "":
-		return "set"
+		return out.Mark(out.Fine) + " set"
 	}
-	return "missing"
+	return out.Mark(out.Broken) + " missing"
 }
 
 // completeLogin completes a vendor, then an account of it.

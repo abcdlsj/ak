@@ -5,10 +5,10 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/spf13/cobra"
 )
@@ -35,23 +35,37 @@ func newVendorListCmd() *cobra.Command {
 				if _, ok := parseKind(kind); !ok {
 					return fmt.Errorf("unknown engine %q; must be %s", kind, kindList())
 				}
+				printVendorKinds(vendor.All(), kind)
+				return nil
 			}
-			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "id\tkind\tname\tendpoint\tmodel\tsign-in")
-			for _, v := range vendor.All() {
-				for _, k := range v.Kinds() {
-					if kind != "" && k != kind {
-						continue
-					}
-					e, _ := v.Endpoint(k)
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", v.ID, k, v.Name, e.BaseURL, dash(e.Model), loginMethods(v))
-				}
-			}
-			return w.Flush()
+			printVendors(vendor.All())
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&kind, "kind", "", "Only vendors serving this engine: claude, codex or pi")
 	return cmd
+}
+
+// printVendors lists every vendor, one row each, and the engines it serves.
+func printVendors(vs []vendor.Vendor) {
+	rows := make([][]string, len(vs))
+	for i, v := range vs {
+		rows[i] = []string{v.ID, v.Name, strings.Join(v.Kinds(), ", "), loginMethods(v)}
+	}
+	out.Table(os.Stdout, []string{"id", "name", "engines", "sign-in"}, rows)
+}
+
+// printVendorKinds lists the vendors serving kind, with what it runs on.
+func printVendorKinds(vs []vendor.Vendor, kind string) {
+	var rows [][]string
+	for _, v := range vs {
+		e, ok := v.Endpoint(kind)
+		if !ok {
+			continue
+		}
+		rows = append(rows, []string{v.ID, v.Name, out.Or(e.BaseURL), out.Or(e.Model), loginMethods(v)})
+	}
+	out.Table(os.Stdout, []string{"id", "name", "endpoint", "model", "sign-in"}, rows)
 }
 
 // loginMethods names a vendor's ways to sign in, pasting a key last.

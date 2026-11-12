@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"text/tabwriter"
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/usage"
 	"github.com/spf13/cobra"
 )
@@ -94,58 +94,98 @@ func usageFilter(days int, since string, args []string) (usage.Filter, error) {
 	return f, nil
 }
 
+// usageModelsShown is how many models the model table shows.
+const usageModelsShown = 10
+
+// printUsage prints a summary: the total, by provider, by model, and the span
+// of the history it covers.
 func printUsage(s usage.Summary, cfg *config.Config) {
-	fmt.Printf("total %s tokens", humanizeInt(s.TotalTokens))
-	if s.TotalCost > 0 {
-		fmt.Printf("  ·  about $%.2f", s.TotalCost)
-	}
-	if s.UnpricedTokens > 0 {
-		fmt.Printf("  (%s tokens have no pricing data and are excluded from cost)", humanizeInt(s.UnpricedTokens))
-	}
-	fmt.Println()
+	printUsageTotal(s)
 
 	// ak's own providers first; engine logins and ids from other tools
 	// (cc-switch, a base codex config) are listed apart.
-	var own, other []usage.ProviderRow
-	for _, r := range s.ByProvider {
+	own, other := splitUsage(s.ByProvider, cfg)
+	if len(own) > 0 {
+		printUsageHead("By provider", "")
+		printUsageProviders(own)
+	}
+	if len(other) > 0 {
+		printUsageHead("Outside ak", "engine logins and other tools, not run through ak")
+		printUsageProviders(other)
+	}
+	if len(s.ByModel) > 0 {
+		printUsageHead("By model", "")
+		printUsageModels(s.ByModel)
+	}
+	if len(s.ByDate) > 0 {
+		fmt.Println()
+		out.Hint(os.Stdout, "%d days on record, earliest %s, latest %s",
+			len(s.ByDate), s.ByDate[0].Date, s.ByDate[len(s.ByDate)-1].Date)
+	}
+}
+
+// printUsageTotal is the summary's first line, and what the cost leaves out.
+func printUsageTotal(s usage.Summary) {
+	line := humanizeInt(s.TotalTokens) + " tokens"
+	if s.TotalCost > 0 {
+		line += fmt.Sprintf(" · ≈ $%.2f", s.TotalCost)
+	}
+	fmt.Println(out.Bold(line))
+	if s.UnpricedTokens > 0 {
+		out.Hint(os.Stdout, "%s tokens have no pricing data and are excluded from cost", humanizeInt(s.UnpricedTokens))
+	}
+}
+
+// printUsageHead starts a section: its title, and a note under it when one is
+// wanted.
+func printUsageHead(title, note string) {
+	fmt.Println()
+	fmt.Println(out.Bold(title))
+	if note != "" {
+		out.Hint(os.Stdout, "%s", note)
+	}
+}
+
+// printUsageProviders is a table of providers by tokens.
+func printUsageProviders(rows []usage.ProviderRow) {
+	cells := make([][]string, len(rows))
+	for i, r := range rows {
+		cells[i] = []string{r.Name, humanizeInt(r.Tokens), costCell(r.Cost)}
+	}
+	out.Table(os.Stdout, []string{"provider", "tokens", "cost"}, cells)
+}
+
+// printUsageModels is the top models by tokens, and how many are left out.
+func printUsageModels(rows []usage.ModelRow) {
+	shown := rows[:min(len(rows), usageModelsShown)]
+	cells := make([][]string, len(shown))
+	for i, r := range shown {
+		cells[i] = []string{r.Model, humanizeInt(r.Tokens), costCell(r.Cost)}
+	}
+	out.Table(os.Stdout, []string{"model", "tokens", "cost"}, cells)
+	if rest := len(rows) - len(shown); rest > 0 {
+		out.Hint(os.Stdout, "… %d more", rest)
+	}
+}
+
+// splitUsage splits the provider rows into ak's own and the others'.
+func splitUsage(rows []usage.ProviderRow, cfg *config.Config) (own, other []usage.ProviderRow) {
+	for _, r := range rows {
 		if _, ok := cfg.Providers[r.Name]; ok {
 			own = append(own, r)
 		} else {
 			other = append(other, r)
 		}
 	}
-	printProviderRows("by provider", own)
-	printProviderRows("not in ak (engine logins, other tools)", other)
-
-	if len(s.ByModel) > 0 {
-		fmt.Println("by model")
-		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "  model\ttokens\tcost")
-		for _, r := range s.ByModel {
-			fmt.Fprintf(w, "  %s\t%s\t%s\n", r.Model, humanizeInt(r.Tokens), costStr(r.Cost))
-		}
-		w.Flush()
-		fmt.Println()
-	}
-
-	if len(s.ByDate) > 0 {
-		fmt.Printf("%d days on record, earliest %s, latest %s.\n",
-			len(s.ByDate), s.ByDate[0].Date, s.ByDate[len(s.ByDate)-1].Date)
-	}
+	return own, other
 }
 
-func printProviderRows(title string, rows []usage.ProviderRow) {
-	if len(rows) == 0 {
-		return
+// costCell is a table's cost: a dollar figure, or a dim dash.
+func costCell(c float64) string {
+	if c <= 0 {
+		return out.Or("")
 	}
-	fmt.Println(title)
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "  provider\ttokens\tcost")
-	for _, r := range rows {
-		fmt.Fprintf(w, "  %s\t%s\t%s\n", r.Name, humanizeInt(r.Tokens), costStr(r.Cost))
-	}
-	w.Flush()
-	fmt.Println()
+	return costStr(c)
 }
 
 func costStr(c float64) string {
