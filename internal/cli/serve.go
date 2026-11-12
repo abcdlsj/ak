@@ -17,10 +17,10 @@ import (
 )
 
 func newServeCmd() *cobra.Command {
-	var addr string
+	var addr, service string
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Run the local pool gateway",
+		Short: "Run the local pool gateway, and the service when one is set",
 		Long: `Run the loopback gateway that provider pools route through.
 
 Every pool points its engine at this gateway instead of an upstream, so
@@ -28,9 +28,15 @@ it must be running for a pool to work; launching a pool starts it in the
 background when it is not, logging to ~/.config/ak/gateway.log. Normal
 providers do not use it.
 
-The gateway reloads providers.toml when it changes (or on SIGHUP), so an edited
-or renamed pool takes effect without a restart. Changing settings.gateway_addr
-still needs a restart, since that is where it listens.`,
+With service.addr set (or --service), it also serves other machines: one
+base URL speaking Anthropic Messages, OpenAI Responses and Chat, the model
+name picking the account or route, a token per machine. It refuses an
+address other machines reach while no token is defined. See
+docs/service.md.
+
+It reloads providers.toml when it changes (or on SIGHUP), so an edited
+pool, route or token takes effect without a restart. The listen addresses
+still need one.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -42,15 +48,20 @@ still needs a restart, since that is where it listens.`,
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
+			if service == "" {
+				service = cfg.Service.Addr
+			}
 			srv := gateway.New(cfg)
 			hup := make(chan os.Signal, 1)
 			signal.Notify(hup, syscall.SIGHUP)
 			defer signal.Stop(hup)
 			go watchConfig(ctx, srv, hup)
-			return srv.Serve(ctx, addr, "")
+			return srv.Serve(ctx, addr, service)
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "", "listen address, host:port (default settings.gateway_addr)")
+	cmd.Flags().StringVar(&service, "service", "", "the service's listen address, host:port (default service.addr)")
+	cmd.AddCommand(newServeTokenCmd(), newServeAdminCmd())
 	return cmd
 }
 

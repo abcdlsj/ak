@@ -252,6 +252,8 @@ func mutate(cfg *config.Config, change func(*config.Config)) error {
 	next := *cfg
 	next.Providers = cloneMap(cfg.Providers)
 	next.Accounts = cloneMap(cfg.Accounts)
+	next.Service.Routes = cloneMap(cfg.Service.Routes)
+	next.Service.Tokens = cloneMap(cfg.Service.Tokens)
 	change(&next)
 	next.Resolve()
 	if err := config.Validate(&next); err != nil {
@@ -262,6 +264,12 @@ func mutate(cfg *config.Config, change func(*config.Config)) error {
 	}
 	*cfg = next
 	return nil
+}
+
+// ChangeService applies a change to the [service] section, validated and
+// saved like any other.
+func ChangeService(cfg *config.Config, change func(*config.Service)) error {
+	return mutate(cfg, func(c *config.Config) { change(&c.Service) })
 }
 
 // cloneMap copies m into a map that is never nil, so a change can add to it.
