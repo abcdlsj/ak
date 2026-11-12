@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/spf13/cobra"
 )
 
@@ -37,12 +38,11 @@ from $SHELL unless --shell names one: for fish a file in
 				return err
 			}
 			if !changed {
-				fmt.Printf("%s already set up in %s\n", sh, displayPlace(path))
+				out.Hint(os.Stdout, "%s already set up in %s", sh, displayPlace(path))
 			} else {
-				fmt.Printf("set up %s in %s\n", sh, displayPlace(path))
+				out.Done(os.Stdout, "set up %s in %s", sh, displayPlace(path))
 			}
-			fmt.Println("Open a new shell (or `exec " + sh + "`), then `ak bind <provider>` in a repository")
-			fmt.Println("or `ak default claude <provider>`; `ak which` shows the result.")
+			out.Hint(os.Stdout, "Open a new shell (or `exec %s`), then `ak bind <provider>` in a repository or `ak default claude <provider>`; `ak which` shows the result.", sh)
 			return nil
 		},
 	}
@@ -73,13 +73,13 @@ func newUninstallCmd() *cobra.Command {
 				}
 				if ok {
 					removed = true
-					fmt.Printf("removed the %s setup from %s\n", sh, displayPlace(path))
+					out.Done(os.Stdout, "removed the %s setup from %s", sh, displayPlace(path))
 				}
 			}
 			if !removed {
-				fmt.Println("nothing to remove")
+				out.Hint(os.Stdout, "nothing to remove")
 			} else {
-				fmt.Println("Open a new shell for claude/codex/pi to be the engines' own again.")
+				out.Hint(os.Stdout, "Open a new shell for claude/codex/pi to be the engines' own again.")
 			}
 			return nil
 		},

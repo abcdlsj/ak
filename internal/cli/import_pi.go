@@ -9,6 +9,7 @@ import (
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/provider"
 )
 
@@ -58,7 +59,7 @@ func importPi(cfg *config.Config) error {
 		return fmt.Errorf("parse %s: %w", path, err)
 	}
 	if len(file.Providers) == 0 {
-		fmt.Printf("%s declares no providers.\n", path)
+		out.Empty(os.Stdout, path+" declares no providers.", "")
 		return nil
 	}
 
@@ -70,25 +71,25 @@ func importPi(cfg *config.Config) error {
 		}
 		p, ok := piProviderFrom(id, src)
 		if !ok {
-			fmt.Printf("  skip  %s: no base URL, model or existing pi provider\n", id)
+			skipLine(id, "no base URL, model or existing pi provider")
 			continue
 		}
 		base := slugify(id)
 		name := uniqueProviderName(cfg, used, base, id)
 		used[name] = true
 		if err := config.ValidateName(name); err != nil {
-			fmt.Printf("  skip  %s: %v\n", id, err)
+			skipLine(id, err.Error())
 			continue
 		}
 		if err := core.Add(cfg, name, p); err != nil {
-			fmt.Printf("  skip  %s: %v\n", id, err)
+			skipLine(id, err.Error())
 			continue
 		}
-		fmt.Printf("  added %s (pi provider %s)\n", name, id)
+		out.Done(os.Stdout, "added %s (pi provider %s)", name, id)
 		added++
 	}
 	if added == 0 {
-		fmt.Println("Nothing to import.")
+		out.Empty(os.Stdout, "Nothing to import.", "")
 		return nil
 	}
 	return runSync(cfg, false)

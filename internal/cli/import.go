@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/spf13/cobra"
 )
 
@@ -115,22 +116,19 @@ func importClaudeSettings(cfg *config.Config) error {
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
+	out.Done(os.Stdout, "imported as provider %q", name)
 	if err := runSync(cfg, false); err != nil {
 		return err
 	}
 
-	fmt.Printf("\nimported as provider %q.\n\n", name)
-	fmt.Println("Now remove these keys from settings.json by hand, otherwise they")
-	fmt.Println("override the environment the ak-* commands inject:")
+	out.Hint(os.Stdout, "Remove these keys from %s by hand, otherwise they override the environment the ak-* commands inject:", shortPath(path))
 	for _, k := range providerEnvKeys {
 		if _, ok := env[k]; ok {
-			fmt.Printf("    %s\n", k)
+			fmt.Printf("  %s\n", k)
 		}
 	}
-	fmt.Printf("\n  file: %s\n", path)
-	fmt.Println("  Keep the global preference keys there (NODE_EXTRA_CA_CERTS,")
-	fmt.Println("  CLAUDE_AUTOCOMPACT_PCT_OVERRIDE and friends).")
-	fmt.Printf("\nThen verify with `ak-%s -p 'reply OK'`.\n", name)
+	out.Hint(os.Stdout, "Keep the global preference keys there (NODE_EXTRA_CA_CERTS, CLAUDE_AUTOCOMPACT_PCT_OVERRIDE and friends).")
+	out.Hint(os.Stdout, "Then verify with `ak-%s -p 'reply OK'`.", name)
 	return nil
 }
 
@@ -198,17 +196,17 @@ func importCodexa(cfg *config.Config) error {
 		cfgPath := filepath.Join(root, profile, "config.toml")
 		raw, err := os.ReadFile(cfgPath)
 		if err != nil || len(raw) == 0 {
-			fmt.Printf("  skip %s: no config.toml or it is empty\n", profile)
+			skipLine(profile, "no config.toml or it is empty")
 			continue
 		}
 
 		prof, err := parseCodexaProfile(raw)
 		if err != nil {
-			fmt.Printf("  skip %s: %v\n", profile, err)
+			skipLine(profile, err.Error())
 			continue
 		}
 		if prof.BaseURL == "" {
-			fmt.Printf("  skip %s: no base_url found\n", profile)
+			skipLine(profile, "no base_url found")
 			continue
 		}
 
@@ -216,7 +214,7 @@ func importCodexa(cfg *config.Config) error {
 		// same provider, and the first (shortest) name wins.
 		key := prof.BaseURL + "\x00" + prof.Model + "\x00" + prof.WireAPI
 		if prev, ok := seen[key]; ok {
-			fmt.Printf("  %s has the same config as %s, merged\n", profile, prev)
+			fmt.Printf("%s %s has the same config as %s, merged\n", out.Mark(out.Unknown), profile, prev)
 			continue
 		}
 
@@ -232,7 +230,7 @@ func importCodexa(cfg *config.Config) error {
 			Display:    profile,
 		}
 		if p.APIKey == "" {
-			fmt.Printf("  note: no key read for %s, fill it in later with `ak edit %s`\n", profile, name)
+			out.Hint(os.Stdout, "no key read for %s; fill it in with `ak edit %s`", profile, name)
 		}
 		got = append(got, imported{name: name, p: p})
 		seen[key] = name
@@ -254,12 +252,17 @@ func importCodexa(cfg *config.Config) error {
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
+	out.Done(os.Stdout, "imported %d provider(s)", len(got))
 	if err := runSync(cfg, false); err != nil {
 		return err
 	}
-
-	fmt.Printf("\nimported %d provider(s). ~/.codex/profiles/ is untouched.\n", len(got))
+	out.Hint(os.Stdout, "~/.codex/profiles/ is untouched")
 	return nil
+}
+
+// skipLine names one source entry that was left out, and why.
+func skipLine(name, reason string) {
+	fmt.Printf("%s %s  %s\n", out.Mark(out.Notice), name, out.Reason(reason))
 }
 
 // codexaProfile holds the settings extracted from a codexa profile.

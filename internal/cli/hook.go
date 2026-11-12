@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/usage"
 	"github.com/spf13/cobra"
 )
@@ -43,7 +44,7 @@ func newHookInstallCmd() *cobra.Command {
 					return err
 				}
 			}
-			fmt.Println("claude usage is now attributed to providers; earlier records stay unknown")
+			out.Hint(os.Stdout, "claude usage is now attributed to providers; earlier records stay unknown")
 			return nil
 		},
 	}
@@ -130,14 +131,14 @@ func installHook(path string) error {
 	}
 	settings["hooks"] = hooksRaw
 
-	out, err := json.MarshalIndent(settings, "", "  ")
+	body, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := config.AtomicWrite(path, out, 0o600); err != nil {
+	if err := config.AtomicWrite(path, body, 0o600); err != nil {
 		return err
 	}
-	fmt.Printf("installed SessionStart hook in %s\n", path)
+	out.Done(os.Stdout, "installed SessionStart hook in %s", shortPath(path))
 	return nil
 }
 
@@ -155,7 +156,7 @@ func uninstallHook(path string) error {
 	}
 	raw, ok := settings["hooks"]
 	if !ok || !strings.Contains(string(raw), hookMarker) {
-		fmt.Printf("no ak-managed hook in %s\n", path)
+		out.Hint(os.Stdout, "no ak-managed hook in %s", shortPath(path))
 		return nil
 	}
 
@@ -171,11 +172,15 @@ func uninstallHook(path string) error {
 		settings["hooks"] = hooksRaw
 	}
 
-	out, err := json.MarshalIndent(settings, "", "  ")
+	body, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
-	return config.AtomicWrite(path, out, 0o600)
+	if err := config.AtomicWrite(path, body, 0o600); err != nil {
+		return err
+	}
+	out.Done(os.Stdout, "removed the SessionStart hook from %s", shortPath(path))
+	return nil
 }
 
 // removeMarked drops every hook entry carrying the ak marker.

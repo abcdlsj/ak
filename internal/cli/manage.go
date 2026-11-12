@@ -13,6 +13,7 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/launch"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/ui"
@@ -304,6 +305,7 @@ func newAddCmd() *cobra.Command {
 			if err := core.Add(cfg, name, p); err != nil {
 				return err
 			}
+			out.Done(os.Stdout, "added %s (%s)", name, commandOf(cfg, name))
 			return runSync(cfg, false)
 		},
 	}
@@ -375,6 +377,11 @@ func newEditCmd() *cobra.Command {
 			if err := core.Edit(cfg, name, newName, p); err != nil {
 				return err
 			}
+			if newName != name {
+				out.Done(os.Stdout, "renamed %s to %s (%s)", name, newName, commandOf(cfg, newName))
+			} else {
+				out.Done(os.Stdout, "changed %s", name)
+			}
 			return runSync(cfg, false)
 		},
 	}
@@ -435,6 +442,7 @@ func newRemoveCmd() *cobra.Command {
 			if err := core.Remove(cfg, args[0]); err != nil {
 				return err
 			}
+			out.Done(os.Stdout, "removed %s", args[0])
 			return runSync(cfg, false)
 		},
 	}
@@ -457,6 +465,7 @@ removed; the default and usage history follow the new name.`,
 			if err := core.Rename(cfg, args[0], args[1]); err != nil {
 				return err
 			}
+			out.Done(os.Stdout, "renamed %s to %s (%s)", args[0], args[1], commandOf(cfg, args[1]))
 			return runSync(cfg, false)
 		},
 	}
@@ -506,7 +515,7 @@ native puts the engine's own command back.`,
 					if err := core.SetEngineDefault(cfg, k, args[1]); err != nil {
 						return err
 					}
-					fmt.Printf("%s now runs %s where nothing is bound\n", k, describeTarget(args[1]))
+					out.Done(os.Stdout, "%s now runs %s where nothing is bound", k, describeTarget(args[1]))
 					return nil
 				}
 			}
@@ -516,10 +525,15 @@ native puts the engine's own command back.`,
 			if err := core.SetDefault(cfg, args[0]); err != nil {
 				return err
 			}
-			fmt.Printf("default provider set to %s\n", args[0])
+			out.Done(os.Stdout, "default provider set to %s", args[0])
 			return nil
 		},
 	}
+}
+
+// commandOf is the command a provider's name generates.
+func commandOf(cfg *config.Config, name string) string {
+	return cfg.Settings.Prefix + name
 }
 
 // newEnvCmd prints the environment a provider would inject, for debugging.
@@ -573,7 +587,7 @@ func newEnvCmd() *cobra.Command {
 }
 
 func printEnvPlan(plan envPlanView, cmd string) {
-	fmt.Printf("# %s would inject:\n", cmd)
+	out.Hint(os.Stdout, "%s would inject:", cmd)
 	for _, line := range plan {
 		fmt.Printf("  %s\n", line)
 	}

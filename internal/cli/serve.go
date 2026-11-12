@@ -12,6 +12,7 @@ import (
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/gateway"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/spf13/cobra"
 )
 
@@ -95,7 +96,7 @@ func ensureGateway(addr string) error {
 	deadline := time.After(5 * time.Second)
 	for {
 		if gatewayUp(addr) {
-			fmt.Fprintf(os.Stderr, "ak: started the pool gateway on %s (log: %s)\n", addr, logPath)
+			out.Done(os.Stderr, "started the pool gateway on %s (log: %s)", addr, shortPath(logPath))
 			return nil
 		}
 		select {
