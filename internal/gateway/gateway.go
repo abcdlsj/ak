@@ -132,7 +132,7 @@ func New(cfg *config.Config) *Server {
 	t := tr.Clone()
 	s := &Server{
 		res:    secrets.Cached(secrets.Default()),
-		client: &http.Client{Transport: t},
+		client: &http.Client{Transport: t, CheckRedirect: sameHost},
 		st:     newState(),
 		lanes:  newLanes(),
 
@@ -968,6 +968,22 @@ func copyIdle(w http.ResponseWriter, r io.ReadCloser) error {
 			return err
 		}
 	}
+}
+
+// sameHost follows a redirect only while it stays on the host the request was
+// given to: Go drops Authorization and Cookie across hosts but not x-api-key,
+// and the key we put there is the vendor's, so a redirect must not carry it.
+func sameHost(req *http.Request, via []*http.Request) error {
+	if len(via) == 0 {
+		return nil
+	}
+	if !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+		return fmt.Errorf("ak: refusing a redirect from %s to %s", via[0].URL.Host, req.URL.Host)
+	}
+	if len(via) >= 10 {
+		return fmt.Errorf("ak: refusing to follow more than 10 redirects")
+	}
+	return nil
 }
 
 // setAuth writes the member's key the way its engine expects and drops any

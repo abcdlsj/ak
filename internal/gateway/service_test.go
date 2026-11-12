@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,6 +181,20 @@ func withModel(t *testing.T, name, model string, stream bool) []byte {
 	}
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// A redirect must not carry the vendor's key to another host, and Go does not
+// treat x-api-key as sensitive the way it treats Authorization.
+func TestSameHostRefusesAnotherHost(t *testing.T) {
+	via := []*http.Request{{URL: &url.URL{Scheme: "https", Host: "api.example.com", Path: "/v1/messages"}}}
+	same := &http.Request{URL: &url.URL{Scheme: "https", Host: "api.example.com", Path: "/v1/messages"}}
+	if err := sameHost(same, via); err != nil {
+		t.Errorf("a redirect on the same host: %v", err)
+	}
+	elsewhere := &http.Request{URL: &url.URL{Scheme: "https", Host: "elsewhere.example.com", Path: "/v1/messages"}}
+	if err := sameHost(elsewhere, via); err == nil {
+		t.Error("a redirect to another host was followed")
+	}
 }
 
 func TestServiceNative(t *testing.T) {

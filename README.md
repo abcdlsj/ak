@@ -24,7 +24,9 @@ pane keeps talking to what it started with.
 ## Get started
 
 Needs Go 1.27.3+ and the engines you use (`claude`, `codex`, `pi`) on PATH.
-Prebuilt binaries are on the [releases](https://github.com/abcdlsj/ak/releases) page.
+Prebuilt binaries are on the [releases](https://github.com/abcdlsj/ak/releases) page,
+and the service is on the registry as `ghcr.io/abcdlsj/ak` (see
+[service.md](docs/service.md#deploying)).
 
 ```
 go install github.com/abcdlsj/ak@latest

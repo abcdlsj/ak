@@ -48,6 +48,9 @@ type Backend interface {
 	Forget(account string)
 }
 
+// maxFormBytes is the largest form the UI reads: a key, a few routes.
+const maxFormBytes = 1 << 20
+
 // UI serves the pages.
 type UI struct {
 	b        Backend
@@ -90,6 +93,14 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost && !sameOrigin(r) {
 		http.Error(w, "ak: cross-origin request refused", http.StatusForbidden)
 		return
+	}
+	// A form is small; refuse a body that is not, before it is read.
+	if r.Method == http.MethodPost {
+		if r.ContentLength > maxFormBytes {
+			http.Error(w, "ak: form too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/ui")
 	if strings.HasPrefix(path, "/static/") {

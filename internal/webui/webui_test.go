@@ -214,6 +214,17 @@ func TestIcon(t *testing.T) {
 	}
 }
 
+// A form larger than a key could be is refused before it is read.
+func TestFormBodyLimit(t *testing.T) {
+	s := newSite(t, true)
+	s.login(password)
+	big := strings.Repeat("x", maxFormBytes+10)
+	rec := s.do("POST", "/ui/accounts/key", url.Values{"csrf": {s.csrf("/ui/accounts")}, "vendor": {"command-code"}, "key": {big}})
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("a huge form: %d", rec.Code)
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	s := newSite(t, true)
 	for range maxFailures {

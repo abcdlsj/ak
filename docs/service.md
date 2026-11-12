@@ -241,7 +241,24 @@ The server reads each account's quota at most once a minute, whoever asks.
 
 ## Deploying
 
-One binary, its state in `AK_CONFIG_DIR`: `providers.toml`, `auth.json`,
+A container image is built by `.github/workflows/image.yml` and pushed to
+`ghcr.io/abcdlsj/ak`: on a tag as that release, on `main` as `main` and the
+commit, and built but not pushed on a pull request. It builds for `amd64`
+and `arm64`, runs as an unprivileged user (65532) with `AK_CONFIG_DIR=/data`
+as its volume, and listens on `0.0.0.0:8787` — which is why it needs a token
+before it starts:
+
+```sh
+docker run -d --name ak -v ak:/data -p 127.0.0.1:8787:8787 ghcr.io/abcdlsj/ak
+docker run --rm -it -v ak:/data ghcr.io/abcdlsj/ak serve token add laptop
+docker run --rm -it -v ak:/data ghcr.io/abcdlsj/ak serve admin set-password
+```
+
+`deploy/Dockerfile` builds it from a checkout; `--build-arg GOPROXY=…`
+points at a module mirror and `--build-arg VERSION=v1.2.3` is what the
+pages' footer then says.
+
+One binary without a container, its state in `AK_CONFIG_DIR`: `providers.toml`, `auth.json`,
 `service-usage.json` (366 days of usage by day, token, route and account) and
 the affinity tables. `deploy/` holds a systemd unit (`ak.service`), a
 `Dockerfile`, a `Caddyfile` and an `nginx.conf`. TLS is the reverse proxy's
@@ -291,6 +308,10 @@ message rather than failing to parse it.
   and each member's key set as its engine expects, as in the pool gateway.
   Keys and tokens are never logged or written in a reply.
 - Tokens are stored as SHA-256, the admin password as bcrypt.
+- A vendor's redirect is followed only while it stays on the vendor's host:
+  Go drops `Authorization` and `Cookie` across hosts but not `x-api-key`,
+  which is where an injected key lives.
+- A form the UI reads is bounded at 1 MB; a request body at 128 MB.
 - Cookies and the client's `Authorization` and `x-api-key` never go
   upstream.
 - Bodies are bounded (128 MB), as are streams that stall; in-flight
