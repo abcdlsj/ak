@@ -47,7 +47,7 @@ still needs a restart, since that is where it listens.`,
 			signal.Notify(hup, syscall.SIGHUP)
 			defer signal.Stop(hup)
 			go watchConfig(ctx, srv, hup)
-			return srv.Serve(ctx, addr)
+			return srv.Serve(ctx, addr, "")
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "", "listen address, host:port (default settings.gateway_addr)")

@@ -114,6 +114,16 @@ type Server struct {
 	// a fresh reading, as after a reload.
 	queryQuota func(ctx context.Context, name string, p config.Provider, key string) quota.Quota
 	quotaKick  chan struct{}
+
+	// The service's routes as pools (see routing), its own health and
+	// affinity state, its usage and its accounts' last quota readings.
+	svc             atomic.Pointer[config.Config]
+	sst             *state
+	svcAffinityPath string
+	meter           *meter
+	readings        readings
+	// UI, when set, is served by the service under /ui/.
+	UI http.Handler
 }
 
 // New builds a server over a config.
@@ -128,11 +138,17 @@ func New(cfg *config.Config) *Server {
 
 		queryQuota: quota.Query,
 		quotaKick:  make(chan struct{}, 1),
+		sst:        newState(),
+		readings:   readings{m: map[string]reading{}},
 	}
 	s.cfg.Store(cfg)
-	if dir, err := config.DataDir(); err == nil {
+	s.svc.Store(routing(cfg))
+	dir, err := config.DataDir()
+	if err == nil {
 		s.affinityPath = filepath.Join(dir, "affinity.json")
+		s.svcAffinityPath = filepath.Join(dir, "service-affinity.json")
 	}
+	s.meter = newMeter(dir)
 	return s
 }
 
@@ -143,6 +159,7 @@ func (s *Server) config() *config.Config { return s.cfg.Load() }
 // without a restart.
 func (s *Server) Reload(cfg *config.Config) {
 	s.cfg.Store(cfg)
+	s.svc.Store(routing(cfg))
 	s.logf("gateway reloaded %d provider(s)", len(cfg.Providers))
 	select {
 	case s.quotaKick <- struct{}{}:
@@ -202,42 +219,75 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "at": now, "pools": pools})
 }
 
-// Serve listens on addr and serves until ctx is cancelled.
-func (s *Server) Serve(ctx context.Context, addr string) error {
-	// Keep the conversation table on disk, so a restart does not lose the
+// Serve listens on addr for local pools and, when service is not empty,
+// on service for other machines, until ctx is cancelled. The service is
+// refused on an address other machines reach while no token is defined.
+func (s *Server) Serve(ctx context.Context, addr, service string) error {
+	if service != "" {
+		if err := CheckExposure(service, s.config()); err != nil {
+			return err
+		}
+	}
+	// Keep the conversation tables on disk, so a restart does not lose the
 	// vendor's prompt cache for every session. Loaded before listening, so an
 	// early request's entry is not overwritten by the older file.
 	s.st.loadSticks(s.affinityPath)
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-	srv := &http.Server{
-		Handler:           s.Handler(),
-		ReadHeaderTimeout: 30 * time.Second,
-		IdleTimeout:       2 * time.Minute,
-	}
-	errCh := make(chan error, 1)
-	go func() {
-		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
+	s.sst.loadSticks(s.svcAffinityPath)
+	s.meter.load()
+	errCh := make(chan error, 2)
+	var servers []*http.Server
+	for _, l := range []struct {
+		addr, what string
+		h          http.Handler
+	}{{addr, "gateway", s.Handler()}, {service, "service", s.ServiceHandler()}} {
+		if l.addr == "" {
+			continue
 		}
-	}()
+		ln, err := net.Listen("tcp", l.addr)
+		if err != nil {
+			for _, srv := range servers {
+				srv.Close()
+			}
+			return err
+		}
+		srv := &http.Server{
+			Handler:           l.h,
+			ReadHeaderTimeout: 30 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+		}
+		servers = append(servers, srv)
+		go func() {
+			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- err
+			}
+		}()
+		s.logf("%s listening on http://%s", l.what, ln.Addr())
+	}
 	stopFlush := make(chan struct{})
 	go s.flushSticks(ctx, stopFlush)
 	go s.refreshQuota(ctx)
 
-	s.logf("gateway listening on http://%s", ln.Addr())
+	save := func() {
+		s.st.saveSticks(s.affinityPath)
+		s.sst.saveSticks(s.svcAffinityPath)
+		s.meter.save()
+		close(stopFlush)
+	}
 	select {
 	case <-ctx.Done():
-		s.st.saveSticks(s.affinityPath)
-		close(stopFlush)
+		save()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return srv.Shutdown(shutCtx)
+		var err error
+		for _, srv := range servers {
+			err = errors.Join(err, srv.Shutdown(shutCtx))
+		}
+		return err
 	case err := <-errCh:
-		s.st.saveSticks(s.affinityPath)
-		close(stopFlush)
+		save()
+		for _, srv := range servers {
+			srv.Close()
+		}
 		return err
 	}
 }
@@ -250,6 +300,8 @@ func (s *Server) flushSticks(ctx context.Context, stop <-chan struct{}) {
 		select {
 		case <-t.C:
 			s.st.saveSticks(s.affinityPath)
+			s.sst.saveSticks(s.svcAffinityPath)
+			s.meter.save()
 		case <-ctx.Done():
 			return
 		case <-stop:
@@ -304,38 +356,100 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ak: pool "+name+" has no members", http.StatusServiceUnavailable)
 		return
 	}
+	build := func(rt route) (leg, error) {
+		mp := cfg.Providers[rt.member]
+		target := strings.TrimRight(mp.BaseURL, "/") + "/" + tail
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		out := body
+		if rt.model != "" {
+			out = rewriteModel(body, rt.model)
+		}
+		return leg{member: rt.member, p: mp, target: target, body: out}, nil
+	}
+	s.relay(w, r, s.st, name, routes, conv, build, func(status int, msg string) {
+		http.Error(w, "ak: pool "+name+msg, status)
+	})
+}
 
+// leg is one way to answer a request: the concrete provider whose key it
+// carries and whose lane it waits in, where it goes and what it sends.
+type leg struct {
+	member string
+	p      config.Provider
+	target string
+	body   []byte
+	// reply, when set, stands between the upstream's reply and the client,
+	// as a translation does; finish is called once the reply is written.
+	reply func(http.ResponseWriter) replyWriter
+	// header, when set, adjusts what goes upstream once the key is in.
+	header func(http.Header)
+}
+
+// replyWriter is a ResponseWriter that may hold back what it was given
+// until finish.
+type replyWriter interface {
+	http.ResponseWriter
+	http.Flusher
+	finish()
+}
+
+// relay sends a request down routes in order until one answers, keeping
+// health, use and affinity in st under name, the pool or route asked for.
+// build makes each route's leg; a route it cannot build is passed over.
+// When none answers, fail is told the status and the reason, which starts
+// with ": " or " ". It returns the member that answered, or "".
+func (s *Server) relay(w http.ResponseWriter, r *http.Request, st *state, name string, routes []route,
+	conv string, build func(route) (leg, error), fail func(status int, msg string)) string {
 	var lastErr string
 	var tried []string
+	unbuilt := 0
 	for i, rt := range routes {
-		m := rt.member
-		mp := cfg.Providers[m]
+		lg, err := build(rt)
+		if err != nil {
+			unbuilt++
+			lastErr = err.Error()
+			tried = append(tried, rt.member+": "+lastErr)
+			s.logf("%s: member %s cannot serve the request (%s); trying next", name, rt.member, lastErr)
+			continue
+		}
+		m := lg.member
 		// A member with a concurrency bound queues its turn; waiting is not
 		// failing and never moves the request to another member.
-		release, ok := s.lanes.acquire(r.Context(), m, mp.MaxConcurrency)
+		release, ok := s.lanes.acquire(r.Context(), m, lg.p.MaxConcurrency)
 		if !ok {
-			return // the client went away while waiting
+			return "" // the client went away while waiting
 		}
 		var res forwardOutcome
 		for attempt := 0; ; attempt++ {
-			res = s.forward(w, r, name, m, tail, rt.model, mp, body)
+			out, rw := w, replyWriter(nil)
+			if lg.reply != nil {
+				rw = lg.reply(w)
+				out = rw
+			}
+			res = s.forward(out, r, lg)
 			if res.handled {
+				if rw != nil {
+					rw.finish()
+				}
 				release()
 				switch {
 				case res.ok:
-					s.st.succeeded(name, m, conv)
+					st.succeeded(name, m, conv)
+					return m
 				case res.err != nil && !clientGone(r, res.err):
 					// A reply that broke after it began: it cannot be retried, but
 					// the member that cut it is set aside for the next request.
-					s.st.failed(name, m, 0)
+					st.failed(name, m, 0)
 				}
-				return
+				return m
 			}
 			if clientGone(r, res.err) {
 				// The agent hung up or was interrupted: not the member's fault,
 				// and nobody is left to answer.
 				release()
-				return
+				return ""
 			}
 			if !res.retryable {
 				break
@@ -345,13 +459,13 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 			if attempt < sameMemberRetries && retrySame(res) {
 				wait := retryBackoff(attempt, res.retryAfter)
 				if wait <= maxRetryWait {
-					s.logf("pool %s: member %s failed (%s); retrying in %s", name, m, res.err, wait)
+					s.logf("%s: member %s failed (%s); retrying in %s", name, m, res.err, wait)
 					select {
 					case <-time.After(wait):
 						continue
 					case <-r.Context().Done():
 						release()
-						return
+						return ""
 					}
 				}
 			}
@@ -365,21 +479,27 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 			// Nothing was written and no other member can help (a request
 			// that already took the member past its wait): tell the caller
 			// instead of an empty 200.
-			http.Error(w, "ak: pool "+name+": "+res.err.Error(), http.StatusGatewayTimeout)
-			return
+			fail(http.StatusGatewayTimeout, ": "+res.err.Error())
+			return ""
 		}
 		lastErr = res.err.Error()
 		if len(tried) < 8 {
 			tried = append(tried, m+": "+lastErr)
 		}
-		s.st.failed(name, m, res.retryAfter)
-		s.logf("pool %s: member %s failed (%s); trying next", name, m, lastErr)
+		st.failed(name, m, res.retryAfter)
+		s.logf("%s: member %s failed (%s); trying next", name, m, lastErr)
 		if i == len(routes)-1 {
 			break
 		}
 	}
-	// Every member failed before any bytes were written.
-	http.Error(w, "ak: pool "+name+" exhausted its members: "+lastErr+"\n  "+strings.Join(tried, "\n  "), http.StatusBadGateway)
+	// Every member failed before any bytes were written. When none could even
+	// be asked, the request itself is what no member can take.
+	status := http.StatusBadGateway
+	if unbuilt == len(routes) {
+		status = http.StatusBadRequest
+	}
+	fail(status, " exhausted its members: "+lastErr+"\n  "+strings.Join(tried, "\n  "))
+	return ""
 }
 
 // readBody reads and bounds the request body. It writes the error itself and
@@ -420,17 +540,9 @@ type forwardOutcome struct {
 	err error
 }
 
-// forward sends the request to one member.
-func (s *Server) forward(w http.ResponseWriter, r *http.Request, pool, member, tail, model string, mp config.Provider, body []byte) forwardOutcome {
-	target := strings.TrimRight(mp.BaseURL, "/") + "/" + tail
-	if r.URL.RawQuery != "" {
-		target += "?" + r.URL.RawQuery
-	}
-
-	out := body
-	if model != "" {
-		out = rewriteModel(body, model)
-	}
+// forward sends one leg of a request.
+func (s *Server) forward(w http.ResponseWriter, r *http.Request, lg leg) forwardOutcome {
+	member, mp, target, out := lg.member, lg.p, lg.target, lg.body
 
 	// Each member has its own key: one that cannot be resolved sets that
 	// member aside, and the next may still answer.
@@ -442,7 +554,7 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, pool, member, t
 	// The wait for headers is per request: a stream gets a short one, a plain
 	// request a long one. Cancelling ctx also ends the body, so it is held
 	// until forward returns.
-	stream := isStreamRequest(body)
+	stream := isStreamRequest(out)
 	wait := plainHeaderWait
 	if stream {
 		wait = streamHeaderWait
@@ -461,6 +573,9 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, pool, member, t
 	// reply: a gzipped event stream or error body could not be inspected.
 	req.Header.Del("Accept-Encoding")
 	setAuth(req.Header, mp, key)
+	if lg.header != nil {
+		lg.header(req.Header)
+	}
 
 	resp, err := s.client.Do(req)
 	headerTimer.Stop()

@@ -107,9 +107,15 @@ func (s *Server) refreshQuota(ctx context.Context) {
 	}
 }
 
-// readQuota asks each smart member's source once per account and records it.
+// readQuota reads the smart members of the local pools and of the service's.
 func (s *Server) readQuota(ctx context.Context) {
-	cfg := s.config()
+	s.readQuotaOf(ctx, s.config(), s.st)
+	s.readQuotaOf(ctx, s.svc.Load(), s.sst)
+}
+
+// readQuotaOf asks each smart member's source once per account and records
+// it in st.
+func (s *Server) readQuotaOf(ctx context.Context, cfg *config.Config, st *state) {
 	leaves := smartLeaves(cfg)
 	if len(leaves) == 0 {
 		return
@@ -143,11 +149,11 @@ func (s *Server) readQuota(ctx context.Context) {
 		go func(a *ask) {
 			defer wg.Done()
 			al := allowanceOf(s.queryQuota(ctx, a.name, a.p, a.key))
-			s.st.mu.Lock()
+			st.mu.Lock()
 			for _, m := range a.members {
-				s.st.quota[m] = al
+				st.quota[m] = al
 			}
-			s.st.mu.Unlock()
+			st.mu.Unlock()
 		}(a)
 	}
 	wg.Wait()
