@@ -88,6 +88,10 @@ header.top nav a:hover { color: var(--text-bright); background: var(--background
 header.top nav a.on { color: var(--text-bright); font-weight: 600; background: var(--background) }
 form.logout { margin: 0 }
 
+/* The title, what the page is, and the page's own control on the right. */
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1.5rem }
+.page-head .tabs { margin-top: .35rem }
+
 /* A section heading with a rule to the right, as the TUI draws it. */
 h1 { font-size: 1.5rem; font-weight: 650; margin: 0 0 .2rem }
 h2 {
@@ -142,40 +146,41 @@ h3 { font-size: .95rem; margin: 0 0 .8rem }
 .meter.high .ticks::after { background: repeating-linear-gradient(90deg, var(--warn) 0 2px, transparent 2px 5px) }
 .meter.spent .ticks::after { background: repeating-linear-gradient(90deg, var(--bad) 0 2px, transparent 2px 5px) }
 
-/* A form is behind a +, so the page shows its information first. */
+/* A form is behind a +, so the page shows its information first. The + is a
+   pill, the same shape as the chips in the tables it sits under. */
 details.add {
   display: block;
-  margin: 2.5rem 0 0;
-  padding: 1.2rem 0 0;
-  border-top: 1px solid var(--border);
+  margin: 1.5rem 0 0;
+  padding: 0;
   border-radius: 0;
   background: none;
 }
 details.add > summary {
   display: inline-flex;
-  margin: 0;
-  padding: 0;
-  background: none;
   align-items: center;
-  gap: .55rem;
-  cursor: pointer;
+  gap: .45rem;
   list-style: none;
-  color: var(--links);
+  margin: 0;
+  padding: .38rem .9rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--background-alt);
+  color: var(--text-main);
+  font-size: .85rem;
   font-weight: 600;
-  font-size: .92rem;
+  cursor: pointer;
   user-select: none;
 }
 details.add > summary::-webkit-details-marker { display: none }
 details.add > summary::before {
   content: "+";
   font-family: var(--mono);
-  font-size: 1rem;
-  line-height: 1;
+  font-weight: 700;
   color: var(--links);
 }
 details.add[open] > summary::before { content: "−" }
-details.add > summary:hover { color: var(--text-bright); text-decoration: none }
-details.add[open] > summary { margin-bottom: 1.2rem }
+details.add > summary:hover { border-color: var(--links); color: var(--text-bright) }
+details.add[open] > summary { margin-bottom: 1.1rem }
 
 /* Panels hold forms; the gate is a login page on its own. */
 .panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; align-items: start }
@@ -340,7 +345,12 @@ table.grid th {
   border-bottom: 1px solid var(--border);
 }
 table.grid td { padding: .62rem .6rem; border-bottom: 1px solid var(--background); vertical-align: baseline }
-table.grid tbody tr:hover td { background: var(--background-alt) }
+table.grid tbody tr:nth-child(even) { background: none }
+table.grid tbody tr:hover { background: var(--background-alt) }
+table.routes th:nth-child(1) { width: 9rem }
+table.routes th:nth-child(2) { width: 6rem }
+table.routes th:nth-child(3) { width: 8rem }
+table.routes th:last-child { width: 5rem }
 td.bar-cell { width: 8rem }
 .bar { height: .45rem; width: var(--w); min-width: 3px; background: var(--links); border-radius: 999px; opacity: .7 }
 

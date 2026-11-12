@@ -1,8 +1,9 @@
 {{define "content"}}
-<h1>Usage</h1>
-<p class="lede">What each token, account and route asked for.</p>
-
-<div class="row-head">
+<div class="page-head">
+  <div>
+    <h1>Usage</h1>
+    <p class="lede">What each token, account and route asked for.</p>
+  </div>
   <nav class="tabs">
     <a href="/ui/usage?days=7"{{if eq .Days 7}} class="on"{{end}}>7 days</a>
     <a href="/ui/usage?days=30"{{if eq .Days 30}} class="on"{{end}}>30 days</a>
