@@ -13,6 +13,7 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/gateway"
 	"github.com/abcdlsj/ak/internal/out"
+	"github.com/abcdlsj/ak/internal/webui"
 	"github.com/spf13/cobra"
 )
 
@@ -52,6 +53,7 @@ still need one.`,
 				service = cfg.Service.Addr
 			}
 			srv := gateway.New(cfg)
+			srv.UI = webui.New(srv)
 			hup := make(chan os.Signal, 1)
 			signal.Notify(hup, syscall.SIGHUP)
 			defer signal.Stop(hup)

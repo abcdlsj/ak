@@ -1,0 +1,9 @@
+{{define "content"}}
+<h1>Sign in {{.Account}}</h1>
+{{if .Err}}<p class="flash bad">{{.Err}}</p>
+{{else if .Done}}<p>Signed in. <a href="/ui/accounts">Back to accounts</a></p>
+{{else}}
+<p>Open <a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.URL}}</a> and approve{{with .Code}} the code <code class="big">{{.}}</code>{{end}}.</p>
+<p class="dim" id="device-status" data-id="{{.ID}}">Waiting for the approval…</p>
+{{end}}
+{{end}}

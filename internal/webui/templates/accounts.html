@@ -1,0 +1,47 @@
+{{define "content"}}
+<h1>Accounts</h1>
+{{if not .Accounts}}<p class="dim">No accounts yet. Sign in to a vendor below.</p>{{end}}
+<div class="cards">
+{{range .Accounts}}
+<section class="card">
+  <div class="row"><strong>{{.Name}}</strong><span class="dim">{{.Vendor}}{{with .User}} · {{.}}{{end}}</span></div>
+  {{with .Quota}}
+    {{if .Error}}<p class="bad small">{{.Error}}</p>
+    {{else}}
+      {{range .Windows}}
+      <div class="bar"><span>{{.Name}}</span><progress max="100" value="{{.Used}}" class="{{if ge .Used 100.0}}spent{{else if ge .Used 80.0}}high{{end}}"></progress><span class="num">{{pct .Used}}%</span></div>
+      {{end}}
+      {{with .Balance}}<div class="bar"><span>balance</span><span class="num big">{{money .}}</span></div>{{end}}
+      {{if and (not .Windows) (not .Balance)}}<p class="dim small">no quota to show</p>{{end}}
+    {{end}}
+  {{end}}
+  <div class="row small">
+    <span class="dim">{{if .Users}}providers here: {{join .Users ", "}}{{else}}no local providers{{end}}</span>
+    <form method="post" action="/ui/accounts/remove" data-confirm="Remove account {{.Name}}?">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}">
+      <button class="link bad">Remove</button>
+    </form>
+  </div>
+</section>
+{{end}}
+</div>
+
+<h2>Sign in</h2>
+<div class="cols">
+<form method="post" action="/ui/accounts/key" class="stack">
+  <h3>Paste a key</h3>
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label>Vendor <select name="vendor">{{range .Vendors}}<option value="{{.ID}}">{{.Name}} ({{.ID}})</option>{{end}}</select></label>
+  <label>Account name <input name="name" placeholder="the vendor's id" pattern="[a-z0-9][a-z0-9._\-]*"></label>
+  <label>Key <input type="password" name="key" autocomplete="off" required></label>
+  <button>Save</button>
+</form>
+<form method="post" action="/ui/accounts/device" class="stack">
+  <h3>Approve in the browser</h3>
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label>Vendor <select name="vendor">{{range .Vendors}}{{if .Device}}<option value="{{.ID}}">{{.Name}} ({{.ID}})</option>{{end}}{{end}}</select></label>
+  <label>Account name <input name="name" placeholder="the vendor's id" pattern="[a-z0-9][a-z0-9._\-]*"></label>
+  <button>Start</button>
+</form>
+</div>
+{{end}}

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ak · {{.Page}}</title>
+<link rel="stylesheet" href="/ui/static/style.css">
+<script src="/ui/static/app.js" defer></script>
+</head>
+<body>
+<header>
+  <span class="brand">ak</span>
+  {{if .Signed}}
+  <nav>
+    <a href="/ui/accounts"{{if eq .Page "accounts" "device"}} class="on"{{end}}>Accounts</a>
+    <a href="/ui/routes"{{if eq .Page "routes"}} class="on"{{end}}>Routes</a>
+    <a href="/ui/tokens"{{if eq .Page "tokens"}} class="on"{{end}}>Tokens</a>
+    <a href="/ui/usage"{{if eq .Page "usage"}} class="on"{{end}}>Usage</a>
+  </nav>
+  <form method="post" action="/ui/logout" class="logout">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <button class="link">Log out</button>
+  </form>
+  {{end}}
+</header>
+<main>
+{{with .Flash}}<p class="flash">{{.}}</p>{{end}}
+{{template "content" .}}
+</main>
+</body>
+</html>

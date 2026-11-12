@@ -1,0 +1,28 @@
+{{define "content"}}
+<h1>Routes</h1>
+<p class="dim">Besides <code>&lt;account&gt;</code> and <code>&lt;account&gt;/&lt;model&gt;</code>, a route is a model name of its own: an alias of another, or a pool over several.</p>
+{{if .Routes}}
+<table>
+<tr><th>name</th><th>kind</th><th>to</th><th>strategy</th><th></th></tr>
+{{range .Routes}}
+<tr><td><code>{{.Name}}</code></td>
+<td>{{if .Members}}pool{{else}}alias{{end}}</td>
+<td>{{if .Members}}{{join .Members ", "}}{{else}}{{.Model}}{{end}}</td>
+<td>{{if .Members}}{{or .Strategy "order"}}{{end}}</td>
+<td><form method="post" action="/ui/routes/remove" data-confirm="Remove route {{.Name}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><button class="link bad">Remove</button></form></td></tr>
+{{end}}
+</table>
+{{else}}<p class="dim">No routes yet.</p>{{end}}
+
+<h2>Add or change a route</h2>
+<form method="post" action="/ui/routes/save" class="stack narrow">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label>Name <input name="name" required pattern="[a-z0-9][a-z0-9._\-]*"></label>
+  <label>Kind <select name="type"><option value="alias">alias</option><option value="pool">pool</option></select></label>
+  <label>Alias of <input name="model" placeholder="command-code/deepseek/deepseek-v4.1-flash"></label>
+  <label>Pool members, one per line <textarea name="members" rows="4" placeholder="bili/glm-5&#10;command-code"></textarea></label>
+  <label>Strategy <select name="strategy">{{range .Strategies}}<option>{{.}}</option>{{end}}</select></label>
+  <button>Save</button>
+  <p class="dim small">Accounts: {{join .Accounts ", "}}</p>
+</form>
+{{end}}

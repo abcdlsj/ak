@@ -1,0 +1,251 @@
+package webui
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/gateway"
+	"github.com/abcdlsj/ak/internal/quota"
+	"golang.org/x/crypto/bcrypt"
+)
+
+const password = "a-long-password"
+
+// backend is the real service, with quota readings that ask no vendor.
+type backend struct{ *gateway.Server }
+
+func (backend) Quotas(_ context.Context, accounts []string) []quota.Quota {
+	out := make([]quota.Quota, len(accounts))
+	for i, a := range accounts {
+		out[i] = quota.Quota{Provider: a, Windows: []quota.Window{{Name: "5h", Used: 85}}}
+	}
+	return out
+}
+
+type site struct {
+	t   *testing.T
+	srv *gateway.Server
+	h   http.Handler
+	jar map[string]*http.Cookie
+}
+
+func newSite(t *testing.T, withPassword bool) *site {
+	t.Helper()
+	t.Setenv(config.DirEnv, t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	cfg := config.Default()
+	if withPassword {
+		h, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+		cfg.Service.AdminPassword = string(h)
+	}
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = config.Load()
+	srv := gateway.New(cfg)
+	srv.Logf = func(string, ...any) {}
+	srv.UI = New(backend{srv})
+	return &site{t: t, srv: srv, h: srv.ServiceHandler(), jar: map[string]*http.Cookie{}}
+}
+
+// do sends a request with the site's cookies and keeps those it sets.
+func (s *site) do(method, path string, form url.Values, hdr ...string) *httptest.ResponseRecorder {
+	s.t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(form.Encode()))
+	if form != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	for i := 0; i+1 < len(hdr); i += 2 {
+		req.Header.Set(hdr[i], hdr[i+1])
+	}
+	for _, c := range s.jar {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	s.h.ServeHTTP(rec, req)
+	for _, c := range rec.Result().Cookies() {
+		if c.MaxAge < 0 {
+			delete(s.jar, c.Name)
+		} else {
+			s.jar[c.Name] = c
+		}
+	}
+	return rec
+}
+
+var csrfRe = regexp.MustCompile(`name="csrf" value="([^"]+)"`)
+
+// csrf is the token on a page's forms.
+func (s *site) csrf(path string) string {
+	s.t.Helper()
+	m := csrfRe.FindStringSubmatch(s.do("GET", path, nil).Body.String())
+	if m == nil {
+		s.t.Fatalf("%s has no form token", path)
+	}
+	return m[1]
+}
+
+func (s *site) login(pw string) *httptest.ResponseRecorder {
+	s.t.Helper()
+	return s.do("POST", "/ui/login", url.Values{"csrf": {s.csrf("/ui/login")}, "password": {pw}})
+}
+
+// post sends a form from page with its token.
+func (s *site) post(page, action string, form url.Values) *httptest.ResponseRecorder {
+	s.t.Helper()
+	form.Set("csrf", s.csrf(page))
+	return s.do("POST", action, form)
+}
+
+func TestSetupWithoutPassword(t *testing.T) {
+	s := newSite(t, false)
+	if rec := s.do("GET", "/ui/accounts", nil); !strings.Contains(rec.Body.String(), "ak serve admin set-password") {
+		t.Errorf("no setup page: %s", rec.Body)
+	}
+}
+
+func TestLoginAndSession(t *testing.T) {
+	s := newSite(t, true)
+	if rec := s.do("GET", "/ui/accounts", nil); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/ui/login" {
+		t.Fatalf("signed out: %d %s", rec.Code, rec.Header().Get("Location"))
+	}
+	if rec := s.login("wrong"); rec.Code != http.StatusUnauthorized {
+		t.Errorf("a wrong password: %d", rec.Code)
+	}
+	req := httptest.NewRequest("GET", "/ui/login", nil)
+	rec := httptest.NewRecorder()
+	s.h.ServeHTTP(rec, req)
+	if h := rec.Header(); !strings.Contains(h.Get("Content-Security-Policy"), "default-src 'self'") || h.Get("X-Frame-Options") != "DENY" {
+		t.Errorf("security headers: %v", h)
+	}
+
+	rec = s.do("POST", "/ui/login", url.Values{"csrf": {s.csrf("/ui/login")}, "password": {password}}, "X-Forwarded-Proto", "https")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("login: %d %s", rec.Code, rec.Body)
+	}
+	c := s.jar[sessionCookie]
+	if c == nil || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || !c.Secure || c.Path != "/ui/" {
+		t.Fatalf("session cookie = %+v", c)
+	}
+	if rec := s.do("GET", "/ui/accounts", nil); rec.Code != 200 {
+		t.Fatalf("signed in: %d", rec.Code)
+	}
+
+	// The session never calls the model API.
+	if rec := s.do("POST", "/v1/messages", url.Values{"model": {"x"}}); rec.Code != http.StatusUnauthorized {
+		t.Errorf("the session cookie opened the API: %d", rec.Code)
+	}
+
+	// A form without the session's token, or from another site, is refused.
+	if rec := s.do("POST", "/ui/tokens/add", url.Values{"name": {"x"}}); rec.Code != http.StatusForbidden {
+		t.Errorf("no csrf: %d", rec.Code)
+	}
+	if rec := s.do("POST", "/ui/tokens/add", url.Values{"name": {"x"}, "csrf": {s.csrf("/ui/tokens")}}, "Origin", "https://evil.example"); rec.Code != http.StatusForbidden {
+		t.Errorf("cross-origin: %d", rec.Code)
+	}
+
+	s.post("/ui/accounts", "/ui/logout", url.Values{})
+	if rec := s.do("GET", "/ui/accounts", nil); rec.Code != http.StatusSeeOther {
+		t.Errorf("after logout: %d", rec.Code)
+	}
+}
+
+func TestTokenNeverOpensUI(t *testing.T) {
+	s := newSite(t, true)
+	tok, hash, _ := gateway.NewToken()
+	cfg := *s.srv.Config()
+	cfg.Service.Tokens = map[string]config.Token{"laptop": {Hash: hash}}
+	s.srv.Reload(&cfg)
+	if rec := s.do("GET", "/ui/accounts", nil, "Authorization", "Bearer "+tok); rec.Code != http.StatusSeeOther {
+		t.Errorf("a token opened the UI: %d", rec.Code)
+	}
+}
+
+func TestLoginRateLimit(t *testing.T) {
+	s := newSite(t, true)
+	for range maxFailures {
+		s.login("wrong")
+	}
+	if rec := s.login(password); rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Errorf("after %d failures the right password: %d", maxFailures, rec.Code)
+	}
+}
+
+func TestPages(t *testing.T) {
+	s := newSite(t, true)
+	s.login(password)
+
+	// Accounts: paste a key; it is saved, reloaded and shown with its quota.
+	rec := s.post("/ui/accounts", "/ui/accounts/key", url.Values{"vendor": {"command-code"}, "key": {"sk-secret"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("add key: %d", rec.Code)
+	}
+	if a := s.srv.Config().Accounts["command-code"]; a.APIKey != "sk-secret" {
+		t.Fatalf("the service was not reloaded with the account: %+v", a)
+	}
+	page := s.do("GET", "/ui/accounts", nil).Body.String()
+	if !strings.Contains(page, "command-code") || !strings.Contains(page, `value="85"`) || strings.Contains(page, "sk-secret") {
+		t.Errorf("accounts page:\n%s", page)
+	}
+
+	// Routes: a pool, then a bad one refused with the reason.
+	s.post("/ui/routes", "/ui/routes/save", url.Values{"name": {"main"}, "type": {"pool"}, "members": {"command-code\ncommand-code/deepseek-v4"}, "strategy": {"smart"}})
+	r := s.srv.Config().Service.Routes["main"]
+	if len(r.Members) != 2 || r.Strategy != "smart" {
+		t.Fatalf("route = %+v", r)
+	}
+	s.post("/ui/routes", "/ui/routes/save", url.Values{"name": {"bad"}, "type": {"alias"}, "model": {"nobody/x"}})
+	if page := s.do("GET", "/ui/routes", nil).Body.String(); !strings.Contains(page, "Not saved") {
+		t.Errorf("a bad route did not say why:\n%s", page)
+	}
+
+	// Tokens: issued once, kept as its hash, limited, revoked.
+	s.post("/ui/tokens", "/ui/tokens/add", url.Values{"name": {"laptop"}, "routes": {"main"}})
+	page = s.do("GET", "/ui/tokens", nil).Body.String()
+	m := regexp.MustCompile(`ak_[A-Za-z0-9_-]{43}`).FindString(page)
+	tok := s.srv.Config().Service.Tokens["laptop"]
+	if m == "" || tok.Hash != gateway.HashToken(m) || len(tok.Routes) != 1 {
+		t.Fatalf("token shown %q, kept %+v", m, tok)
+	}
+	if again := s.do("GET", "/ui/tokens", nil).Body.String(); strings.Contains(again, m) {
+		t.Error("the token was shown twice")
+	}
+	s.post("/ui/tokens", "/ui/tokens/revoke", url.Values{"name": {"laptop"}})
+	if len(s.srv.Config().Service.Tokens) != 0 {
+		t.Error("revoke left the token")
+	}
+
+	// Removing an account a route uses is refused; the route first.
+	s.post("/ui/accounts", "/ui/accounts/remove", url.Values{"name": {"command-code"}})
+	if _, ok := s.srv.Config().Accounts["command-code"]; !ok {
+		t.Error("an account a route uses was removed")
+	}
+	s.post("/ui/routes", "/ui/routes/remove", url.Values{"name": {"main"}})
+	s.post("/ui/accounts", "/ui/accounts/remove", url.Values{"name": {"command-code"}})
+	if _, ok := s.srv.Config().Accounts["command-code"]; ok {
+		t.Error("the account was not removed")
+	}
+
+	for _, p := range []string{"/ui/usage", "/ui/usage?days=30"} {
+		if rec := s.do("GET", p, nil); rec.Code != 200 || !strings.Contains(rec.Body.String(), "By account") {
+			t.Errorf("%s: %d", p, rec.Code)
+		}
+	}
+	if rec := s.do("GET", "/ui/static/style.css", nil); rec.Code != 200 {
+		t.Errorf("static: %d", rec.Code)
+	}
+}
+
+func TestNumber(t *testing.T) {
+	for n, want := range map[int64]string{0: "0", 999: "999", 1000: "1 000", 1234567: "1 234 567"} {
+		if got := number(n); got != want {
+			t.Errorf("number(%d) = %q", n, got)
+		}
+	}
+}

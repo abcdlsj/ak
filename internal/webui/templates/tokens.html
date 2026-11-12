@@ -1,0 +1,23 @@
+{{define "content"}}
+<h1>Tokens</h1>
+{{with .Token}}<p class="flash">Token: <code class="select">{{.}}</code></p>{{end}}
+{{if .Tokens}}
+<table>
+<tr><th>name</th><th>routes</th><th>created</th><th></th></tr>
+{{range .Tokens}}
+<tr><td>{{.Name}}</td><td>{{if .Routes}}{{join .Routes ", "}}{{else}}<span class="dim">all</span>{{end}}</td><td class="num">{{.Created}}</td>
+<td><form method="post" action="/ui/tokens/revoke" data-confirm="Revoke {{.Name}}? Its machine stops working at once."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><button class="link bad">Revoke</button></form></td></tr>
+{{end}}
+</table>
+{{else}}<p class="dim">No tokens yet.</p>{{end}}
+
+<h2>Issue a token</h2>
+<form method="post" action="/ui/tokens/add" class="stack narrow">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label>Machine <input name="name" required pattern="[a-z0-9][a-z0-9._\-]*"></label>
+  <fieldset><legend>Limit to (none: all)</legend>
+  {{range .Targets}}<label class="check"><input type="checkbox" name="routes" value="{{.}}"> {{.}}</label>{{end}}
+  </fieldset>
+  <button>Issue</button>
+</form>
+{{end}}
