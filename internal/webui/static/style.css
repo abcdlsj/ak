@@ -2,6 +2,8 @@
    font as `ak quota board`, tick bars, and amber or red once an allowance
    runs out. */
 
+*, *::before, *::after { box-sizing: border-box }
+
 :root {
   --hue: #0969da;
   --ok: #1a7f37;
@@ -121,8 +123,12 @@ h2::after { content: ""; flex: 1; height: 1px; background: var(--border) }
 h3 { font-size: .95rem; margin: 0 0 .8rem }
 
 /* Cards: the board's, as a grid. */
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1.25rem }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem }
+@media (max-width: 46rem) {
+  .cards, .panels { grid-template-columns: 1fr }
+}
 .card {
+  position: relative;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
@@ -135,6 +141,11 @@ h3 { font-size: .95rem; margin: 0 0 .8rem }
 .sub { color: var(--text-muted); font-size: .82rem; margin: .1rem 0 .5rem }
 .card-foot { margin-top: auto; padding-top: .8rem; display: flex; justify-content: flex-end }
 .spacer { flex: 1 }
+/* The card is the link; its own controls sit above it. */
+.card .open { position: absolute; inset: 0; border-radius: 10px }
+.card .open:focus-visible { outline: 2px solid var(--action); outline-offset: -2px }
+.card:has(.open:hover) { border-color: var(--text-muted) }
+.card-foot { position: relative; z-index: 1 }
 .card-head .when { color: var(--text-muted); font-size: .78rem; font-variant-numeric: tabular-nums }
 .targets { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; margin-top: .2rem }
 .targets .go { font-size: .82rem; color: var(--text-main); overflow-wrap: break-word }
@@ -386,6 +397,11 @@ button.link.bad { color: var(--bad) }
 .heat-legend .unit { font-size: .9rem; color: var(--ok); margin-bottom: .1rem }
 .heat-legend .note { margin: 0 }
 .heat-legend .spacer { flex: 1 }
+/* The card is the link; its own controls sit above it. */
+.card .open { position: absolute; inset: 0; border-radius: 10px }
+.card .open:focus-visible { outline: 2px solid var(--action); outline-offset: -2px }
+.card:has(.open:hover) { border-color: var(--text-muted) }
+.card-foot { position: relative; z-index: 1 }
 
 /* Tabs above a page's own content. */
 .tabs { display: flex; gap: .2rem }

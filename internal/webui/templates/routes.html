@@ -6,9 +6,11 @@
 <div class="cards">
 {{range .Routes}}
 <section class="card hue-{{.Hue}}">
+  <a class="open" href="/ui/routes?edit={{.Name}}" aria-label="Edit {{.Name}}"></a>
   <div class="card-head">
     <span class="mark">■</span><b class="mono">{{.Name}}</b>
     <span class="spacer"></span>
+    <span class="when">{{if .Act.Requests}}{{num .Act.Requests}} in 30 days · {{.Act.Last}}{{else}}unused in 30 days{{end}}</span>
     <span class="chip">{{.Kind}}</span>
     {{with .Strategy}}<span class="chip">{{.}}</span>{{end}}
   </div>
@@ -27,19 +29,23 @@
 {{template "empty" "No routes yet."}}
 {{end}}
 
-<details class="add">
-<summary>Add or change a route</summary>
+<details class="add"{{if .Form.Editing}} open{{end}}>
+<summary>{{if .Form.Editing}}Edit {{.Form.Name}}{{else}}Add a route{{end}}</summary>
 <section class="panel narrow">
 <form method="post" action="/ui/routes/save" class="stack">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <div class="duo">
-    <label>Name <input name="name" required pattern="[a-z0-9][a-z0-9._\-]*"></label>
-    <label>Kind <select name="type"><option value="alias">alias</option><option value="pool">pool</option></select></label>
+    <label>Name <input name="name" value="{{.Form.Name}}" required pattern="[a-z0-9][a-z0-9._\-]*"{{if .Form.Editing}} readonly{{end}}></label>
+    <label>Kind <select name="type">
+      <option value="alias"{{if eq .Form.Kind "alias"}} selected{{end}}>alias</option>
+      <option value="pool"{{if eq .Form.Kind "pool"}} selected{{end}}>pool</option>
+    </select></label>
   </div>
-  <label>Alias of <input name="model" placeholder="command-code/deepseek/deepseek-v4.1-flash"></label>
-  <label>Pool members, one per line <textarea name="members" rows="4" placeholder="bili/glm-5&#10;command-code"></textarea></label>
-  <label>Strategy <select name="strategy">{{range .Strategies}}<option>{{.}}</option>{{end}}</select></label>
+  <label>Alias of <input name="model" value="{{.Form.Model}}" placeholder="command-code/deepseek/deepseek-v4.1-flash"></label>
+  <label>Pool members, one per line <textarea name="members" rows="4" placeholder="bili/glm-5&#10;command-code">{{.Form.Members}}</textarea></label>
+  <label>Strategy <select name="strategy">{{range .Strategies}}<option{{if eq . $.Form.Strategy}} selected{{end}}>{{.}}</option>{{end}}</select></label>
   <button>Save</button>
+  {{if .Form.Editing}}<p class="note">A route's name is fixed; remove it and add another to rename.</p>{{end}}
 </form>
 <p class="note">Accounts: {{template "chips" .Accounts}}</p>
 </section>

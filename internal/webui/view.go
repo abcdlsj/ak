@@ -351,6 +351,35 @@ func totalsOf(rows []gateway.UsageRow) usageTotals {
 	return t
 }
 
+// activityDays is the window a card's activity line counts over.
+const activityDays = 30
+
+// activity is what a token, a route or an account asked for lately: the
+// requests in the window and the day it was last asked.
+type activity struct {
+	Requests int64
+	Last     string
+}
+
+// activities sums a window's rows by whatever pick names, as the cards show
+// them under a card's own numbers.
+func activities(rows []gateway.UsageRow, pick func(gateway.UsageRow) string) map[string]activity {
+	out := map[string]activity{}
+	for _, r := range rows {
+		k := pick(r)
+		if k == "" {
+			continue
+		}
+		a := out[k]
+		a.Requests += r.Requests
+		if r.Day > a.Last {
+			a.Last = r.Day[5:]
+		}
+		out[k] = a
+	}
+	return out
+}
+
 // barWidth is how full a row's bar is, against the largest row.
 func barWidth(v, most int64) int {
 	if most <= 0 || v <= 0 {

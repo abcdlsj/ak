@@ -212,6 +212,65 @@ func TestLoginRateLimit(t *testing.T) {
 	}
 }
 
+// A token's routes are edited in place: the machine keeps the token it was
+// given, and only what it may ask changes.
+func TestTokenEditKeepsTheToken(t *testing.T) {
+	s := newSite(t, true)
+	s.login(password)
+	s.post("/ui/accounts", "/ui/accounts/key", url.Values{"vendor": {"command-code"}, "key": {"sk-secret"}})
+	s.post("/ui/accounts", "/ui/accounts/key", url.Values{"vendor": {"opendesign"}, "key": {"sk-secret-2"}})
+	s.post("/ui/tokens", "/ui/tokens/add", url.Values{"name": {"laptop"}, "routes": {"command-code"}})
+	shown := regexp.MustCompile(`ak_[A-Za-z0-9_-]{43}`).FindString(s.do("GET", "/ui/tokens", nil).Body.String())
+	if shown == "" {
+		t.Fatal("no token was issued")
+	}
+	before := s.srv.Config().Service.Tokens["laptop"]
+
+	if page := s.do("GET", "/ui/tokens?edit=laptop", nil).Body.String(); !strings.Contains(page, `value="command-code" checked`) {
+		t.Errorf("the edit form does not carry the token's route:\n%s", page)
+	}
+	rec := s.do("POST", "/ui/tokens/save", url.Values{
+		"csrf": {s.csrf("/ui/tokens")}, "name": {"laptop"}, "routes": {"opendesign"},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body)
+	}
+	after := s.srv.Config().Service.Tokens["laptop"]
+	if after.Hash != before.Hash {
+		t.Errorf("the token was reissued: %q then %q", before.Hash, after.Hash)
+	}
+	if len(after.Routes) != 1 || after.Routes[0] != "opendesign" {
+		t.Errorf("routes = %v, want [opendesign]", after.Routes)
+	}
+}
+
+// Opening a card brings up its form filled in: a route's name is fixed, and
+// signing in again as an account replaces that account's key.
+func TestEditFormsAreFilledIn(t *testing.T) {
+	s := newSite(t, true)
+	s.login(password)
+	s.post("/ui/accounts", "/ui/accounts/key", url.Values{"vendor": {"command-code"}, "key": {"sk-secret"}})
+	s.post("/ui/routes", "/ui/routes/save", url.Values{
+		"name": {"main"}, "type": {"pool"}, "members": {"command-code\ncommand-code/deepseek-v4.4"}, "strategy": {"smart"},
+	})
+	page := s.do("GET", "/ui/routes?edit=main", nil).Body.String()
+	for _, want := range []string{`<details class="add" open>`, `value="main"`, `readonly`, `selected>smart<`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the route form lacks %q:\n%s", want, page)
+		}
+	}
+
+	page = s.do("GET", "/ui/accounts?edit=command-code", nil).Body.String()
+	for _, want := range []string{`<details class="add" open>`, `value="command-code" selected`, `Sign in again as command-code`, `>Replace the key<`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the account form lacks %q:\n%s", want, page)
+		}
+	}
+	if strings.Contains(page, "sk-secret") {
+		t.Error("the account's key is on the page")
+	}
+}
+
 func TestPages(t *testing.T) {
 	s := newSite(t, true)
 	s.login(password)

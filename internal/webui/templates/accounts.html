@@ -6,7 +6,12 @@
 <div class="cards">
 {{range .Accounts}}
 <section class="card hue-{{.Hue}}">
-  <div class="card-head"><span class="mark">■</span><b>{{.Name}}</b></div>
+  <a class="open" href="/ui/accounts?edit={{.Name}}" aria-label="Sign in again as {{.Name}}"></a>
+  <div class="card-head">
+    <span class="mark">■</span><b>{{.Name}}</b>
+    <span class="spacer"></span>
+    <span class="when">{{if .Act.Requests}}{{num .Act.Requests}} in 30 days · {{.Act.Last}}{{else}}unused in 30 days{{end}}</span>
+  </div>
   <p class="sub">{{.Vendor}}{{with .User}} · {{.}}{{end}}{{with .Users}} · {{join . ", "}}{{end}}</p>
   {{with .Err}}<p class="bad">✗ {{.}}</p>{{end}}
   {{range .Meters}}{{template "meter" .}}{{end}}
@@ -24,17 +29,18 @@
 {{template "empty" "No accounts yet. Sign in to a vendor below."}}
 {{end}}
 
-<details class="add">
-<summary>Sign in to a vendor</summary>
+<details class="add"{{if .Edit}} open{{end}}>
+<summary>{{if .Edit}}Sign in again as {{.Edit}}{{else}}Sign in to a vendor{{end}}</summary>
 <div class="panels">
   <section class="panel">
     <h3>Paste a key</h3>
     <form method="post" action="/ui/accounts/key" class="stack">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <label>Vendor <select name="vendor">{{range .Vendors}}<option value="{{.ID}}">{{.Name}} ({{.ID}})</option>{{end}}</select></label>
-      <label>Account name <input name="name" placeholder="the vendor's id" pattern="[a-z0-9][a-z0-9._\-]*"></label>
-      <label>Key <input type="password" name="key" autocomplete="off" required></label>
-      <button>Save</button>
+      <label>Vendor <select name="vendor">{{range .Vendors}}<option value="{{.ID}}"{{if eq .ID $.EditVendor}} selected{{end}}>{{.Name}} ({{.ID}})</option>{{end}}</select></label>
+      <label>Account name <input name="name" value="{{.Edit}}" placeholder="the vendor's id" pattern="[a-z0-9][a-z0-9._\-]*"{{if .Edit}} readonly{{end}}></label>
+      <label>{{if .Edit}}New key{{else}}Key{{end}} <input type="password" name="key" autocomplete="off" required></label>
+      <button>{{if .Edit}}Replace the key{{else}}Save{{end}}</button>
+      {{if .Edit}}<p class="note">The vendor's key is replaced; providers on this account keep working.</p>{{end}}
     </form>
   </section>
   <section class="panel">

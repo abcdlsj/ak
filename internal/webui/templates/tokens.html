@@ -13,12 +13,13 @@
 <div class="cards">
 {{range .Tokens}}
 <section class="card hue-{{.Hue}}">
+  <a class="open" href="/ui/tokens?edit={{.Name}}" aria-label="Edit {{.Name}}"></a>
   <div class="card-head">
     <span class="mark">■</span><b>{{.Name}}</b>
     <span class="spacer"></span>
-    <span class="when">{{.Created}}</span>
+    <span class="when">{{if .Act.Requests}}{{num .Act.Requests}} in 30 days · {{.Act.Last}}{{else}}unused in 30 days{{end}}</span>
   </div>
-  <p class="sub">{{if .Routes}}may ask these routes and accounts only{{else}}may ask every route{{end}}</p>
+  <p class="sub">issued {{.Created}} · {{if .Routes}}these routes and accounts only{{else}}every route{{end}}</p>
   <div class="targets">{{template "chips" .Routes}}</div>
   <form method="post" action="/ui/tokens/revoke" data-confirm="Revoke {{.Name}}? Its machine stops working at once." class="card-foot">
     <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}">
@@ -31,20 +32,20 @@
 {{template "empty" "No tokens yet."}}
 {{end}}
 
-<details class="add">
-<summary>Issue a token</summary>
+<details class="add"{{if .Form.Editing}} open{{end}}>
+<summary>{{if .Form.Editing}}Edit {{.Form.Name}}{{else}}Issue a token{{end}}</summary>
 <section class="panel narrow">
-<form method="post" action="/ui/tokens/add" class="stack">
+<form method="post" action="{{if .Form.Editing}}/ui/tokens/save{{else}}/ui/tokens/add{{end}}" class="stack">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
-  <label>Machine <input name="name" required pattern="[a-z0-9][a-z0-9._\-]*"></label>
+  <label>Machine <input name="name" value="{{.Form.Name}}" required pattern="[a-z0-9][a-z0-9._\-]*"{{if .Form.Editing}} readonly{{end}}></label>
   <fieldset>
     <legend>Limit to routes and accounts</legend>
     <div class="checks">
-    {{range .Targets}}<label class="check"><input type="checkbox" name="routes" value="{{.}}"> <span class="mono">{{.}}</span></label>{{end}}
+    {{range .Targets}}<label class="check"><input type="checkbox" name="routes" value="{{.}}"{{if contains $.Form.Routes .}} checked{{end}}> <span class="mono">{{.}}</span></label>{{end}}
     </div>
   </fieldset>
-  <button>Issue</button>
-  <p class="note">None checked: the token may use every route.</p>
+  <button>{{if .Form.Editing}}Save{{else}}Issue{{end}}</button>
+  <p class="note">{{if .Form.Editing}}The token itself stays; only what it may ask changes.{{else}}None checked: the token may use every route.{{end}}</p>
 </form>
 </section>
 </details>

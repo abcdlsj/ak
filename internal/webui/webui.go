@@ -9,6 +9,7 @@
 package webui
 
 import (
+	"cmp"
 	"context"
 	"embed"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -62,7 +64,10 @@ type UI struct {
 func New(b Backend) *UI {
 	u := &UI{b: b, sessions: newSessions(), pages: map[string]*template.Template{},
 		devices: newDevices(), now: time.Now}
-	funcs := template.FuncMap{"join": strings.Join, "num": number, "human": humanize, "pix": pix}
+	funcs := template.FuncMap{
+		"join": strings.Join, "num": number, "human": humanize, "pix": pix,
+		"contains": func(list []string, s string) bool { return slices.Contains(list, s) },
+	}
 	for _, p := range []string{"login", "setup", "accounts", "device", "routes", "tokens", "usage"} {
 		u.pages[p] = template.Must(template.New("layout.html").Funcs(funcs).ParseFS(templateFS,
 			"templates/layout.html", "templates/components.html", "templates/"+p+".html"))
@@ -138,6 +143,8 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		c.tokens()
 	case path == "/tokens/add" && r.Method == http.MethodPost:
 		c.addToken()
+	case path == "/tokens/save" && r.Method == http.MethodPost:
+		c.saveToken()
 	case path == "/tokens/revoke" && r.Method == http.MethodPost:
 		c.revokeToken()
 	case path == "/usage" && r.Method == http.MethodGet:
@@ -256,6 +263,7 @@ type accountView struct {
 	Name, Vendor, User string
 	Users              []string
 	Hue                int
+	Act                activity
 	Meters             []meterView
 	Balance            *amountView
 	Err                string
@@ -269,13 +277,14 @@ func (c *call) accounts() {
 	ctx, cancel := context.WithTimeout(c.r.Context(), 20*time.Second)
 	defer cancel()
 	qs := c.u.b.Quotas(ctx, names)
+	act := activities(c.u.b.Usage(activityDays), func(r gateway.UsageRow) string { return r.Account })
 	views := make([]accountView, len(names))
 	for i, n := range names {
 		a := cfg.Accounts[n]
 		v, _ := vendor.Lookup(a.Vendor)
 		q := qs[i]
 		views[i] = accountView{Name: n, Vendor: v.Name, User: a.User, Users: cfg.UsersOf(n),
-			Hue: hueOf(v.ID), Meters: meters(q), Err: q.Error, NoSource: q.NoSource}
+			Hue: hueOf(v.ID), Meters: meters(q), Err: q.Error, NoSource: q.NoSource, Act: act[n]}
 		if q.Balance != nil {
 			amount := money(*q.Balance)
 			views[i].Balance = &amountView{Name: "Balance", Note: q.Currency, Value: amount,
@@ -291,7 +300,16 @@ func (c *call) accounts() {
 	for _, v := range vendor.All() {
 		vendors = append(vendors, vendorOpt{ID: v.ID, Name: v.Name, Device: deviceLogin(v) != nil})
 	}
-	c.u.render(c.w, "accounts", map[string]any{"Accounts": views, "Vendors": vendors}, c)
+	// ?edit=<name> opens the sign-in form set to that account, so a new key
+	// replaces the one stored.
+	edit, editVendor := "", ""
+	if e := c.r.URL.Query().Get("edit"); e != "" {
+		if a, ok := cfg.Accounts[e]; ok {
+			edit, editVendor = e, a.Vendor
+		}
+	}
+	c.u.render(c.w, "accounts", map[string]any{"Accounts": views, "Vendors": vendors,
+		"Edit": edit, "EditVendor": editVendor}, c)
 }
 
 // deviceLogin is a vendor's device sign-in, if it has one.
@@ -334,10 +352,19 @@ type routeView struct {
 	Name, Model, Strategy, Kind string
 	Members                     []string
 	Hue                         int
+	Act                         activity
+}
+
+// routeForm is the add form's values, filled from a route when ?edit names
+// one.
+type routeForm struct {
+	Name, Model, Members, Kind, Strategy string
+	Editing                              bool
 }
 
 func (c *call) routes() {
 	cfg := c.u.b.Config()
+	act := activities(c.u.b.Usage(activityDays), func(r gateway.UsageRow) string { return r.Route })
 	var views []routeView
 	for _, n := range cfg.Service.RouteNames() {
 		r := cfg.Service.Routes[n]
@@ -350,9 +377,21 @@ func (c *call) routes() {
 		} else {
 			v.Strategy = ""
 		}
+		v.Act = act[n]
 		views = append(views, v)
 	}
-	c.u.render(c.w, "routes", map[string]any{"Routes": views, "Accounts": cfg.AccountNames(),
+	form := routeForm{Kind: "alias", Strategy: config.StrategyOrder}
+	if e := c.r.URL.Query().Get("edit"); e != "" {
+		if r, ok := cfg.Service.Routes[e]; ok {
+			form = routeForm{Name: e, Model: r.Model, Members: strings.Join(r.Members, "\n"),
+				Kind: "alias", Strategy: config.StrategyOrder, Editing: true}
+			if r.IsPool() {
+				form.Kind = "pool"
+				form.Strategy = cmp.Or(r.Strategy, config.StrategyOrder)
+			}
+		}
+	}
+	c.u.render(c.w, "routes", map[string]any{"Routes": views, "Accounts": cfg.AccountNames(), "Form": form,
 		"Strategies": []string{config.StrategyOrder, config.StrategyRotate, config.StrategyLeastUsed, config.StrategySmart}}, c)
 }
 
@@ -388,10 +427,12 @@ func (c *call) removeRoute() {
 
 func (c *call) tokens() {
 	cfg := c.u.b.Config()
+	act := activities(c.u.b.Usage(activityDays), func(r gateway.UsageRow) string { return r.Token })
 	type tokenView struct {
 		Name, Created string
 		Routes        []string
 		Hue           int
+		Act           activity
 	}
 	var views []tokenView
 	for _, n := range cfg.Service.TokenNames() {
@@ -400,10 +441,24 @@ func (c *call) tokens() {
 		if !t.Created.IsZero() {
 			created = t.Created.Local().Format("2006-01-02 15:04")
 		}
-		views = append(views, tokenView{Name: n, Routes: t.Routes, Created: created, Hue: hueOf("token:" + n)})
+		views = append(views, tokenView{Name: n, Routes: t.Routes, Created: created,
+			Hue: hueOf("token:" + n), Act: act[n]})
 	}
 	targets := append(cfg.Service.RouteNames(), cfg.AccountNames()...)
-	c.u.render(c.w, "tokens", map[string]any{"Tokens": views, "Targets": targets}, c)
+	// ?edit=<name> turns the issue form into one that changes a token's
+	// routes; its hash, and so the token a machine holds, stays as it is.
+	type tokenForm struct {
+		Name    string
+		Routes  []string
+		Editing bool
+	}
+	var form tokenForm
+	if e := c.r.URL.Query().Get("edit"); e != "" {
+		if t, ok := cfg.Service.Tokens[e]; ok {
+			form = tokenForm{Name: e, Routes: t.Routes, Editing: true}
+		}
+	}
+	c.u.render(c.w, "tokens", map[string]any{"Tokens": views, "Targets": targets, "Form": form}, c)
 }
 
 func (c *call) addToken() {
@@ -441,6 +496,24 @@ func (c *call) revokeToken() {
 		return core.ChangeService(cfg, func(s *config.Service) { delete(s.Tokens, name) })
 	})
 	c.back("tokens", done(err, "Revoked "+name+"."))
+}
+
+// saveToken changes what a token may ask, keeping the token itself: a
+// machine's key does not have to be issued again.
+func (c *call) saveToken() {
+	c.r.ParseForm()
+	name, routes := field(c.r, "name"), c.r.PostForm["routes"]
+	err := c.change(func(cfg *config.Config) error {
+		t, ok := cfg.Service.Tokens[name]
+		if !ok {
+			return fmt.Errorf("no token %q", name)
+		}
+		return core.ChangeService(cfg, func(s *config.Service) {
+			t.Routes = routes
+			s.Tokens[name] = t
+		})
+	})
+	c.back("tokens", done(err, "Saved "+name+"."))
 }
 
 // usageGroup is one row of a usage table.
