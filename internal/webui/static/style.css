@@ -53,7 +53,7 @@
 body {
   font-family: 'Avenir Next', Avenir, ui-sans-serif, system-ui, -apple-system,
     'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-  max-width: 62rem;
+  max-width: 66rem;
   margin: 0 auto;
   padding: 1.5rem 1.5rem 4rem;
 }
@@ -104,13 +104,13 @@ h2::after { content: ""; flex: 1; height: 1px; background: var(--border) }
 h3 { font-size: .95rem; margin: 0 0 .8rem }
 
 /* Cards: the board's, as a grid. */
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr)); gap: 1rem }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1.25rem }
 .card {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 1rem 1.1rem;
+  padding: 1.15rem 1.3rem;
   background: var(--background-alt);
 }
 .card-head { display: flex; align-items: baseline; gap: .5rem; font-size: 1.05rem }
@@ -141,6 +141,41 @@ h3 { font-size: .95rem; margin: 0 0 .8rem }
 .ticks::after { width: var(--fill); background: repeating-linear-gradient(90deg, var(--hue) 0 2px, transparent 2px 5px) }
 .meter.high .ticks::after { background: repeating-linear-gradient(90deg, var(--warn) 0 2px, transparent 2px 5px) }
 .meter.spent .ticks::after { background: repeating-linear-gradient(90deg, var(--bad) 0 2px, transparent 2px 5px) }
+
+/* A form is behind a +, so the page shows its information first. */
+details.add {
+  display: block;
+  margin: 2.5rem 0 0;
+  padding: 1.2rem 0 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+}
+details.add > summary {
+  display: inline-flex;
+  margin: 0;
+  padding: 0;
+  background: none;
+  align-items: center;
+  gap: .55rem;
+  cursor: pointer;
+  list-style: none;
+  color: var(--links);
+  font-weight: 600;
+  font-size: .92rem;
+  user-select: none;
+}
+details.add > summary::-webkit-details-marker { display: none }
+details.add > summary::before {
+  content: "+";
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--links);
+}
+details.add[open] > summary::before { content: "−" }
+details.add > summary:hover { color: var(--text-bright); text-decoration: none }
+details.add[open] > summary { margin-bottom: 1.2rem }
 
 /* Panels hold forms; the gate is a login page on its own. */
 .panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; align-items: start }
@@ -223,14 +258,14 @@ button.link:hover { text-decoration: underline }
 button.link.bad { color: var(--bad) }
 
 /* Tiles: one headline number each. */
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; margin: 1.25rem 0 0 }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1rem; margin: 1.25rem 0 0 }
 .tile {
   display: flex;
   flex-direction: column;
   gap: .1rem;
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: .7rem .9rem;
+  padding: .85rem 1rem;
   background: var(--background-alt);
 }
 .tile-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted) }
@@ -296,15 +331,15 @@ button.link.bad { color: var(--bad) }
 /* Tables: faint headings, a hairline under every row, numbers on the right. */
 table.grid { table-layout: auto; border-collapse: collapse; width: 100%; margin: .5rem 0 0; font-size: .88rem }
 table.grid th {
+  padding: .5rem .6rem;
   font-size: .7rem;
   text-transform: uppercase;
   letter-spacing: .06em;
   color: var(--text-muted);
   font-weight: 600;
-  padding: .35rem .5rem;
   border-bottom: 1px solid var(--border);
 }
-table.grid td { padding: .45rem .5rem; border-bottom: 1px solid var(--background); vertical-align: baseline }
+table.grid td { padding: .62rem .6rem; border-bottom: 1px solid var(--background); vertical-align: baseline }
 table.grid tbody tr:hover td { background: var(--background-alt) }
 td.bar-cell { width: 8rem }
 .bar { height: .45rem; width: var(--w); min-width: 3px; background: var(--links); border-radius: 999px; opacity: .7 }

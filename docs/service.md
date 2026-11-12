@@ -203,7 +203,9 @@ favicon and the header's; the login page is that mark above a quiet card.
   token, account and route over 7 or 30 days, each row with a bar against
   the largest.
 
-Pages follow the system's light or dark preference. The bars' shares are the
+A page shows what there is first: adding an account, a route or a token is
+behind a `+` at the bottom, so the cards and tables have the page to
+themselves. Pages follow the system's light or dark preference. The bars' shares are the
 only inline styles, and their values are numbers the server computes.
 
 The session is a random id in a cookie `ak_session`: HttpOnly,

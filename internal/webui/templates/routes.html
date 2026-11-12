@@ -21,9 +21,9 @@
 {{template "empty" "No routes yet."}}
 {{end}}
 
-<h2>Add or change a route</h2>
-<div class="cols">
-<section class="panel">
+<details class="add">
+<summary>Add or change a route</summary>
+<section class="panel narrow">
 <form method="post" action="/ui/routes/save" class="stack">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <div class="duo">
@@ -37,18 +37,16 @@
 </form>
 <p class="note">Accounts: {{template "chips" .Accounts}}</p>
 </section>
+</details>
 
-<section class="panel">
-  <h3>Model names</h3>
-  <table class="grid">
-    <thead><tr><th>name</th><th>means</th></tr></thead>
-    <tbody>
-    <tr><td class="mono">&lt;account&gt;</td><td>the account's vendor's default model, for the protocol asked</td></tr>
-    <tr><td class="mono">&lt;account&gt;/&lt;model&gt;</td><td>any model at that account; the model goes upstream as is</td></tr>
-    <tr><td class="mono">&lt;alias&gt;</td><td>another model name, from a route</td></tr>
-    <tr><td class="mono">&lt;pool&gt;</td><td>several model names with failover or rotation</td></tr>
-    </tbody>
-  </table>
-</section>
-</div>
+<h2>Model names</h2>
+<table class="grid">
+  <thead><tr><th>name</th><th>means</th></tr></thead>
+  <tbody>
+  <tr><td class="mono">&lt;account&gt;</td><td>the account's vendor's default model, for the protocol asked</td></tr>
+  <tr><td class="mono">&lt;account&gt;/&lt;model&gt;</td><td>any model at that account; the model goes upstream as is</td></tr>
+  <tr><td class="mono">&lt;alias&gt;</td><td>another model name, from a route</td></tr>
+  <tr><td class="mono">&lt;pool&gt;</td><td>several model names with failover or rotation</td></tr>
+  </tbody>
+</table>
 {{end}}

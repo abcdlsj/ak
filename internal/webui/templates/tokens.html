@@ -27,7 +27,8 @@
 {{template "empty" "No tokens yet."}}
 {{end}}
 
-<h2>Issue a token</h2>
+<details class="add">
+<summary>Issue a token</summary>
 <section class="panel narrow">
 <form method="post" action="/ui/tokens/add" class="stack">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -42,4 +43,5 @@
   <p class="note">None checked: the token may use every route.</p>
 </form>
 </section>
+</details>
 {{end}}
