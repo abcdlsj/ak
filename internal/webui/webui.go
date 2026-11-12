@@ -211,6 +211,7 @@ func (u *UI) render(w http.ResponseWriter, page string, data map[string]any, c *
 		data["CSRF"] = c.ss.csrf
 		data["Flash"], data["Token"] = u.sessions.take(c.ss)
 		data["Signed"] = true
+		data["Addr"] = u.b.Config().Service.Addr
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := u.pages[page].Execute(w, data); err != nil {

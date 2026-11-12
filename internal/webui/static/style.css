@@ -12,7 +12,7 @@
   --heat2: #4ac26b;
   --heat3: #2da44e;
   --heat4: #116329;
-  --cell: 12px;
+  --cell: 13px;
   --action: #0969da;
   --on-action: #fff;
   --mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -143,7 +143,7 @@ h3 { font-size: .95rem; margin: 0 0 .8rem }
 .meter.spent .ticks::after { background: repeating-linear-gradient(90deg, var(--bad) 0 2px, transparent 2px 5px) }
 
 /* Panels hold forms; the gate is a login page on its own. */
-.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem }
+.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; align-items: start }
 .panel {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -270,10 +270,12 @@ button.link.bad { color: var(--bad) }
 .heat-cell {
   width: var(--cell);
   height: var(--cell);
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--heat0);
   display: inline-block;
+  transition: filter .1s linear;
 }
+.heat-grid .heat-cell:hover { filter: brightness(1.35) }
 .heat-cell.l-1 { visibility: hidden }
 .heat-cell.l1 { background: var(--heat1) }
 .heat-cell.l2 { background: var(--heat2) }
@@ -331,6 +333,17 @@ td.bar-cell { width: 8rem }
 .issued code { font-size: .95rem; word-break: break-all; user-select: all }
 .select { user-select: all }
 
+.foot {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  margin-top: 3.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: .78rem;
+}
+.foot .mono { font-size: .78rem }
 .flash { border: 1px solid var(--border); border-radius: 8px; padding: .6rem .85rem; background: var(--background-alt) }
 .flash.bad { border-color: var(--bad); color: var(--bad) }
 .empty { color: var(--text-muted); border: 1px dashed var(--border); border-radius: 10px; padding: 1rem; text-align: center }

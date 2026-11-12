@@ -107,6 +107,8 @@ func short(d time.Duration) string {
 	switch {
 	case days > 0:
 		return fmt.Sprintf("%dd %dh", days, hours)
+	case hours > 0 && mins == 0:
+		return fmt.Sprintf("%dh", hours)
 	case hours > 0:
 		return fmt.Sprintf("%dh %dm", hours, mins)
 	}
