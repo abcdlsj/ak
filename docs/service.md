@@ -211,8 +211,8 @@ only inline styles, and their values are numbers the server computes.
 The session is a random id in a cookie `ak_session`: HttpOnly,
 SameSite=Strict, Secure when the request came over TLS or with
 `X-Forwarded-Proto: https`, for 12 hours, held in memory (a restart signs
-out). Every form carries the session's CSRF token, and a POST whose
-`Origin` is another host is refused. Five failed logins within five minutes
+out). Every form carries the session's CSRF token, and a POST that names no
+`Origin` or `Referer`, or another host, is refused. Five failed logins within five minutes
 lock the login for the rest of those minutes; the count is global, because
 behind a proxy every client has the proxy's address. Logout ends the
 session. An API token never opens the UI, and the session cookie is never
@@ -311,10 +311,10 @@ message rather than failing to parse it.
 - A vendor's redirect is followed only while it stays on the vendor's host:
   Go drops `Authorization` and `Cookie` across hosts but not `x-api-key`,
   which is where an injected key lives.
-- A form the UI reads is bounded at 1 MB; a request body at 128 MB.
+- A form the UI reads is bounded at 1 MB; a request body at 32 MB.
 - Cookies and the client's `Authorization` and `x-api-key` never go
   upstream.
-- Bodies are bounded (128 MB), as are streams that stall; in-flight
+- Bodies are bounded (32 MB), as are streams that stall; in-flight
   requests are bounded by `settings.max_inflight`.
 - UI responses carry `Content-Security-Policy: default-src 'self';
   style-src 'self' 'unsafe-inline'` (inline styles are the bars' widths and

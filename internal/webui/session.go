@@ -136,15 +136,16 @@ func setCookie(w http.ResponseWriter, r *http.Request, name, value string, maxAg
 	})
 }
 
-// sameOrigin refuses a request whose Origin or Referer names another host:
-// SameSite cookies already keep other sites out, this keeps out the rest.
+// sameOrigin refuses a request whose Origin or Referer names another host,
+// and one that names neither: a browser sends one of them with every form,
+// so a post without them is not a page of ours.
 func sameOrigin(r *http.Request) bool {
 	src := r.Header.Get("Origin")
 	if src == "" {
 		src = r.Header.Get("Referer")
 	}
 	if src == "" || src == "null" {
-		return src == ""
+		return false
 	}
 	u, err := url.Parse(src)
 	if err != nil {

@@ -64,6 +64,10 @@ func (s *site) do(method, path string, form url.Values, hdr ...string) *httptest
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req.Header.Set(hdr[i], hdr[i+1])
 	}
+	// A browser names the origin on a form post; without it the UI refuses.
+	if method == http.MethodPost && req.Header.Get("Origin") == "" {
+		req.Header.Set("Origin", "http://"+req.Host)
+	}
 	for _, c := range s.jar {
 		req.AddCookie(c)
 	}
@@ -222,6 +226,22 @@ func TestFormBodyLimit(t *testing.T) {
 	rec := s.do("POST", "/ui/accounts/key", url.Values{"csrf": {s.csrf("/ui/accounts")}, "vendor": {"command-code"}, "key": {big}})
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("a huge form: %d", rec.Code)
+	}
+}
+
+// A form post names where it came from; one that does not is not from a page
+// of ours, and is refused even before the password is looked at.
+func TestPostWithoutAnOriginIsRefused(t *testing.T) {
+	s := newSite(t, true)
+	req := httptest.NewRequest("POST", "/ui/login", strings.NewReader("csrf=x&password="+password))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("a post with no Origin or Referer: %d", rec.Code)
+	}
+	if rec := s.do("GET", "/ui/login", nil); rec.Code != http.StatusOK {
+		t.Errorf("a plain GET: %d", rec.Code)
 	}
 }
 

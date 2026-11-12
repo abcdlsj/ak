@@ -48,8 +48,9 @@ const (
 // Bounds on a proxied request and its streams.
 const (
 	// maxBodyBytes is the largest request body buffered: failover replays it,
-	// so it is held in memory and capped.
-	maxBodyBytes = 128 << 20
+	// so it is held in memory and capped. A long prompt is a few megabytes;
+	// 32 holds a whole one with room, and 256 of them in flight stay bounded.
+	maxBodyBytes = 32 << 20
 	// bodyReadTimeout is how long a client has to send its whole body.
 	bodyReadTimeout = 60 * time.Second
 	// maxErrorBody is how much of a 4xx body is read to classify its cause.
