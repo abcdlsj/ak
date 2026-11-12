@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
+	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/quota"
 	"github.com/abcdlsj/ak/internal/usage"
 	"github.com/spf13/cobra"
@@ -43,7 +44,7 @@ ak usage. No model request is sent: ak check does that.`,
 				}
 			}
 			if len(names) == 0 {
-				fmt.Println("No providers yet. Run `ak` to add one.")
+				out.Empty(os.Stdout, "No providers yet.", "Add one by running `ak`.")
 				return nil
 			}
 
@@ -69,29 +70,59 @@ ak usage. No model request is sent: ak check does that.`,
 				}
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintf(w, "provider\tengine\thealth\tbalance\tplan\t%dd tokens\t%dd cost\n", statusDays, statusDays)
-			for _, n := range names {
-				p := cfg.Providers[n]
-				h := "ok"
-				if st := health[n]; !st.OK() {
-					h = "✗ " + strings.Join(st.Problems(), ", ")
-				}
-				bal, plan := "-", ""
-				if q, ok := quotas[n]; ok {
-					switch {
-					case q.NoSource:
-					case q.Error != "":
-						bal = "✗"
-					default:
-						bal, plan = balanceText(q), usageText(q)
-					}
-				}
-				u := used[n]
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", n, p.Kind, h, bal, plan, humanizeInt(u.Tokens), costStr(u.Cost))
-			}
-			w.Flush()
+			printStatus(cfg, names, health, quotas, used)
 			return nil
 		},
 	}
+}
+
+// printStatus writes the table, then what to do about providers no balance
+// source serves.
+func printStatus(cfg *config.Config, names []string, health map[string]core.Status,
+	quotas map[string]quota.Quota, used map[string]usage.ProviderRow) {
+	cells := make([][]string, 0, len(names))
+	var noSource []string
+	for _, n := range names {
+		q := quotas[n]
+		if q.NoSource {
+			noSource = append(noSource, n)
+		}
+		u := used[n]
+		cells = append(cells, []string{
+			n,
+			string(cfg.Providers[n].Kind),
+			healthText(health[n]),
+			planCell(q),
+			humanizeInt(u.Tokens),
+			costStr(u.Cost),
+		})
+	}
+	head := []string{"provider", "engine", "health", "plan",
+		fmt.Sprintf("%dd tokens", statusDays), fmt.Sprintf("%dd cost", statusDays)}
+	out.Table(os.Stdout, head, cells)
+	if len(noSource) > 0 {
+		fmt.Println()
+		out.Hint(os.Stdout, "no balance source: %s (relays and gateways usually have none)", strings.Join(noSource, ", "))
+	}
+}
+
+// healthText is a provider's local health: a mark and what is wrong, or just
+// ok.
+func healthText(st core.Status) string {
+	if st.OK() {
+		return out.Mark(out.Fine) + " ok"
+	}
+	return out.Mark(out.Broken) + " " + strings.Join(st.Problems(), ", ")
+}
+
+// planCell is a provider's balance and windows, a dim dash when no source
+// serves it, or why the read failed.
+func planCell(q quota.Quota) string {
+	switch {
+	case q.NoSource:
+		return out.Or("")
+	case q.Error != "":
+		return out.Err("✗ ") + out.Reason(q.Error)
+	}
+	return out.Or(planText(q))
 }

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"text/tabwriter"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/probe"
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/spf13/cobra"
@@ -37,7 +37,7 @@ ok when any member is. Exits 1 when any provider is not ok or slow.`,
 				return err
 			}
 			if len(results) == 0 {
-				fmt.Println("No providers to check.")
+				out.Empty(os.Stdout, "No providers to check.", "")
 				return nil
 			}
 			if asJSON {
@@ -48,7 +48,7 @@ ok when any member is. Exits 1 when any provider is not ok or slow.`,
 				printChecks(results)
 			}
 			if n := failedChecks(results); n > 0 {
-				return fmt.Errorf("%d provider(s) failed the check", n)
+				return fmt.Errorf("%d of %d providers failed the check", n, len(results))
 			}
 			return nil
 		},
@@ -158,15 +158,41 @@ func failedChecks(results []probe.Result) int {
 	return n
 }
 
+// printChecks writes one row per provider: its mark, how fast it answered and
+// what went wrong.
 func printChecks(results []probe.Result) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "provider\tstatus\tlatency\tmodel\tdetail")
+	cells := make([][]string, 0, len(results))
 	for _, r := range results {
-		latency := "-"
+		latency := ""
 		if r.LatencyMS > 0 {
 			latency = fmt.Sprintf("%dms", r.LatencyMS)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Provider, r.Status, latency, dash(r.Model), r.Detail)
+		cells = append(cells, []string{
+			r.Provider,
+			checkText(r.Status),
+			out.Or(latency),
+			out.Or(r.Model),
+			out.Or(out.Reason(r.Detail)),
+		})
 	}
-	w.Flush()
+	out.Table(os.Stdout, []string{"provider", "status", "latency", "model", "note"}, cells)
+}
+
+// checkText is a check's mark and its status word.
+func checkText(s probe.Status) string {
+	return out.Mark(checkLevel(s)) + " " + string(s)
+}
+
+// checkLevel is the mark a status earns: ok is fine, slow is worth a look, a
+// skip says nothing and anything else is broken.
+func checkLevel(s probe.Status) out.Level {
+	switch s {
+	case probe.StatusOK:
+		return out.Fine
+	case probe.StatusSlow:
+		return out.Notice
+	case probe.StatusSkip:
+		return out.Unknown
+	}
+	return out.Broken
 }

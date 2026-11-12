@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"text/tabwriter"
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/quota"
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/spf13/cobra"
@@ -41,7 +41,7 @@ names, every provider is asked. A pool is asked through its members.`,
 				return err
 			}
 			if len(names) == 0 {
-				fmt.Println("No providers to query.")
+				out.Empty(os.Stdout, "No providers to query.", "")
 				return nil
 			}
 			for _, err := range quota.PluginErrors() {
@@ -257,33 +257,44 @@ func quotaTargets(cfg *config.Config, args []string) ([]string, error) {
 	return out, nil
 }
 
+// printQuota writes the table, then what to do about providers no balance
+// source serves: a gap in coverage, counted once rather than on every row.
 func printQuota(results []quota.Quota) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "provider\tsource\tbalance\tusage\tdetail")
-	var noSource int
+	cells := make([][]string, 0, len(results))
+	var noSource []string
 	for _, q := range results {
-		switch {
-		case q.NoSource:
-			// Not a failure: say so once below rather than on every row.
-			noSource++
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", q.Provider, "-", "-", "", "")
-		case q.Error != "":
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", q.Provider, dash(q.Source), "✗", "", q.Error)
-		default:
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				q.Provider, dash(q.Source), balanceText(q), usageText(q), q.Detail)
+		if q.NoSource {
+			noSource = append(noSource, q.Provider)
 		}
+		cells = append(cells, quotaRow(q))
 	}
-	w.Flush()
-	if noSource > 0 {
-		fmt.Printf("\n%d without a balance source: set quota = <%s>, or quota_cmd\n",
-			noSource, strings.Join(quota.Sources(), "|"))
+	out.Table(os.Stdout, []string{"provider", "source", "balance", "plan", "note"}, cells)
+	if len(noSource) == 0 {
+		return
 	}
+	fmt.Println()
+	out.Hint(os.Stdout, "%d providers have no balance source; relays and gateways usually have none", len(noSource))
+	out.Hint(os.Stdout, "set `quota = \"<id>\"` in providers.toml; `ak vendor list` and ~/.config/ak/quota.d add sources")
 }
 
+// quotaRow is one provider's balance reading; a failed read says why in the
+// note, a provider with no source says nothing.
+func quotaRow(q quota.Quota) []string {
+	switch {
+	case q.NoSource:
+		return []string{q.Provider, out.Or(""), out.Or(""), out.Or(""), out.Or("")}
+	case q.Error != "":
+		return []string{q.Provider, out.Or(q.Source), out.Or(""), out.Or(""),
+			out.Mark(out.Broken) + " " + out.Reason(q.Error)}
+	}
+	return []string{q.Provider, out.Or(q.Source), out.Or(balanceText(q)),
+		out.Or(usageText(q)), out.Or(q.Detail)}
+}
+
+// balanceText is a quota's money left, empty when the source reports none.
 func balanceText(q quota.Quota) string {
 	if q.Balance == nil {
-		return "-"
+		return ""
 	}
 	if q.Currency == "" {
 		return amount(*q.Balance)
@@ -307,24 +318,50 @@ func percent(v float64) string {
 	return strings.TrimSuffix(strconv.FormatFloat(v, 'f', 1, 64), ".0") + "%"
 }
 
+// usageText is what a plan has used: money against a limit, and its windows.
 func usageText(q quota.Quota) string {
-	var parts []string
-	if q.Used != nil && q.Limit != nil {
-		parts = append(parts, amount(*q.Used)+"/"+amount(*q.Limit))
-	} else if q.Used != nil {
-		parts = append(parts, amount(*q.Used)+" used")
+	parts := windowParts(q)
+	switch {
+	case q.Used != nil && q.Limit != nil:
+		parts = append([]string{amount(*q.Used) + "/" + amount(*q.Limit)}, parts...)
+	case q.Used != nil:
+		parts = append([]string{amount(*q.Used) + " used"}, parts...)
 	}
+	return joinParts(parts)
+}
+
+// planText is a balance and its plan windows on one line, as ak status shows
+// them.
+func planText(q quota.Quota) string {
+	parts := windowParts(q)
+	if b := balanceText(q); b != "" {
+		parts = append([]string{b}, parts...)
+	}
+	return joinParts(parts)
+}
+
+// windowParts is each plan window: its share used and when it resets.
+func windowParts(q quota.Quota) []string {
+	parts := make([]string, 0, len(q.Windows))
 	for _, win := range q.Windows {
 		s := win.Name + " " + percent(win.Used)
 		if win.Resets != nil {
-			s += " (resets " + win.Resets.Local().Format("01-02 15:04") + ")"
+			s += " " + resetText(*win.Resets)
 		}
 		parts = append(parts, s)
 	}
-	if len(parts) == 0 {
-		return ""
+	return parts
+}
+
+// resetText is when a plan window resets: the time alone when that is today,
+// the day too otherwise, in local time as the TUI shows it.
+func resetText(t time.Time) string {
+	t = t.Local()
+	now := time.Now()
+	if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
+		return "↻ " + t.Format("15:04")
 	}
-	return joinParts(parts)
+	return "↻ " + t.Format("01-02 15:04")
 }
 
 func joinParts(parts []string) string {

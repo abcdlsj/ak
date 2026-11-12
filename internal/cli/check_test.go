@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/probe"
 	"github.com/abcdlsj/ak/internal/secrets"
 )
@@ -44,5 +45,26 @@ func TestRunChecksPool(t *testing.T) {
 	}
 	if n := failedChecks(results); n != 1 {
 		t.Fatalf("failed = %d, want 1", n)
+	}
+}
+
+// A status says what it is with its mark: an answer is fine, a slow one is
+// worth a look, a skip is unknown and a failure is broken.
+func TestCheckMarks(t *testing.T) {
+	cases := map[probe.Status]out.Level{
+		probe.StatusOK:    out.Fine,
+		probe.StatusSlow:  out.Notice,
+		probe.StatusSkip:  out.Unknown,
+		probe.StatusAuth:  out.Broken,
+		probe.StatusModel: out.Broken,
+		probe.StatusFail:  out.Broken,
+	}
+	for s, want := range cases {
+		if got := checkLevel(s); got != want {
+			t.Errorf("checkLevel(%s) = %v, want %v", s, got, want)
+		}
+		if want := out.Mark(want) + " " + string(s); checkText(s) != want {
+			t.Errorf("checkText(%s) = %q, want %q", s, checkText(s), want)
+		}
 	}
 }
