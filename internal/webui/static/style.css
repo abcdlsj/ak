@@ -18,8 +18,17 @@
   --mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* Neutral grey behind the pages, not water.css's blue-black, so the
+   colourful cards and the green calendar sit on quiet ground. */
 @media (prefers-color-scheme: dark) {
   :root {
+    --background-body: #17191c;
+    --background: #24272c;
+    --background-alt: #1d2024;
+    --border: #35393f;
+    --text-main: #e2e4e7;
+    --text-muted: #9ba1a9;
+    --links: #58a6ff;
     --ok: #3fb950;
     --warn: #d29922;
     --bad: #f85149;
