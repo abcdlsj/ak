@@ -17,9 +17,9 @@ import (
 	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/quota"
-	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/shim"
+	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/spf13/cobra"
 )
 

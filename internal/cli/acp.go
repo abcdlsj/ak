@@ -42,7 +42,7 @@ credentials.
 The provider is chosen the same way a terminal launch chooses it: the AK
 override, then a repository binding, then the engine default, and the engine's
 own environment when none applies.`,
-		Args:               cobra.MinimumNArgs(1),
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			k, ok := parseKind(args[0])
 			if !ok {
