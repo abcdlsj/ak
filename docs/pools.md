@@ -62,7 +62,7 @@ starts `ak serve` in the background when nothing is listening, logging to
 `~/.config/ak/gateway.log`; `ak doctor` warns when a pool exists but
 nothing is listening on the gateway.
 
-With the gateway running, the TUI's Manage page shows a pool as it works: a
+With the gateway running, the TUI's home page shows a selected pool as it works: a
 sparkline per member of requests per minute over the last hour, scaled together
 so a busier member visibly outranks a quieter one, with each member's totals and
 any cooldown. The gateway answers `GET /stats` with the same data, and

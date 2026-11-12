@@ -5,8 +5,8 @@ import (
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
-	"github.com/abcdlsj/ak/internal/preset"
 	"github.com/abcdlsj/ak/internal/provider"
+	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/spf13/cobra"
 )
 
@@ -119,14 +119,27 @@ func describeProvider(cfg *config.Config, name string) string {
 	return strings.Join(parts, " · ")
 }
 
-// completePresets completes preset ids, each once across engines.
-func completePresets(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	seen := map[string]bool{}
+// completeVendors completes vendor ids.
+func completeVendors(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	var out []string
-	for _, p := range preset.All() {
-		if !seen[p.ID] && strings.HasPrefix(p.ID, toComplete) {
-			seen[p.ID] = true
-			out = append(out, p.ID+"\t"+p.Name)
+	for _, v := range vendor.All() {
+		if strings.HasPrefix(v.ID, toComplete) {
+			out = append(out, v.ID+"\t"+v.Name)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeAccounts completes account names.
+func completeAccounts(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	cfg, err := core.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var out []string
+	for _, n := range cfg.AccountNames() {
+		if strings.HasPrefix(n, toComplete) {
+			out = append(out, n+"\t"+cfg.Accounts[n].Vendor)
 		}
 	}
 	return out, cobra.ShellCompDirectiveNoFileComp

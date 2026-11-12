@@ -6,13 +6,20 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 )
 
+// editDraftOf edits p as provider "pool" of an otherwise empty config.
+func editDraftOf(p config.Provider) *Draft {
+	cfg := config.Default()
+	cfg.Providers["pool"] = p
+	return EditDraft(cfg, "pool")
+}
+
 func TestDraftPoolRoundTrip(t *testing.T) {
 	src := config.Provider{
 		Kind: config.KindClaude, Members: []string{"a", "b"},
 		Strategy: config.StrategyRotate, MemberModels: map[string]string{"a": "m1"},
 		Model: "logical",
 	}
-	d := EditDraft("pool", src)
+	d := editDraftOf(src)
 	if d.Members != "a, b" {
 		t.Fatalf("Members = %q, want \"a, b\"", d.Members)
 	}
@@ -29,7 +36,7 @@ func TestDraftPoolRoundTrip(t *testing.T) {
 }
 
 func TestDraftPoolDropsRemovedMapping(t *testing.T) {
-	d := EditDraft("pool", config.Provider{
+	d := editDraftOf(config.Provider{
 		Kind: config.KindClaude, Members: []string{"a", "b"},
 		MemberModels: map[string]string{"a": "m1", "b": "m2"},
 	})
@@ -44,7 +51,7 @@ func TestDraftPoolDropsRemovedMapping(t *testing.T) {
 }
 
 func TestDraftBlankMembersClearsPool(t *testing.T) {
-	d := EditDraft("pool", config.Provider{
+	d := editDraftOf(config.Provider{
 		Kind: config.KindClaude, Members: []string{"a"}, Strategy: config.StrategyOrder,
 		MemberModels: map[string]string{"a": "m1"},
 	})

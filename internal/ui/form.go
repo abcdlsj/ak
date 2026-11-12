@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
-	"github.com/abcdlsj/ak/internal/preset"
+	"github.com/abcdlsj/ak/internal/vendor"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
 )
 
@@ -38,28 +39,39 @@ type Draft struct {
 	// provider a normal upstream.
 	Members  string
 	Strategy string
-	// Preset is the id of the built-in preset a new provider starts from;
-	// blank for none.
-	Preset string
+	// Account is the account the provider runs on; blank for an endpoint of
+	// its own.
+	Account string
 
+	// choice is what the pick step chose: an account, a vendor to sign in
+	// to first, or neither for an endpoint of its own.
+	choice string
+	// defaults is what the account gives the provider, shown where the
+	// provider leaves a field to it.
+	defaults vendor.Endpoint
 	existing bool
-	// picked is set once the engine and preset were asked before the form,
-	// so the form does not ask for the engine again.
-	picked bool
-	// keyURL is where the chosen preset's vendor hands out keys.
-	keyURL string
 	// orig is the name being edited; Name may differ after a rename.
 	orig string
 	base config.Provider
 }
+
+// The pick step's choices are prefixed by what they name.
+const (
+	choiceAccount = "account:"
+	choiceVendor  = "vendor:"
+)
 
 // NewDraft starts a draft for a new provider.
 func NewDraft(name string) *Draft {
 	return &Draft{Name: name, Kind: string(config.KindClaude), KeyField: "auth_token", WireAPI: "responses"}
 }
 
-// EditDraft starts a draft from an existing provider.
-func EditDraft(name string, p config.Provider) *Draft {
+// EditDraft starts a draft from an existing provider, as providers.toml
+// keeps it: a field its account gives stays blank and keeps following the
+// account.
+func EditDraft(cfg *config.Config, name string) *Draft {
+	full := cfg.Providers[name]
+	p := cfg.Stored(full)
 	d := &Draft{
 		Name: name, Kind: string(p.Kind), Display: p.Display, BaseURL: p.BaseURL,
 		Model: p.Model, Haiku: p.Haiku, Sonnet: p.Sonnet, Opus: p.Opus,
@@ -68,8 +80,10 @@ func EditDraft(name string, p config.Provider) *Draft {
 		PiProvider:     p.PiProvider, PiAPI: p.PiAPI, PiAuth: p.PiAuthHeader,
 		Quota: p.Quota, QuotaCmd: p.QuotaCmd,
 		Members: strings.Join(p.Members, ", "), Strategy: p.Strategy,
+		Account:  p.Account,
 		existing: true, orig: name, base: p,
 	}
+	d.defaults = endpointOf(cfg, p.Account, p.Kind)
 	if d.KeyField == "" {
 		d.KeyField = "auth_token"
 	}
@@ -82,26 +96,46 @@ func EditDraft(name string, p config.Provider) *Draft {
 	return d
 }
 
+// endpointOf is what account gives an engine of kind, if anything.
+func endpointOf(cfg *config.Config, account string, kind config.Kind) vendor.Endpoint {
+	v, ok := vendor.Lookup(cfg.Accounts[account].Vendor)
+	if !ok {
+		return vendor.Endpoint{}
+	}
+	e, _ := v.Endpoint(string(kind))
+	return e
+}
+
 // Provider merges the draft over the provider it started from, so fields the
-// form does not show (env, variants, pricing) survive an edit.
+// form does not show (env, variants, pricing) survive an edit. It is in the
+// stored form: a provider on an account leaves its endpoint to the account.
 func (d *Draft) Provider() config.Provider {
 	p := d.base
 	p.Kind = config.Kind(d.Kind)
+	p.Account = d.Account
 	p.Display = strings.TrimSpace(d.Display)
-	p.BaseURL = strings.TrimSpace(d.BaseURL)
 	p.Model = strings.TrimSpace(d.Model)
 	p.Haiku = strings.TrimSpace(d.Haiku)
 	p.Sonnet = strings.TrimSpace(d.Sonnet)
 	p.Opus = strings.TrimSpace(d.Opus)
+	p.DefaultVariant = strings.TrimSpace(d.DefaultVariant)
+	p.Reasoning = ""
+	if p.Kind == config.KindCodex {
+		p.Reasoning = d.Reasoning
+	}
+	if p.Account != "" {
+		return p
+	}
+
+	p.BaseURL = strings.TrimSpace(d.BaseURL)
 	p.Quota = strings.TrimSpace(d.Quota)
 	p.QuotaCmd = strings.TrimSpace(d.QuotaCmd)
 	p.PiProvider = strings.TrimSpace(d.PiProvider)
 	p.PiAPI = strings.TrimSpace(d.PiAPI)
 	p.PiAuthHeader = d.PiAuth
-	p.DefaultVariant = strings.TrimSpace(d.DefaultVariant)
 	// Fields of the other engine are cleared, not carried along; a default
 	// value is left unset.
-	p.KeyField, p.WireAPI, p.Reasoning = "", "", ""
+	p.KeyField, p.WireAPI = "", ""
 	switch p.Kind {
 	case config.KindClaude:
 		if d.KeyField != "auth_token" {
@@ -111,7 +145,6 @@ func (d *Draft) Provider() config.Provider {
 		if d.WireAPI != "responses" {
 			p.WireAPI = d.WireAPI
 		}
-		p.Reasoning = d.Reasoning
 	}
 	// A blank key keeps whatever the provider had.
 	if key := strings.TrimSpace(d.Key); key != "" {
@@ -163,69 +196,97 @@ func (d *Draft) Orig() string { return d.orig }
 // IsNew reports whether the draft adds a provider rather than editing one.
 func (d *Draft) IsNew() bool { return !d.existing }
 
-// PresetForm asks a new provider's engine and an optional preset, run before
-// Form so the preset can pre-fill it.
-func (d *Draft) PresetForm() *huh.Form {
+// PickForm asks a new provider's engine and what it runs on: an account, a
+// vendor to sign in to, or an endpoint of its own. It runs before Form,
+// which it decides the shape of.
+func (d *Draft) PickForm(cfg *config.Config) *huh.Form {
 	return huh.NewForm(huh.NewGroup(
 		huh.NewSelect[string]().Title("Engine").Value(&d.Kind).
 			Options(huh.NewOption("claude", string(config.KindClaude)), huh.NewOption("codex", string(config.KindCodex)), huh.NewOption("pi", string(config.KindPi))),
-		huh.NewSelect[string]().Title("Preset").Value(&d.Preset).
-			Description("Pre-fills the endpoint and model; / filters").
-			OptionsFunc(func() []huh.Option[string] { return presetOptions(config.Kind(d.Kind)) }, &d.Kind).
+		huh.NewSelect[string]().Title("Runs on").Value(&d.choice).
+			Description("An account, a vendor to sign in to, or your own endpoint; / filters").
+			OptionsFunc(func() []huh.Option[string] { return pickOptions(cfg, config.Kind(d.Kind)) }, &d.Kind).
 			Height(12),
 	)).WithShowHelp(true)
 }
 
-func presetOptions(kind config.Kind) []huh.Option[string] {
-	opts := []huh.Option[string]{huh.NewOption("(none)", "")}
-	for _, p := range preset.ForKind(kind) {
-		opts = append(opts, huh.NewOption(p.Name+" ("+p.ID+")", p.ID))
+// pickOptions lists, for an engine, the accounts that serve it, then the
+// vendors to sign in to, then an endpoint of one's own.
+func pickOptions(cfg *config.Config, kind config.Kind) []huh.Option[string] {
+	var opts []huh.Option[string]
+	for _, n := range cfg.AccountNames() {
+		v, ok := vendor.Lookup(cfg.Accounts[n].Vendor)
+		if _, serves := v.Endpoint(string(kind)); ok && serves {
+			opts = append(opts, huh.NewOption(n+"  ·  "+v.Name, choiceAccount+n))
+		}
 	}
-	return opts
+	for _, v := range vendor.All() {
+		if _, serves := v.Endpoint(string(kind)); serves {
+			opts = append(opts, huh.NewOption("sign in to "+v.Name+" ("+v.ID+")", choiceVendor+v.ID))
+		}
+	}
+	return append(opts, huh.NewOption("my own endpoint", ""))
 }
 
-// ApplyPreset fills the draft from the chosen preset and marks the engine as
-// chosen. With no preset it changes nothing else. A blank name becomes the
-// preset id.
-func (d *Draft) ApplyPreset() {
-	d.picked = true
-	ps, ok := preset.Lookup(d.Preset, config.Kind(d.Kind))
+// SignInFirst is the vendor the pick step chose to sign in to before the
+// form, if any.
+func (d *Draft) SignInFirst() (vendor.Vendor, bool) {
+	id, ok := strings.CutPrefix(d.choice, choiceVendor)
 	if !ok {
-		d.Preset = ""
-		return
+		return vendor.Vendor{}, false
 	}
-	ps.Apply(&d.base)
-	p := d.base
-	d.BaseURL, d.Model = p.BaseURL, p.Model
-	d.Haiku, d.Sonnet, d.Opus = p.Haiku, p.Sonnet, p.Opus
-	d.PiAPI, d.PiAuth = p.PiAPI, p.PiAuthHeader
-	if d.KeyField = p.KeyField; d.KeyField == "" {
-		d.KeyField = "auth_token"
-	}
-	if d.WireAPI = p.WireAPI; d.WireAPI == "" {
-		d.WireAPI = "responses"
-	}
-	if d.Display == "" {
-		d.Display = p.Display
-	}
-	if d.Name == "" {
-		d.Name = ps.ID
-	}
-	d.keyURL = ps.APIKeyURL
+	return vendor.Lookup(id)
 }
 
-// Form builds the provider form. taken reports names already in use.
-func (d *Draft) Form(taken func(string) bool) *huh.Form {
-	isKind := func(k config.Kind) func() bool {
-		return func() bool { return d.Kind != string(k) }
+// UseAccount puts the draft on an account, as the pick step or a sign-in
+// chose. A blank name is the provider's own endpoint.
+func (d *Draft) UseAccount(cfg *config.Config, name string) {
+	d.choice, d.Account = "", name
+	d.defaults = endpointOf(cfg, name, config.Kind(d.Kind))
+	if d.Name == "" && name != "" {
+		d.Name = name
+		if _, taken := cfg.Providers[name]; taken {
+			d.Name = name + "-" + d.Kind
+		}
 	}
+}
 
-	keyDesc := "Or a reference: env:NAME, cmd:..., keychain:..."
-	if d.existing {
-		keyDesc = "Blank keeps the current key. " + keyDesc
+// ApplyPick takes the pick step's choice of account; a vendor to sign in to
+// is left for the caller (SignInFirst), who then calls UseAccount.
+func (d *Draft) ApplyPick(cfg *config.Config) {
+	if name, ok := strings.CutPrefix(d.choice, choiceAccount); ok {
+		d.UseAccount(cfg, name)
 	}
-	if d.keyURL != "" {
-		keyDesc = "Get one at " + d.keyURL + ". " + keyDesc
+}
+
+// formKeys moves between fields with ↑/↓ as well as tab, and changes a
+// select with ←/→: every select in the form is inline.
+func formKeys() *huh.KeyMap {
+	km := huh.NewDefaultKeyMap()
+	km.Input.Next = key.NewBinding(key.WithKeys("enter", "tab", "down"), key.WithHelp("↓/enter", "next"))
+	km.Input.Prev = key.NewBinding(key.WithKeys("shift+tab", "up"), key.WithHelp("↑", "back"))
+	km.Select.Next = key.NewBinding(key.WithKeys("enter", "tab", "down"), key.WithHelp("↓/enter", "next"))
+	km.Select.Prev = key.NewBinding(key.WithKeys("shift+tab", "up"), key.WithHelp("↑", "back"))
+	km.Confirm.Next = key.NewBinding(key.WithKeys("enter", "tab", "down"), key.WithHelp("↓/enter", "next"))
+	km.Confirm.Prev = key.NewBinding(key.WithKeys("shift+tab", "up"), key.WithHelp("↑", "back"))
+	return km
+}
+
+// selectOf is an inline select, changed with ←/→, so ↑/↓ stay free to move
+// between fields.
+func selectOf(title string, value *string, opts ...huh.Option[string]) *huh.Select[string] {
+	return huh.NewSelect[string]().Title(title).Value(value).Options(opts...).Inline(true)
+}
+
+// Form builds the provider form for the draft's engine and account, known
+// by now. taken reports names already in use.
+func (d *Draft) Form(taken func(string) bool) *huh.Form {
+	onAccount := d.Account != ""
+	def := func(v string) string {
+		if v == "" {
+			return ""
+		}
+		return v + " (account default)"
 	}
 
 	basics := []huh.Field{
@@ -240,18 +301,65 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 				}
 				return nil
 			}),
+		huh.NewInput().Title("Model").Value(&d.Model).Placeholder(def(d.defaults.Model)),
+		huh.NewInput().Title("Display name").Value(&d.Display),
 	}
-	if !d.existing && !d.picked {
-		basics = append(basics,
-			huh.NewSelect[string]().Title("Engine").Value(&d.Kind).
-				Options(huh.NewOption("claude", string(config.KindClaude)), huh.NewOption("codex", string(config.KindCodex)), huh.NewOption("pi", string(config.KindPi))),
+	groups := []*huh.Group{huh.NewGroup(basics...)}
+	if !onAccount {
+		groups = append(groups, d.endpointGroup())
+	}
+
+	switch config.Kind(d.Kind) {
+	case config.KindClaude:
+		fields := []huh.Field{
+			huh.NewInput().Title("Opus-tier model").Value(&d.Opus).Placeholder(def(d.defaults.Opus)).Description("Blank uses the primary model"),
+			huh.NewInput().Title("Sonnet-tier model").Value(&d.Sonnet).Placeholder(def(d.defaults.Sonnet)),
+			huh.NewInput().Title("Haiku-tier model").Value(&d.Haiku).Placeholder(def(d.defaults.Haiku)),
+			selectOf("Default variant", &d.DefaultVariant, variantOptions(config.ClaudeTiers(), d.base.Variants)...),
+		}
+		if !onAccount {
+			fields = append(fields, selectOf("Auth variable", &d.KeyField,
+				huh.NewOption("ANTHROPIC_AUTH_TOKEN", "auth_token"), huh.NewOption("ANTHROPIC_API_KEY", "api_key")))
+		}
+		groups = append(groups, huh.NewGroup(fields...))
+	case config.KindCodex:
+		var fields []huh.Field
+		if !onAccount {
+			fields = append(fields, selectOf("Wire API", &d.WireAPI, huh.NewOption("responses", "responses"), huh.NewOption("chat", "chat")))
+		}
+		fields = append(fields,
+			selectOf("Default reasoning effort", &d.Reasoning, reasoningOptions()...),
+			selectOf("Default variant", &d.DefaultVariant, variantOptions(config.ReasoningLevels(), d.base.Variants)...),
 		)
+		groups = append(groups, huh.NewGroup(fields...))
+	case config.KindPi:
+		var fields []huh.Field
+		if !onAccount {
+			fields = append(fields,
+				huh.NewInput().Title("Existing pi provider").Value(&d.PiProvider).
+					Description("Use a provider pi already knows; blank registers ak-<name> from the endpoint"),
+				selectOf("Wire API", &d.PiAPI, huh.NewOption("anthropic-messages", "anthropic-messages"), huh.NewOption("openai-completions", "openai-completions"), huh.NewOption("openai-responses", "openai-responses")),
+				huh.NewConfirm().Title("Send the key as Authorization: Bearer").Value(&d.PiAuth),
+			)
+		}
+		fields = append(fields, selectOf("Default variant", &d.DefaultVariant, variantOptions(config.ThinkingLevels(), d.base.Variants)...))
+		groups = append(groups, huh.NewGroup(fields...))
 	}
-	basics = append(basics,
+	return huh.NewForm(groups...).WithKeyMap(formKeys()).WithShowHelp(true)
+}
+
+// endpointGroup asks for a provider's own upstream, or the members of a pool.
+func (d *Draft) endpointGroup() *huh.Group {
+	keyDesc := "Or a reference: env:NAME, cmd:..., keychain:..."
+	if d.existing {
+		keyDesc = "Blank keeps the current key. " + keyDesc
+	}
+	return huh.NewGroup(
 		huh.NewInput().Title("Pool members").Value(&d.Members).
 			Description("Comma-separated provider names; blank for a normal provider"),
-		huh.NewSelect[string]().Title("Pool strategy").Value(&d.Strategy).
-			Options(huh.NewOption("order (failover)", config.StrategyOrder), huh.NewOption("rotate", config.StrategyRotate), huh.NewOption("least-used", config.StrategyLeastUsed), huh.NewOption("smart (soonest reset first)", config.StrategySmart)),
+		selectOf("Pool strategy", &d.Strategy,
+			huh.NewOption("order", config.StrategyOrder), huh.NewOption("rotate", config.StrategyRotate),
+			huh.NewOption("least-used", config.StrategyLeastUsed), huh.NewOption("smart", config.StrategySmart)),
 		huh.NewInput().Title("API endpoint").Value(&d.BaseURL).
 			Validate(func(s string) error {
 				if strings.TrimSpace(s) != "" || len(splitMembers(d.Members)) > 0 {
@@ -265,44 +373,11 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 			}),
 		huh.NewInput().Title("API key").Value(&d.Key).Description(keyDesc).
 			EchoMode(huh.EchoModePassword),
-		huh.NewInput().Title("Model").Value(&d.Model),
-		huh.NewInput().Title("Display name").Value(&d.Display),
 		huh.NewInput().Title("Balance source").Value(&d.Quota).
-			Description("deepseek, openrouter, moonshot, siliconflow, or off; blank auto-detects"),
+			Description("A quota source id, or off; blank auto-detects"),
 		huh.NewInput().Title("Balance command").Value(&d.QuotaCmd).
 			Description("Optional shell command printing the balance as JSON or a number"),
 	)
-
-	claude := huh.NewGroup(
-		huh.NewInput().Title("Opus-tier model").Value(&d.Opus).Description("Blank uses the primary model"),
-		huh.NewInput().Title("Sonnet-tier model").Value(&d.Sonnet),
-		huh.NewInput().Title("Haiku-tier model").Value(&d.Haiku),
-		huh.NewSelect[string]().Title("Default variant").Value(&d.DefaultVariant).
-			Options(variantOptions(config.ClaudeTiers(), d.base.Variants)...),
-		huh.NewSelect[string]().Title("Auth variable").Value(&d.KeyField).
-			Options(huh.NewOption("ANTHROPIC_AUTH_TOKEN", "auth_token"), huh.NewOption("ANTHROPIC_API_KEY", "api_key")),
-	).WithHideFunc(isKind(config.KindClaude))
-
-	codex := huh.NewGroup(
-		huh.NewSelect[string]().Title("Wire API").Value(&d.WireAPI).
-			Options(huh.NewOption("responses", "responses"), huh.NewOption("chat", "chat")),
-		huh.NewSelect[string]().Title("Default reasoning effort").Value(&d.Reasoning).
-			Options(reasoningOptions()...),
-		huh.NewSelect[string]().Title("Default variant").Value(&d.DefaultVariant).
-			Options(variantOptions(config.ReasoningLevels(), d.base.Variants)...),
-	).WithHideFunc(isKind(config.KindCodex))
-
-	pi := huh.NewGroup(
-		huh.NewInput().Title("Existing pi provider").Value(&d.PiProvider).
-			Description("Use a provider pi already knows; blank registers ak-<name> from the endpoint"),
-		huh.NewSelect[string]().Title("Wire API").Value(&d.PiAPI).
-			Options(huh.NewOption("anthropic-messages", "anthropic-messages"), huh.NewOption("openai-completions", "openai-completions"), huh.NewOption("openai-responses", "openai-responses")),
-		huh.NewConfirm().Title("Send the key as Authorization: Bearer").Value(&d.PiAuth),
-		huh.NewSelect[string]().Title("Default variant").Value(&d.DefaultVariant).
-			Options(variantOptions(config.ThinkingLevels(), d.base.Variants)...),
-	).WithHideFunc(isKind(config.KindPi))
-
-	return huh.NewForm(huh.NewGroup(basics...), claude, codex, pi).WithShowHelp(true)
 }
 
 func reasoningOptions() []huh.Option[string] {

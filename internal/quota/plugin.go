@@ -2,6 +2,7 @@ package quota
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -395,7 +396,8 @@ func requestVar(name string, p config.Provider, key string) string {
 		return apiRoot(p.BaseURL)
 	}
 	if v, ok := strings.CutPrefix(name, "var."); ok {
-		return p.QuotaVars[v]
+		// An account's own secrets come first: the sign-in handed them out.
+		return cmp.Or(p.Secrets[v], p.QuotaVars[v])
 	}
 	if env, ok := strings.CutPrefix(name, "env."); ok {
 		return p.Env[env]

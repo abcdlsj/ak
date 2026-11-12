@@ -1,0 +1,622 @@
+[
+  {
+    "id": "kimi",
+    "name": "Kimi",
+    "category": "official",
+    "website_url": "https://platform.kimi.com",
+    "api_key_url": "https://platform.kimi.com/console/api-keys",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.moonshot.cn/anthropic",
+        "model": "kimi-k2.7-code",
+        "key_field": "auth_token"
+      },
+      "codex": {
+        "base_url": "https://api.moonshot.cn/v1",
+        "model": "kimi-k3",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://api.moonshot.cn/v1",
+        "model": "kimi-k2.7-code",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "kimi-coding",
+    "name": "Kimi For Coding",
+    "category": "official",
+    "website_url": "https://www.kimi.com/code/",
+    "api_key_url": "https://www.kimi.com/code/",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.kimi.com/coding/",
+        "model": "kimi-for-coding",
+        "key_field": "auth_token",
+        "env": {
+          "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
+          "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144"
+        }
+      },
+      "codex": {
+        "base_url": "https://api.kimi.com/coding/v1",
+        "model": "kimi-for-coding",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://api.kimi.com/coding",
+        "model": "kimi-for-coding",
+        "pi_api": "anthropic-messages"
+      }
+    }
+  },
+  {
+    "id": "zhipu",
+    "name": "Zhipu GLM",
+    "category": "official",
+    "website_url": "https://open.bigmodel.cn",
+    "api_key_url": "https://www.bigmodel.cn/claude-code",
+    "engines": {
+      "claude": {
+        "base_url": "https://open.bigmodel.cn/api/anthropic",
+        "model": "glm-5.3",
+        "key_field": "auth_token"
+      },
+      "codex": {
+        "base_url": "https://open.bigmodel.cn/api/v1",
+        "model": "glm-5.3",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "model": "glm-5.3",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "minimax",
+    "name": "MiniMax",
+    "category": "official",
+    "website_url": "https://platform.minimax.cn",
+    "api_key_url": "https://platform.minimax.cn/subscribe/token-plan",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.minimax.cn/anthropic",
+        "model": "MiniMax-M3[1M]",
+        "key_field": "auth_token",
+        "env": {
+          "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000"
+        }
+      },
+      "codex": {
+        "base_url": "https://api.minimax.cn/v1",
+        "model": "MiniMax-M3",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://api.minimax.cn/v1",
+        "model": "MiniMax-M3",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "category": "official",
+    "website_url": "https://platform.deepseek.com",
+    "api_key_url": "https://platform.deepseek.com/api_keys",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.deepseek.com/anthropic",
+        "model": "deepseek-v4-pro",
+        "haiku": "deepseek-flash",
+        "key_field": "auth_token"
+      },
+      "codex": {
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-flash",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-v4-pro",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "stepfun",
+    "name": "StepFun",
+    "category": "official",
+    "website_url": "https://platform.stepfun.com/step-plan",
+    "api_key_url": "https://platform.stepfun.com/interface-key",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.stepfun.com/step_plan",
+        "model": "step-3.5-flash-2603",
+        "key_field": "auth_token"
+      },
+      "pi": {
+        "base_url": "https://api.stepfun.com/step_plan/v1",
+        "model": "step-3.5-flash-2603",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "stepfun-plan",
+    "name": "StepFun Step Plan",
+    "category": "official",
+    "website_url": "https://platform.stepfun.com/docs/zh/step-plan/overview",
+    "api_key_url": "https://platform.stepfun.com/interface-key",
+    "engines": {
+      "pi": {
+        "base_url": "https://api.stepfun.com/step_plan/v1",
+        "model": "step-3.5-flash",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "stepfun-api",
+    "name": "StepFun API",
+    "category": "official",
+    "website_url": "https://platform.stepfun.com",
+    "api_key_url": "https://platform.stepfun.com/interface-key",
+    "engines": {
+      "codex": {
+        "base_url": "https://api.stepfun.com/v1",
+        "model": "step-3.7-flash",
+        "wire_api": "responses"
+      }
+    }
+  },
+  {
+    "id": "qwen-coding",
+    "name": "千问AI平台 Coding Plan",
+    "category": "coding-plan",
+    "website_url": "https://bailian.console.aliyun.com",
+    "engines": {
+      "claude": {
+        "base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+        "key_field": "auth_token"
+      }
+    }
+  },
+  {
+    "id": "qwencloud-coding",
+    "name": "QwenCloud For Coding",
+    "category": "coding-plan",
+    "website_url": "https://www.qwencloud.com",
+    "api_key_url": "https://home.qwencloud.com/api-keys",
+    "engines": {
+      "claude": {
+        "base_url": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+        "model": "qwen3.7-plus",
+        "key_field": "auth_token"
+      },
+      "pi": {
+        "base_url": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+        "model": "qwen3.7-plus",
+        "pi_api": "anthropic-messages"
+      }
+    }
+  },
+  {
+    "id": "volcengine-coding",
+    "name": "火山 Coding Plan",
+    "category": "coding-plan",
+    "website_url": "https://www.volcengine.com/activity/codingplan",
+    "api_key_url": "https://www.volcengine.com/activity/codingplan",
+    "engines": {
+      "claude": {
+        "base_url": "https://ark.cn-beijing.volces.com/api/coding",
+        "model": "ark-code-latest",
+        "key_field": "auth_token"
+      },
+      "codex": {
+        "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "model": "ark-code-latest",
+        "wire_api": "responses"
+      }
+    }
+  },
+  {
+    "id": "mimo",
+    "name": "Xiaomi MiMo",
+    "category": "coding-plan",
+    "website_url": "https://platform.xiaomimimo.com",
+    "api_key_url": "https://platform.xiaomimimo.com/#/console/api-keys",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.xiaomimimo.com/anthropic",
+        "model": "mimo-v2.6-pro",
+        "key_field": "auth_token"
+      },
+      "codex": {
+        "base_url": "https://api.xiaomimimo.com/v1",
+        "model": "mimo-v2.6-pro",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://api.xiaomimimo.com/v1",
+        "model": "mimo-v2.5-pro",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "longcat",
+    "name": "Longcat",
+    "category": "coding-plan",
+    "website_url": "https://longcat.chat/platform",
+    "api_key_url": "https://longcat.chat/platform/api_keys",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.longcat.chat/anthropic",
+        "model": "LongCat-2.0",
+        "key_field": "auth_token",
+        "env": {
+          "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "131072"
+        }
+      },
+      "codex": {
+        "base_url": "https://api.longcat.chat/openai/v1",
+        "model": "LongCat-2.0",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://api.longcat.chat/openai/v1",
+        "model": "LongCat-2.0",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "modelscope",
+    "name": "ModelScope",
+    "category": "coding-plan",
+    "website_url": "https://modelscope.cn",
+    "api_key_url": "https://modelscope.cn/my/myaccesstoken",
+    "engines": {
+      "claude": {
+        "base_url": "https://api-inference.modelscope.cn",
+        "model": "ZhipuAI/GLM-5.2",
+        "key_field": "auth_token"
+      },
+      "pi": {
+        "base_url": "https://api-inference.modelscope.cn/v1",
+        "model": "ZhipuAI/GLM-5.2",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "kimi-global",
+    "name": "Kimi Global",
+    "category": "global",
+    "website_url": "https://platform.kimi.ai",
+    "api_key_url": "https://platform.kimi.ai/console/api-keys",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.moonshot.ai/anthropic",
+        "model": "kimi-k2.7-code",
+        "key_field": "auth_token"
+      },
+      "codex": {
+        "base_url": "https://api.moonshot.ai/v1",
+        "model": "kimi-k3",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://api.moonshot.ai/v1",
+        "model": "kimi-k2.7-code",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "kimi-coding-global",
+    "name": "Kimi For Coding Global",
+    "category": "global",
+    "website_url": "https://www.kimi.ai/code",
+    "api_key_url": "https://www.kimi.ai/code",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.kimi.ai/coding/",
+        "model": "kimi-for-coding",
+        "key_field": "auth_token",
+        "env": {
+          "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
+          "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144"
+        }
+      },
+      "codex": {
+        "base_url": "https://api.kimi.ai/coding/v1",
+        "model": "kimi-for-coding",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://api.kimi.ai/coding",
+        "model": "kimi-for-coding",
+        "pi_api": "anthropic-messages"
+      }
+    }
+  },
+  {
+    "id": "zhipu-en",
+    "name": "Zhipu GLM en",
+    "category": "global",
+    "website_url": "https://z.ai",
+    "api_key_url": "https://z.ai/subscribe",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.z.ai/api/anthropic",
+        "model": "glm-5.3",
+        "key_field": "auth_token"
+      },
+      "codex": {
+        "base_url": "https://api.z.ai/api/v1",
+        "model": "glm-5.3",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://api.z.ai/api/coding/paas/v4",
+        "model": "glm-5.3",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "minimax-en",
+    "name": "MiniMax en",
+    "category": "global",
+    "website_url": "https://platform.minimax.io",
+    "api_key_url": "https://platform.minimax.io/subscribe/coding-plan",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.minimax.io/anthropic",
+        "model": "MiniMax-M3[1M]",
+        "key_field": "auth_token",
+        "env": {
+          "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000"
+        }
+      },
+      "codex": {
+        "base_url": "https://api.minimax.io/v1",
+        "model": "MiniMax-M3",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://api.minimax.io/v1",
+        "model": "MiniMax-M3",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "stepfun-en",
+    "name": "StepFun en",
+    "category": "global",
+    "website_url": "https://platform.stepfun.ai/step-plan",
+    "api_key_url": "https://platform.stepfun.ai/interface-key",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.stepfun.ai/step_plan",
+        "model": "step-3.5-flash-2603",
+        "key_field": "auth_token"
+      },
+      "pi": {
+        "base_url": "https://api.stepfun.ai/step_plan/v1",
+        "model": "step-3.5-flash-2603",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "stepfun-api-en",
+    "name": "StepFun API en",
+    "category": "global",
+    "website_url": "https://platform.stepfun.ai",
+    "api_key_url": "https://platform.stepfun.ai/interface-key",
+    "engines": {
+      "codex": {
+        "base_url": "https://api.stepfun.ai/v1",
+        "model": "step-3.7-flash",
+        "wire_api": "responses"
+      }
+    }
+  },
+  {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "category": "aggregator",
+    "website_url": "https://openrouter.ai",
+    "api_key_url": "https://openrouter.ai/keys",
+    "engines": {
+      "claude": {
+        "base_url": "https://openrouter.ai/api",
+        "model": "anthropic/claude-sonnet-5",
+        "haiku": "anthropic/claude-haiku-4.5",
+        "opus": "anthropic/claude-opus-5",
+        "key_field": "auth_token"
+      },
+      "codex": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "model": "gpt-5.6-sol",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://openrouter.ai/api",
+        "model": "anthropic/claude-sonnet-5",
+        "pi_api": "anthropic-messages"
+      }
+    }
+  },
+  {
+    "id": "siliconflow",
+    "name": "SiliconFlow",
+    "category": "aggregator",
+    "website_url": "https://siliconflow.cn",
+    "api_key_url": "https://cloud.siliconflow.cn/account/ak",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.siliconflow.cn",
+        "model": "Pro/MiniMaxAI/MiniMax-M2.5",
+        "key_field": "auth_token"
+      }
+    }
+  },
+  {
+    "id": "siliconflow-en",
+    "name": "SiliconFlow en",
+    "category": "aggregator",
+    "website_url": "https://siliconflow.com",
+    "api_key_url": "https://cloud.siliconflow.com/account/ak",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.siliconflow.com",
+        "model": "MiniMaxAI/MiniMax-M3",
+        "key_field": "auth_token"
+      }
+    }
+  },
+  {
+    "id": "novita",
+    "name": "Novita AI",
+    "category": "aggregator",
+    "website_url": "https://novita.ai",
+    "api_key_url": "https://novita.ai",
+    "engines": {
+      "claude": {
+        "base_url": "https://api.novita.ai/anthropic",
+        "model": "zai-org/glm-5.1",
+        "key_field": "auth_token"
+      },
+      "pi": {
+        "base_url": "https://api.novita.ai/openai",
+        "model": "zai-org/glm-5.1",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "opencode-go",
+    "name": "OpenCode Go",
+    "category": "aggregator",
+    "website_url": "https://opencode.ai/go",
+    "api_key_url": "https://opencode.ai/go",
+    "login": [
+      {
+        "method": "file",
+        "paths": [
+          "$XDG_DATA_HOME/opencode/auth.json",
+          "~/.local/share/opencode/auth.json"
+        ],
+        "key": "opencode-go.key"
+      }
+    ],
+    "engines": {
+      "claude": {
+        "base_url": "https://opencode.ai/zen/go",
+        "model": "deepseek-v4-flash",
+        "key_field": "api_key"
+      },
+      "pi": {
+        "base_url": "https://opencode.ai/zen/go/v1",
+        "model": "glm-5.2",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "command-code",
+    "name": "Command Code",
+    "category": "aggregator",
+    "website_url": "https://commandcode.ai",
+    "api_key_url": "https://commandcode.ai/settings/keys",
+    "login": [
+      {
+        "method": "file",
+        "paths": [
+          "~/.commandcode/auth.json"
+        ],
+        "key": "apiKey"
+      }
+    ],
+    "engines": {
+      "claude": {
+        "base_url": "https://api.commandcode.ai/provider",
+        "model": "claude-sonnet-5-5",
+        "opus": "claude-opus-5-5",
+        "sonnet": "claude-sonnet-5-5",
+        "haiku": "claude-haiku-4-5-20251001"
+      },
+      "codex": {
+        "base_url": "https://api.commandcode.ai/provider/v1",
+        "model": "deepseek/deepseek-v4.1-flash",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://api.commandcode.ai/provider/v1",
+        "model": "deepseek/deepseek-v4.1-flash",
+        "pi_api": "openai-completions"
+      }
+    }
+  },
+  {
+    "id": "opendesign",
+    "name": "Open Design",
+    "category": "aggregator",
+    "website_url": "https://open-design.ai",
+    "login": [
+      {
+        "method": "device",
+        "device": {
+          "start": {
+            "url": "https://amr-api.open-design.ai/api/v1/cli/device-authorizations",
+            "body": {
+              "cliVersion": "0.1.4",
+              "host": "{{host}}",
+              "profile": "prod"
+            }
+          },
+          "code": "userCode",
+          "verify_url": "activationUrl",
+          "interval": "pollIntervalSeconds",
+          "expires": "expiresAt",
+          "poll": {
+            "url": "https://amr-api.open-design.ai/api/v1/cli/device-authorizations/{{deviceId}}/token",
+            "body": {
+              "deviceSecret": "{{deviceSecret}}"
+            }
+          },
+          "key": "runtimeKey",
+          "secrets": {
+            "control": "controlKey"
+          },
+          "user": "user.email"
+        }
+      }
+    ],
+    "engines": {
+      "claude": {
+        "base_url": "https://amr-link.open-design.ai",
+        "model": "deepseek-v4-pro"
+      },
+      "codex": {
+        "base_url": "https://amr-link.open-design.ai/v1",
+        "model": "gpt-6-luna",
+        "wire_api": "responses"
+      },
+      "pi": {
+        "base_url": "https://amr-link.open-design.ai/v1",
+        "model": "deepseek-v4-pro",
+        "pi_api": "openai-completions"
+      }
+    }
+  }
+]

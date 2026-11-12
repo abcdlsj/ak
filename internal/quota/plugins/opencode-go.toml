@@ -1,0 +1,28 @@
+# OpenCode Go: GET /zen/go/v1/usage ->
+# {"usage":{"rolling":{"percent":…,"resetsAt":"…"},
+#           "weekly":{"percent":…,"resetsAt":"…"},
+#           "monthly":{"percent":…,"resetsAt":"…"}}}
+# Zen's pay-as-you-go gateway at the same host has no plan; only Go's path
+# is asked.
+id = "opencode-go"
+match = ["opencode.ai"]
+kind = "plan"
+
+[request]
+url = "{{root}}/zen/go/v1/usage"
+headers = { Authorization = "Bearer {{key}}", Accept = "application/json" }
+
+[[windows]]
+name = "5h"
+percent = "usage.rolling.percent"
+resets = "usage.rolling.resetsAt"
+
+[[windows]]
+name = "weekly"
+percent = "usage.weekly.percent"
+resets = "usage.weekly.resetsAt"
+
+[[windows]]
+name = "monthly"
+percent = "usage.monthly.percent"
+resets = "usage.monthly.resetsAt"

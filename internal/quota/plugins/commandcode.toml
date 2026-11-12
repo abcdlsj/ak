@@ -1,0 +1,25 @@
+# Command Code plans (Go, Pro, GOAT, Max, Ultra): GET /alpha/billing/credits ->
+# {"credits":{"monthlyCredits":…,"purchasedCredits":…},
+#  "windowLimits":{"fiveHour":{"used":…,"cap":…,"resetAt":<ms>},
+#                  "weekly":{"used":…,"cap":…,"resetAt":<ms>}}}
+# A resetAt of 0 means the window has not started. A pay-as-you-go key has
+# no windows and reads as an error.
+id = "commandcode"
+match = ["api.commandcode.ai"]
+kind = "plan"
+
+[request]
+url = "{{root}}/alpha/billing/credits"
+headers = { Authorization = "Bearer {{key}}", Accept = "application/json" }
+
+[[windows]]
+name = "5h"
+used = "windowLimits.fiveHour.used"
+limit = "windowLimits.fiveHour.cap"
+resets = "windowLimits.fiveHour.resetAt"
+
+[[windows]]
+name = "weekly"
+used = "windowLimits.weekly.used"
+limit = "windowLimits.weekly.cap"
+resets = "windowLimits.weekly.resetAt"

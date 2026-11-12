@@ -53,6 +53,7 @@ const (
 type Config struct {
 	Version   int                 `toml:"version"`
 	Settings  Settings            `toml:"settings"`
+	Accounts  map[string]Account  `toml:"accounts,omitempty"`
 	Providers map[string]Provider `toml:"providers"`
 }
 
@@ -142,7 +143,11 @@ func (s Settings) GatewayURL() string {
 type Provider struct {
 	Kind    Kind   `toml:"kind"`
 	Display string `toml:"display,omitempty"`
-	BaseURL string `toml:"base_url"`
+	// Account names the account the provider runs on. Its key is the
+	// account's, and each endpoint field left unset is the account vendor's
+	// for this engine (see Resolve).
+	Account string `toml:"account,omitempty"`
+	BaseURL string `toml:"base_url,omitempty"`
 	// APIKey is the plaintext key. It is never written to providers.toml:
 	// Save stores it in auth.json under AuthKey, and Load reads it back.
 	APIKey string `toml:"-"`
@@ -152,7 +157,10 @@ type Provider struct {
 	// APIKeyRef takes the form env:NAME / cmd:... / keychain:... and is
 	// mutually exclusive with APIKey.
 	APIKeyRef string `toml:"api_key_ref,omitempty"`
-	Model     string `toml:"model,omitempty"`
+	// Secrets are the account's further credentials, filled by Resolve and
+	// never written.
+	Secrets map[string]string `toml:"-"`
+	Model   string            `toml:"model,omitempty"`
 	// DefaultVariant is applied when the provider launches without an explicit
 	// variant, so the launcher does not ask each time: a pi thinking level, a
 	// codex reasoning effort or a claude model tier. Empty keeps asking.
@@ -362,6 +370,7 @@ func Default() *Config {
 	return &Config{
 		Version:   Version,
 		Settings:  Settings{BinDir: "~/.local/bin", Prefix: "ak-", GatewayAddr: DefaultGatewayAddr, MaxInflight: DefaultMaxInflight},
+		Accounts:  map[string]Account{},
 		Providers: map[string]Provider{},
 	}
 }
@@ -390,6 +399,9 @@ func Load() (*Config, error) {
 	if cfg.Providers == nil {
 		cfg.Providers = map[string]Provider{}
 	}
+	if cfg.Accounts == nil {
+		cfg.Accounts = map[string]Account{}
+	}
 	if cfg.Settings.BinDir == "" {
 		cfg.Settings.BinDir = "~/.local/bin"
 	}
@@ -410,6 +422,8 @@ func Load() (*Config, error) {
 			cfg.Providers[name] = p
 		}
 	}
+	cfg.readAccountAuth(auth)
+	cfg.Resolve()
 	return cfg, nil
 }
 
@@ -433,14 +447,15 @@ func loadAuth() (map[string]string, error) {
 	return auth, nil
 }
 
-// authEntries assigns every provider holding a key its auth_key and returns
-// the keys by entry. Two providers naming one entry must hold the same key.
+// authEntries assigns every provider holding a key of its own its auth_key
+// and returns the keys by entry, the accounts' among them. Two providers
+// naming one entry must hold the same key.
 func authEntries(cfg *Config) (map[string]string, error) {
 	auth := map[string]string{}
 	owner := map[string]string{}
 	for _, name := range cfg.Names() {
 		p := cfg.Providers[name]
-		if p.APIKey == "" {
+		if p.APIKey == "" || p.Account != "" {
 			continue
 		}
 		if p.AuthKey == "" {
@@ -459,6 +474,7 @@ func authEntries(cfg *Config) (map[string]string, error) {
 		auth[p.AuthKey] = p.APIKey
 		owner[p.AuthKey] = name
 	}
+	cfg.writeAccountAuth(auth)
 	return auth, nil
 }
 
@@ -490,8 +506,9 @@ func UnknownKeys() ([]string, error) {
 }
 
 // Save writes the config back atomically with mode 0600: the keys to
-// auth.json, everything else to providers.toml. auth.json is rewritten whole,
-// so an entry no provider names any more is dropped.
+// auth.json, everything else to providers.toml, each provider as Stored
+// gives it. auth.json is rewritten whole, so an entry no provider or account
+// names any more is dropped.
 func Save(cfg *Config) error {
 	path, err := Path()
 	if err != nil {
@@ -517,7 +534,12 @@ func Save(cfg *Config) error {
 	if err := atomicWrite(authPath, append(authData, '\n'), 0o600); err != nil {
 		return err
 	}
-	data, err := toml.Marshal(cfg)
+	stored := *cfg
+	stored.Providers = make(map[string]Provider, len(cfg.Providers))
+	for name, p := range cfg.Providers {
+		stored.Providers[name] = cfg.Stored(p)
+	}
+	data, err := toml.Marshal(&stored)
 	if err != nil {
 		return err
 	}

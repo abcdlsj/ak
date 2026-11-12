@@ -78,14 +78,19 @@ typed: `ak kimi mcp list`, `ak cx resume`.
 on the one last launched in this directory (else in another worktree of the
 same repository, else the default). `enter` launches the selected one and
 `1`-`9` launch a row directly, asking for a variant first when there are any,
-unless the provider names a `default_variant`; `/` filters. Launch, Manage and
-Usage are tabs: `tab` / `shift+tab` cycle them, `m` and `u` jump straight to
-one, and `esc` comes back to Launch:
+unless the provider names a `default_variant`; `/` filters. On a wide terminal
+the selected provider's details, health and last 30 days of usage sit beside
+the list. `e` edits (the name too, which renames the command), `a` / `d` add
+and delete, `*` sets the default and `s` syncs. In the form `↑` / `↓` move
+between fields, `←` / `→` change a choice and `ctrl+s` saves from any field.
 
-- `m` Manage shows each provider's health, details and last 30 days of usage;
-  `enter` edits (the name too, which renames the command), `a` / `d` add and
-  delete, `*` sets the default and `s` syncs. In the form `ctrl+s` saves from
-  any field.
+Launch, Accounts and Usage are tabs: `tab` / `shift+tab` cycle them, `u`
+jumps to Usage, and `esc` comes back to Launch:
+
+- Accounts lists each account with its vendor, who signed in, the providers
+  on it and what is left of its plan, read when the page is first opened and
+  again on `b`. `a` signs in to a vendor, `enter` signs in again, `n` adds a
+  provider on the account and `d` removes it.
 - `u` Usage opens on all history and switches to 7, 30 or 90 days with `[`
   `]`; `enter` on a provider narrows the page to it and adds a tokens-over-time
   curve for the range, 5-minute points merged into round intervals to fit.
@@ -141,20 +146,37 @@ that runs `ak run <name> "$@"`: it holds no key and no launch logic, so it
 never drifts from the config. Every change through ak (`add`, `edit`, `rm`,
 `rename`, `import`) regenerates the commands; `ak sync` is only for repair.
 
-## Presets
+## Accounts and vendors
 
-Known vendors come built in, so adding one needs only a name and a key:
+An account is one subscription or key at a vendor ak knows. Its providers
+take their endpoint from the vendor for their engine and their key from the
+account, so one sign-in serves claude, codex and pi, and its balance is read
+once:
 
 ```
-ak preset list [--kind claude]        id, engine, endpoint, model, where to get a key
-ak add kimi --preset kimi-coding --kind claude --key sk-...
+ak vendor list [--kind claude]          id, engine, endpoint, model, how to sign in
+ak login command-code                   reads the Command Code CLI's sign-in
+ak login opencode-go                    reads OpenCode's, else asks for the key
+ak login opendesign                     approve a code in the browser
+ak login kimi-coding work --key -       a second account, named work
+ak add goat --account command-code --kind claude
+ak add goatx --account command-code --kind codex --model gpt-6-luna
+ak accounts                             accounts, who signed in, their providers
 ```
 
-`--kind` is needed only when the preset exists for more than one engine. Any
-other flag overrides the preset, e.g. `--model`. With no flags, `ak add` and
-the TUI ask for the engine and an optional preset first, then open the form
-pre-filled. The data comes from cc-switch's presets; vendors that need OAuth or
-protocol translation are left out.
+A provider on an account stores only what it overrides: a field it leaves
+unset follows the vendor, so a vendor that moves is followed by the next ak.
+`ak add kimi --vendor kimi-coding --key -` makes the account and the provider
+in one go. `ak edit old --account <name>` moves a provider with its own
+endpoint onto an account; its endpoint fields equal to the vendor's and its
+own key are dropped. `ak login` again renews an account's credentials,
+`ak logout` removes one no provider runs on, and `ak accounts rename` renames
+one with its providers.
+
+A provider of its own (`--base-url`, `--key`) still works as before, for a
+relay or anything ak has no vendor for. The vendor data comes from cc-switch's
+presets plus subscriptions; vendors that need protocol translation are left
+out.
 
 ## Sharing or isolating config
 

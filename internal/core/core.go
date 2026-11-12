@@ -4,6 +4,7 @@ package core
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -245,15 +246,14 @@ func SetDefault(cfg *config.Config, name string) error {
 	return mutate(cfg, func(c *config.Config) { c.Settings.Default = name })
 }
 
-// mutate applies a change to a copy, validates and saves it, and only then
-// replaces cfg, so a rejected change leaves cfg untouched.
+// mutate applies a change to a copy, resolves, validates and saves it, and
+// only then replaces cfg, so a rejected change leaves cfg untouched.
 func mutate(cfg *config.Config, change func(*config.Config)) error {
 	next := *cfg
-	next.Providers = make(map[string]config.Provider, len(cfg.Providers)+1)
-	for k, v := range cfg.Providers {
-		next.Providers[k] = v
-	}
+	next.Providers = cloneMap(cfg.Providers)
+	next.Accounts = cloneMap(cfg.Accounts)
 	change(&next)
+	next.Resolve()
 	if err := config.Validate(&next); err != nil {
 		return err
 	}
@@ -262,6 +262,13 @@ func mutate(cfg *config.Config, change func(*config.Config)) error {
 	}
 	*cfg = next
 	return nil
+}
+
+// cloneMap copies m into a map that is never nil, so a change can add to it.
+func cloneMap[M ~map[K]V, K comparable, V any](m M) M {
+	out := make(M, len(m)+1)
+	maps.Copy(out, m)
+	return out
 }
 
 // NewSyncer builds the syncer every caller that generates artifacts uses.

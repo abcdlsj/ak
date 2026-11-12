@@ -94,21 +94,16 @@ func TestHomeFocusesDefault(t *testing.T) {
 	}
 }
 
-// m and u open the secondary pages; esc returns home, but first clears what
-// the page itself holds.
-func TestSecondaryPagesEscHome(t *testing.T) {
+// esc on home first clears the filter; on another page it goes home.
+func TestEscClearsThenGoesHome(t *testing.T) {
 	a := newApp(testConfig())
-	press(a, "m", "/", "x", "enter")
-	if a.active != pageManage {
-		t.Fatalf("active = %d, want manage", a.active)
+	press(a, "/", "x", "enter")
+	if !a.home().consumesEsc() {
+		t.Fatal("the filter should be kept")
 	}
 	press(a, "esc")
-	if a.active != pageManage || a.pages[pageManage].consumesEsc() {
-		t.Fatal("first esc should clear the manage filter")
-	}
-	press(a, "esc")
-	if a.active != pageHome {
-		t.Fatalf("active = %d, want home", a.active)
+	if a.active != pageHome || a.home().consumesEsc() || a.quitting {
+		t.Fatal("esc should clear the filter and stay home")
 	}
 	press(a, "u", "esc")
 	if a.active != pageHome || a.quitting {
@@ -119,7 +114,7 @@ func TestSecondaryPagesEscHome(t *testing.T) {
 // tab and shift+tab cycle the pages, wrapping at either end.
 func TestTabCyclesPages(t *testing.T) {
 	a := newApp(testConfig())
-	for _, want := range []int{pageManage, pageUsage, pageHome} {
+	for _, want := range []int{pageAccounts, pageUsage, pageHome} {
 		press(a, "tab")
 		if a.active != want {
 			t.Fatalf("active = %d, want %d", a.active, want)
@@ -131,12 +126,16 @@ func TestTabCyclesPages(t *testing.T) {
 	}
 }
 
-// On the manage page enter edits; launching is the home page's job.
-func TestManageEnterEdits(t *testing.T) {
+// On the home page e edits and enter still launches.
+func TestHomeEditsWithE(t *testing.T) {
 	a := newApp(testConfig())
-	press(a, "m", "enter")
+	press(a, "e")
 	if _, ok := a.overlay.(*formOverlay); !ok || a.quitting {
 		t.Fatalf("overlay = %T, want the edit form", a.overlay)
+	}
+	press(a, "esc", "enter")
+	if o, ok := a.overlay.(*pickOverlay); !ok || o.provider != "alpha" {
+		t.Fatalf("overlay = %T, want the variant picker for alpha", a.overlay)
 	}
 }
 
@@ -152,8 +151,9 @@ func TestHomeAddWhenEmpty(t *testing.T) {
 // ctrl+s saves the edit form from any field.
 func TestFormCtrlSSaves(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv(config.DirEnv, t.TempDir())
 	a := newApp(testConfig())
-	press(a, "m", "enter")
+	press(a, "e")
 	if _, ok := a.overlay.(*formOverlay); !ok {
 		t.Fatalf("overlay = %T, want the form", a.overlay)
 	}

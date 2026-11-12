@@ -9,34 +9,29 @@ import (
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/usage"
+	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// providersPage lists providers. As the home page it is only a launcher: the
-// list, a number per row and enter. As the manage page it also shows the
-// selected provider in detail and hosts the actions that change them.
+// providersPage is the home page: the providers, a number per row to launch
+// one, the selected one in detail beside them when there is room, and the
+// actions that change them.
 type providersPage struct {
-	manage    bool
 	cursor    int
 	filter    textinput.Model
 	filtering bool
 }
 
-func newProvidersPage(manage bool) *providersPage {
+func newProvidersPage() *providersPage {
 	ti := textinput.New()
 	ti.Prompt = "/ "
-	ti.Placeholder = "filter by name, model or endpoint"
-	return &providersPage{manage: manage, filter: ti}
+	ti.Placeholder = "filter by name, model, account or endpoint"
+	return &providersPage{filter: ti}
 }
 
-func (p *providersPage) title() string {
-	if p.manage {
-		return "Manage"
-	}
-	return "Launch"
-}
+func (p *providersPage) title() string { return "Launch" }
 
 func (p *providersPage) capturing() bool { return p.filtering }
 
@@ -46,10 +41,7 @@ func (p *providersPage) help() []string {
 	if p.filtering {
 		return []string{"enter keep filter", "esc clear"}
 	}
-	if !p.manage {
-		return []string{"enter/1-9 launch", "/ filter"}
-	}
-	return []string{"↑/↓ move", "enter edit", "/ filter", "a add", "d delete", "* default", "s sync"}
+	return []string{"enter/1-9 launch", "e edit", "a add", "d delete", "* default", "/ filter", "s sync"}
 }
 
 // focus puts the cursor on the named provider.
@@ -67,7 +59,7 @@ func (p *providersPage) visible(cfg *config.Config) []string {
 	var out []string
 	for _, n := range cfg.Names() {
 		pr := cfg.Providers[n]
-		hay := strings.ToLower(strings.Join([]string{n, pr.Display, pr.Model, pr.BaseURL, string(pr.Kind)}, " "))
+		hay := strings.ToLower(strings.Join([]string{n, pr.Display, pr.Model, pr.Account, pr.BaseURL, string(pr.Kind)}, " "))
 		if q == "" || strings.Contains(hay, q) {
 			out = append(out, n)
 		}
@@ -122,15 +114,9 @@ func (p *providersPage) update(a *app, msg tea.Msg) tea.Cmd {
 	case "esc":
 		p.filter.SetValue("")
 	}
-	if !p.manage {
-		if key.String() == "a" && len(a.cfg.Providers) == 0 {
-			return a.open(newFormOverlay(NewDraft(""), false))
-		}
-		return p.launcherKeys(a, key.String())
-	}
 	switch key.String() {
 	case "a":
-		return a.open(newFormOverlay(NewDraft(""), false))
+		return a.open(newFormOverlay(NewDraft("")))
 	case "s":
 		return a.sync()
 	}
@@ -139,8 +125,8 @@ func (p *providersPage) update(a *app, msg tea.Msg) tea.Cmd {
 	}
 
 	switch key.String() {
-	case "enter", "e":
-		return a.open(newFormOverlay(EditDraft(name, a.cfg.Providers[name]), true))
+	case "e":
+		return a.open(newFormOverlay(EditDraft(a.cfg, name)))
 	case "d":
 		return a.open(newConfirmOverlay(
 			fmt.Sprintf("Delete provider %s and its command %s%s?", name, a.cfg.Settings.Prefix, name),
@@ -163,7 +149,7 @@ func (p *providersPage) update(a *app, msg tea.Msg) tea.Cmd {
 		}
 		return a.notify("default provider: "+target, false)
 	}
-	return nil
+	return p.launcherKeys(a, key.String())
 }
 
 // launcherKeys handles the home page: enter launches the selected provider, a
@@ -218,9 +204,6 @@ func variantNames(cfg *config.Config, name string) []string {
 
 func (p *providersPage) view(a *app, width, height int) string {
 	if len(a.cfg.Providers) == 0 {
-		if !p.manage {
-			return dimStyle.Render("No providers yet. Press a to add one, or run `ak import --from cc-switch`.")
-		}
 		return dimStyle.Render("No providers yet. Press a to add one, or run `ak import --from cc-switch`.")
 	}
 	var top string
@@ -232,15 +215,8 @@ func (p *providersPage) view(a *app, width, height int) string {
 		return top + dimStyle.Render("No provider matches the filter.")
 	}
 	name, _ := p.selected(a.cfg)
-	if !p.manage {
-		list := p.list(a, names, width, height-lipgloss.Height(top)-2)
-		if pr := problemLine(a, name); pr != "" {
-			list = strings.TrimRight(list, "\n") + "\n\n" + truncate(pr, width)
-		}
-		return top + list
-	}
-
-	// Side by side when there is room, detail below otherwise.
+	// The detail beside the list when there is room; below a narrow list,
+	// only what would make the launch fail.
 	if width >= 100 {
 		listW := width * 11 / 20
 		list := p.list(a, names, listW, height-lipgloss.Height(top))
@@ -248,7 +224,11 @@ func (p *providersPage) view(a *app, width, height int) string {
 		return top + lipgloss.JoinHorizontal(lipgloss.Top,
 			lipgloss.NewStyle().Width(listW).Render(list), "  ", detail)
 	}
-	return top + p.list(a, names, width, height/2) + "\n" + detailPanel(a, name, width)
+	list := p.list(a, names, width, height-lipgloss.Height(top)-2)
+	if pr := problemLine(a, name); pr != "" {
+		list = strings.TrimRight(list, "\n") + "\n\n" + truncate(pr, width)
+	}
+	return top + list
 }
 
 func (p *providersPage) list(a *app, names []string, width, height int) string {
@@ -262,10 +242,7 @@ func (p *providersPage) list(a *app, names []string, width, height int) string {
 	modelW := max(width-nameW-kindW-10, 8)
 
 	var b strings.Builder
-	head := fmt.Sprintf("    %-*s  %-*s  %s", nameW, "PROVIDER", kindW, "KIND", "MODEL")
-	if !p.manage {
-		head = rowNumber(-1) + head
-	}
+	head := rowNumber(-1) + fmt.Sprintf("    %-*s  %-*s  %s", nameW, "PROVIDER", kindW, "KIND", "MODEL")
 	b.WriteString(headStyle.Render(head))
 	b.WriteString("\n")
 
@@ -286,9 +263,7 @@ func (p *providersPage) list(a *app, names []string, width, height int) string {
 		} else {
 			r.add(rowStyle, "  ")
 		}
-		if !p.manage {
-			r.add(badgeStyle, rowNumber(i))
-		}
+		r.add(badgeStyle, rowNumber(i))
 		st, mark := statusMark(a, n)
 		r.add(st, mark)
 		r.add(rowStyle, fmt.Sprintf(" %-*s  %-*s  %s", nameW, cfg.Settings.Prefix+n, kindW, pr.Kind, truncate(dash(pr.Model), modelW)))
@@ -374,8 +349,13 @@ func detailPanel(a *app, name string, width int) string {
 			field("mapping", mappingSummary(p))
 		}
 	} else {
+		if p.Account != "" {
+			field("account", accountSummary(a.cfg, p.Account))
+		}
 		field("endpoint", dash(p.BaseURL))
-		field("key", keySummary(p))
+		if p.Account == "" {
+			field("key", keySummary(p))
+		}
 	}
 	field("model", dash(p.Model))
 	if p.Quota != "" || p.QuotaCmd != "" {
@@ -427,6 +407,22 @@ func detailPanel(a *app, name string, width int) string {
 		}
 	}
 	return panelStyle.Width(width - 2).Render(strings.TrimRight(b.String(), "\n"))
+}
+
+// accountSummary names an account and its vendor.
+func accountSummary(cfg *config.Config, name string) string {
+	acc, ok := cfg.Accounts[name]
+	if !ok {
+		return errStyle.Render(name + " (missing)")
+	}
+	s := name
+	if v, ok := vendor.Lookup(acc.Vendor); ok {
+		s += " · " + v.Name
+	}
+	if acc.User != "" {
+		s += " · " + acc.User
+	}
+	return s
 }
 
 func keySummary(p config.Provider) string {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -18,6 +19,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // providerFlag maps a command-line flag onto a provider field.
@@ -28,6 +30,7 @@ type providerFlag struct {
 
 var providerFlags = []providerFlag{
 	{"kind", "claude", "Engine: claude, codex or pi", func(p *config.Provider, v string) { p.Kind = config.Kind(v) }},
+	{"account", "", "Account to run on (`ak accounts`); its vendor gives the endpoint and its key is used", func(p *config.Provider, v string) { p.Account = v }},
 	{"base-url", "", "API endpoint", func(p *config.Provider, v string) { p.BaseURL = v }},
 	{"key", "", "API key, a reference (env:NAME, cmd:..., keychain:...), or - to read it from stdin, kept out of shell history", func(p *config.Provider, v string) { p.SetKey(v) }},
 	{"model", "", "Primary model", func(p *config.Provider, v string) { p.Model = v }},
@@ -64,6 +67,16 @@ func readKeyFlag(cmd *cobra.Command) error {
 	if v, _ := cmd.Flags().GetString("key"); v != "-" {
 		return nil
 	}
+	key, err := readKey()
+	if err != nil {
+		return err
+	}
+	return cmd.Flags().Set("key", key)
+}
+
+// readKey reads a key from stdin: typed without echo on a terminal, or the
+// first line of a pipe.
+func readKey() (string, error) {
 	var b []byte
 	var err error
 	if term.IsTerminal(os.Stdin.Fd()) {
@@ -79,20 +92,21 @@ func readKeyFlag(cmd *cobra.Command) error {
 		b = []byte(line)
 	}
 	if err != nil {
-		return fmt.Errorf("read key: %w", err)
+		return "", fmt.Errorf("read key: %w", err)
 	}
 	key := strings.TrimSpace(string(b))
 	if key == "" {
-		return fmt.Errorf("no key read from stdin")
+		return "", fmt.Errorf("no key read from stdin")
 	}
-	return cmd.Flags().Set("key", key)
+	return key, nil
 }
 
-// applyProviderFlags sets fields from flags; onlyChanged skips flags the user
-// did not pass, so an edit leaves every other field alone.
-func applyProviderFlags(cmd *cobra.Command, p *config.Provider, onlyChanged bool) (changed int) {
+// applyProviderFlags sets fields from flags, except those named in skip;
+// onlyChanged skips flags the user did not pass, so an edit leaves every
+// other field alone.
+func applyProviderFlags(cmd *cobra.Command, p *config.Provider, onlyChanged bool, skip ...string) (changed int) {
 	for _, f := range providerFlags {
-		if onlyChanged && !cmd.Flags().Changed(f.name) {
+		if onlyChanged && !cmd.Flags().Changed(f.name) || slices.Contains(skip, f.name) {
 			continue
 		}
 		v, _ := cmd.Flags().GetString(f.name)
@@ -236,11 +250,11 @@ func newAddCmd() *cobra.Command {
 		Short: "Add a provider",
 		Long: `Add a provider and generate its command immediately.
 
+  ak add goat --account goat --kind claude       # on an account from ak login
+  ak add kimi --vendor kimi-coding --key -       # makes account kimi-coding, types the key
   ak add kimi --kind claude --base-url https://api.moonshot.cn/anthropic --key sk-... --model kimi-k2.7-code
-  ak add kimi --preset kimi-coding --key sk-...   # endpoint and model from a preset
-  ak add kimi --preset kimi-coding --key -        # type the key, out of shell history
   ak add pool --kind claude --member kimi --member cpa --strategy rotate
-  ak add        # with no --base-url or --member, opens a form`,
+  ak add        # with no --vendor, --account, --base-url or --member, opens a form`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := readKeyFlag(cmd); err != nil {
@@ -255,12 +269,18 @@ func newAddCmd() *cobra.Command {
 				name = args[0]
 			}
 			var p config.Provider
-			if id, _ := cmd.Flags().GetString("preset"); id != "" {
-				if p, err = presetProvider(cmd, id); err != nil {
-					return err
-				}
-			} else {
+			id, _ := cmd.Flags().GetString("vendor")
+			account, _ := cmd.Flags().GetString("account")
+			switch {
+			case id != "":
+				p, err = vendorProvider(cmd, cfg, id)
+			case account != "":
+				p, err = accountProvider(cmd, cfg, account)
+			default:
 				applyProviderFlags(cmd, &p, false)
+			}
+			if err != nil {
+				return err
 			}
 			if _, err := applyPoolFlags(cmd, &p, false); err != nil {
 				return err
@@ -271,9 +291,9 @@ func newAddCmd() *cobra.Command {
 			if _, err := applyQuotaVarFlag(cmd, &p); err != nil {
 				return err
 			}
-			if p.BaseURL == "" && !p.IsPool() && p.PiProvider == "" {
+			if p.BaseURL == "" && !p.IsPool() && p.PiProvider == "" && p.Account == "" {
 				d := ui.NewDraft(name)
-				if err := runForm(d, cfg); err != nil {
+				if err := runForm(cmd, d, cfg); err != nil {
 					return err
 				}
 				name, p = d.Name, d.Provider()
@@ -291,8 +311,10 @@ func newAddCmd() *cobra.Command {
 	addPoolFlags(cmd)
 	cmd.Flags().String("settings", "", `claude settings layer as a JSON object, e.g. '{"effortLevel":"low"}'; '' clears it`)
 	cmd.Flags().StringArray("quota-var", nil, "value only the balance query reads, name=value (repeatable; name= removes it)")
-	cmd.Flags().String("preset", "", "Start from a built-in preset, listed by 'ak preset list'; other flags override it")
-	_ = cmd.RegisterFlagCompletionFunc("preset", completePresets)
+	cmd.Flags().String("vendor", "", "Run on an account of this vendor (`ak vendor list`): --account, else one named after the vendor")
+	cmd.Flags().SetNormalizeFunc(presetIsVendor)
+	_ = cmd.RegisterFlagCompletionFunc("vendor", completeVendors)
+	_ = cmd.RegisterFlagCompletionFunc("account", completeAccounts)
 	return cmd
 }
 
@@ -319,8 +341,15 @@ func newEditCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("provider %q does not exist", name)
 			}
+			// Edit what providers.toml holds, so a field the account gives
+			// keeps following the account.
+			p = cfg.Stored(p)
 			newName := name
 			changed := applyProviderFlags(cmd, &p, true)
+			if p.Account != "" && cmd.Flags().Changed("key") {
+				return fmt.Errorf("%s runs on account %s, whose key it uses; change it with `ak login %s %s`",
+					name, p.Account, cfg.Accounts[p.Account].Vendor, p.Account)
+			}
 			n, err := applyPoolFlags(cmd, &p, true)
 			if err != nil {
 				return err
@@ -337,8 +366,8 @@ func newEditCmd() *cobra.Command {
 			}
 			changed += n
 			if changed == 0 {
-				d := ui.EditDraft(name, p)
-				if err := runForm(d, cfg); err != nil {
+				d := ui.EditDraft(cfg, name)
+				if err := runForm(cmd, d, cfg); err != nil {
 					return err
 				}
 				newName, p = d.Name, d.Provider()
@@ -353,17 +382,32 @@ func newEditCmd() *cobra.Command {
 	addPoolFlags(cmd)
 	cmd.Flags().String("settings", "", `claude settings layer as a JSON object, e.g. '{"effortLevel":"low"}'; '' clears it`)
 	cmd.Flags().StringArray("quota-var", nil, "value only the balance query reads, name=value (repeatable; name= removes it)")
+	_ = cmd.RegisterFlagCompletionFunc("account", completeAccounts)
 	return cmd
 }
 
+// presetIsVendor keeps --preset, the flag's old name, working as --vendor.
+func presetIsVendor(_ *pflag.FlagSet, name string) pflag.NormalizedName {
+	if name == "preset" {
+		name = "vendor"
+	}
+	return pflag.NormalizedName(name)
+}
+
 // runForm runs the provider form; a new provider is first asked its engine
-// and an optional preset, which pre-fills the form.
-func runForm(d *ui.Draft, cfg *config.Config) error {
+// and what it runs on, signing in first when that is a vendor.
+func runForm(cmd *cobra.Command, d *ui.Draft, cfg *config.Config) error {
 	if d.IsNew() {
-		if err := runHuh(d.PresetForm()); err != nil {
+		if err := runHuh(d.PickForm(cfg)); err != nil {
 			return err
 		}
-		d.ApplyPreset()
+		d.ApplyPick(cfg)
+		if v, ok := d.SignInFirst(); ok {
+			if err := signIn(cmd, cfg, v, v.ID, "", ""); err != nil {
+				return err
+			}
+			d.UseAccount(cfg, v.ID)
+		}
 	}
 	return runHuh(d.Form(func(n string) bool { _, ok := cfg.Providers[n]; return ok }))
 }

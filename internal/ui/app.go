@@ -1,5 +1,6 @@
-// Package ui is ak's TUI: a launcher home page, the Manage and Usage pages a
-// key away from it, and modal overlays (forms, confirmations, pickers).
+// Package ui is ak's TUI: a home page that launches and edits providers, the
+// Accounts and Usage pages a key away from it, and modal overlays (forms,
+// sign-ins, confirmations, pickers).
 package ui
 
 import (
@@ -28,7 +29,7 @@ type Selection struct {
 func RunUI(cfg *config.Config, focus string) (Selection, error) {
 	a := newApp(cfg)
 	if focus != "" {
-		a.pages[pageHome].(*providersPage).focus(cfg, focus)
+		a.home().focus(cfg, focus)
 	}
 	final, err := tea.NewProgram(a, tea.WithAltScreen()).Run()
 	if err != nil {
@@ -59,7 +60,7 @@ type page interface {
 // The pages are tabs in this order; the launcher opens first.
 const (
 	pageHome = iota
-	pageManage
+	pageAccounts
 	pageUsage
 )
 
@@ -88,7 +89,7 @@ type app struct {
 	spinner  spinner.Model
 	flash    flash
 
-	// poolStats is the local gateway's flow view, refreshed while the manage
+	// poolStats is the local gateway's flow view, refreshed while the home
 	// page shows a pool.
 	poolStats    map[string]gateway.PoolStats
 	poolStatsErr error
@@ -126,21 +127,24 @@ func newApp(cfg *config.Config) *app {
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
 	sp.Style = lipgloss.NewStyle().Foreground(accentColor)
-	home := newProvidersPage(false)
+	home := newProvidersPage()
 	// Open on the default provider so enter alone launches it.
 	home.focus(cfg, cfg.Settings.Default)
 	return &app{
 		cfg:     cfg,
-		pages:   []page{home, newProvidersPage(true), newUsagePage()},
+		pages:   []page{home, newAccountsPage(), newUsagePage()},
 		spinner: sp,
 	}
 }
+
+// home is the providers page.
+func (a *app) home() *providersPage { return a.pages[pageHome].(*providersPage) }
 
 func (a *app) Init() tea.Cmd {
 	cmds := []tea.Cmd{a.loadUsage(), a.loadStatuses(), a.spinner.Tick, a.poolStatsTick()}
 	// With nothing configured, start by adding a provider: preset, key, done.
 	if len(a.cfg.Providers) == 0 {
-		cmds = append(cmds, a.open(newFormOverlay(NewDraft(""), false)))
+		cmds = append(cmds, a.open(newFormOverlay(NewDraft(""))))
 	}
 	return tea.Batch(cmds...)
 }
@@ -169,8 +173,8 @@ func (a *app) hasPools() bool {
 }
 
 // poolStatsWanted is whether the flow view should be kept fresh: a pool exists
-// and the manage page is showing.
-func (a *app) poolStatsWanted() bool { return a.hasPools() && a.active == pageManage }
+// and the home page is showing.
+func (a *app) poolStatsWanted() bool { return a.hasPools() && a.active == pageHome }
 
 // poolStatsTick keeps a poll running; each tick reloads only when wanted.
 func (a *app) poolStatsTick() tea.Cmd {
@@ -245,9 +249,10 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 
-	if a.overlay != nil {
-		done, cmd := a.overlay.update(a, msg)
-		if done {
+	if o := a.overlay; o != nil {
+		done, cmd := o.update(a, msg)
+		// An overlay that opened another in its place is not the one to close.
+		if done && a.overlay == o {
 			a.overlay = nil
 		}
 		return a, cmd
@@ -258,17 +263,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return a.quit()
 		case "tab":
-			a.active = (a.active + 1) % len(a.pages)
-			return a, nil
+			return a, a.show((a.active + 1) % len(a.pages))
 		case "shift+tab":
-			a.active = (a.active + len(a.pages) - 1) % len(a.pages)
-			return a, nil
-		case "m":
-			a.active = pageManage
-			if a.hasPools() {
-				return a, a.loadPoolStats()
-			}
-			return a, nil
+			return a, a.show((a.active + len(a.pages) - 1) % len(a.pages))
 		case "u":
 			a.active = pageUsage
 			return a, nil
@@ -280,6 +277,15 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return a, a.pages[a.active].update(a, msg)
+}
+
+// show switches to page i, running what the page wants on being shown.
+func (a *app) show(i int) tea.Cmd {
+	a.active = i
+	if s, ok := a.pages[i].(interface{ shown(*app) tea.Cmd }); ok {
+		return s.shown(a)
+	}
+	return nil
 }
 
 func (a *app) quit() (tea.Model, tea.Cmd) {

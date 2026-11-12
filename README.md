@@ -29,11 +29,13 @@ Prebuilt binaries are on the [releases](https://github.com/abcdlsj/ak/releases) 
 ```
 go install github.com/abcdlsj/ak@latest
 ak                                       # with nothing set up, opens the add form
-ak add kimi --preset kimi-coding --kind claude --key -   # or add one directly
-ak kimi
+ak login opencode-go                     # or sign in to a vendor first
+ak add og --account opencode-go --kind claude
+ak og
 ```
 
-`--key -` asks for the key, so it stays out of shell history.
+`ak login` reads a sign-in another tool already has, runs a device sign-in, or
+asks for the key, so it stays out of shell history.
 
 To keep typing `claude` and `codex`, set up the shell once and bind:
 
@@ -53,7 +55,7 @@ the engines' own, with their own settings. Flags every launch should get go in
 claude_args = ['--dangerously-skip-permissions']
 ```
 
-`ak preset list` shows the built-in vendors; `ak import --from cc-switch` (or
+`ak vendor list` shows the vendors to sign in to; `ak import --from cc-switch` (or
 `--from pi`, `--from claude-settings`, `--from codexa`) copies providers you
 already have.
 
@@ -65,6 +67,8 @@ ak                              launcher, opens on what you last used here
 ak status [name...]             health, balance and last 7 days of usage
 ak list                         providers
 ak add / edit / rm / rename     change providers (flags, or a form)
+ak login <vendor> / logout      sign in to a vendor as an account, or remove one
+ak accounts                     accounts and the providers on each
 ak import --from <source>       copy providers over
 ak usage | quota | check | models   the parts of status, for scripts
 ak bind / unbind / bindings     what claude/codex/pi typed in a repository run on
@@ -79,7 +83,7 @@ ak-<name> [args...]             the same as ak <name>, for scripts
 ## More
 
 - [Guide](docs/guide.md): typing `claude` and `codex` directly, variants, the
-  launcher, environment, presets, sharing or isolating config, pi, how usage
+  launcher, environment, accounts and vendors, sharing or isolating config, pi, how usage
   is attributed.
 - [Pools](docs/pools.md): one provider spread over several, with failover,
   rotation and a quota-aware strategy.

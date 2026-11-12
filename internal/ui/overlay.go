@@ -9,25 +9,26 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
-// formOverlay edits a provider with the same form as `ak add` / `ak edit`.
+// formOverlay adds or edits a provider with the same form as `ak add` and
+// `ak edit`. A new provider is first asked its engine and what it runs on;
+// choosing a vendor signs in to it before the form.
 type formOverlay struct {
-	draft   *Draft
-	editing bool
-	form    *huh.Form
-	// picking is set while a new provider's engine and preset are asked,
+	draft *Draft
+	form  *huh.Form
+	// picking is set while a new provider's engine and account are asked,
 	// before the main form.
 	picking bool
 }
 
-func newFormOverlay(d *Draft, editing bool) *formOverlay {
-	return &formOverlay{draft: d, editing: editing, picking: !editing && d.IsNew()}
+func newFormOverlay(d *Draft) *formOverlay {
+	return &formOverlay{draft: d, picking: d.IsNew()}
 }
 
 func (o *formOverlay) init(a *app) tea.Cmd { return o.build(a).Init() }
 
 func (o *formOverlay) build(a *app) *huh.Form {
 	if o.form == nil {
-		f := o.draft.PresetForm()
+		f := o.draft.PickForm(a.cfg)
 		if !o.picking {
 			f = o.draft.Form(func(n string) bool { _, ok := a.cfg.Providers[n]; return ok })
 		}
@@ -44,7 +45,7 @@ func (o *formOverlay) update(a *app, msg tea.Msg) (bool, tea.Cmd) {
 			return true, a.notify("cancelled", false)
 		case "ctrl+s":
 			// Save from any field, without stepping through the rest. While
-			// picking a preset there is nothing to save yet.
+			// picking there is nothing to save yet.
 			if !o.picking {
 				return o.save(a)
 			}
@@ -59,14 +60,26 @@ func (o *formOverlay) update(a *app, msg tea.Msg) (bool, tea.Cmd) {
 		return true, a.notify("cancelled", false)
 	case huh.StateCompleted:
 		if o.picking {
-			o.picking = false
-			o.draft.ApplyPreset()
-			o.form = nil
-			return false, o.init(a)
+			return o.picked(a)
 		}
 		return o.save(a)
 	}
 	return false, cmd
+}
+
+// picked moves on from the pick step: to the form, or first to signing in
+// to the vendor chosen, after which the form follows on the new account.
+func (o *formOverlay) picked(a *app) (bool, tea.Cmd) {
+	o.picking, o.form = false, nil
+	o.draft.ApplyPick(a.cfg)
+	v, ok := o.draft.SignInFirst()
+	if !ok {
+		return false, o.init(a)
+	}
+	return false, a.open(newLoginOverlay(v, v.ID, func(a *app, account string) tea.Cmd {
+		o.draft.UseAccount(a.cfg, account)
+		return a.open(o)
+	}))
 }
 
 // save stores the draft; on a rejected change the form stays open so nothing
@@ -74,10 +87,10 @@ func (o *formOverlay) update(a *app, msg tea.Msg) (bool, tea.Cmd) {
 func (o *formOverlay) save(a *app) (bool, tea.Cmd) {
 	p := o.draft.Provider()
 	var err error
-	if o.editing {
-		err = core.Edit(a.cfg, o.draft.Orig(), o.draft.Name, p)
-	} else {
+	if o.draft.IsNew() {
 		err = core.Add(a.cfg, o.draft.Name, p)
+	} else {
+		err = core.Edit(a.cfg, o.draft.Orig(), o.draft.Name, p)
 	}
 	if err != nil {
 		if o.form.State != huh.StateNormal {
@@ -88,18 +101,23 @@ func (o *formOverlay) save(a *app) (bool, tea.Cmd) {
 		return false, a.notify(err.Error(), true)
 	}
 	// Leave the cursor on what was just saved.
-	for _, i := range []int{pageHome, pageManage} {
-		a.pages[i].(*providersPage).focus(a.cfg, o.draft.Name)
-	}
+	a.home().focus(a.cfg, o.draft.Name)
 	return true, a.sync()
 }
 
 func (o *formOverlay) view(a *app, width int) string {
 	head := "Add provider"
-	if o.editing {
-		head = "Edit " + o.draft.Name
+	if !o.draft.IsNew() {
+		head = "Edit " + o.draft.Orig()
 	}
-	return section(head, width) + "\n\n" + o.build(a).View() + "\n" + dimStyle.Render("ctrl+s save  ·  esc cancel")
+	if acc := o.draft.Account; acc != "" && !o.picking {
+		head += "  ·  on " + accountSummary(a.cfg, acc)
+	}
+	hint := "↑/↓ move  ·  ←/→ change  ·  ctrl+s save  ·  esc cancel"
+	if o.picking {
+		hint = "enter next  ·  esc cancel"
+	}
+	return section(head, width) + "\n\n" + o.build(a).View() + "\n" + dimStyle.Render(hint)
 }
 
 // confirmOverlay asks a yes/no question before a destructive action.

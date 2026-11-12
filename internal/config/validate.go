@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/abcdlsj/ak/internal/vendor"
 )
 
 // nameRe constrains provider names so they are safe as a command name suffix.
@@ -45,6 +47,11 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.Settings.MaxInflight < 0 {
 		return fmt.Errorf("settings.max_inflight must not be negative")
+	}
+	for _, name := range cfg.AccountNames() {
+		if err := validateAccount(name, cfg.Accounts[name]); err != nil {
+			return err
+		}
 	}
 	for _, name := range cfg.Names() {
 		if err := ValidateName(name); err != nil {
@@ -140,6 +147,9 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 	if err := validateEnv(name, p); err != nil {
 		return err
 	}
+	if err := validateOnAccount(cfg, name, p); err != nil {
+		return err
+	}
 	if err := validateIsolation(name, p); err != nil {
 		return err
 	}
@@ -183,6 +193,53 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 		return err
 	}
 	return validateVariants(name, p)
+}
+
+// ValidateAccountName validates an account name; it follows a provider
+// name's rules but claims no command.
+func ValidateAccountName(name string) error {
+	if !nameRe.MatchString(name) {
+		return fmt.Errorf("invalid account name %q: only lowercase letters, digits, dots, underscores and hyphens are allowed, and it must start with a letter or digit", name)
+	}
+	return nil
+}
+
+func validateAccount(name string, a Account) error {
+	if err := ValidateAccountName(name); err != nil {
+		return err
+	}
+	if _, ok := vendor.Lookup(a.Vendor); !ok {
+		return fmt.Errorf("account %q has unknown vendor %q; `ak preset list` lists them", name, a.Vendor)
+	}
+	if a.APIKey != "" && a.APIKeyRef != "" {
+		return fmt.Errorf("account %q sets both a key and api_key_ref; only one is allowed", name)
+	}
+	return nil
+}
+
+// validateOnAccount checks a provider's account exists and its vendor serves
+// the provider's engine. A pool routes over its members' accounts and has
+// none of its own.
+func validateOnAccount(cfg *Config, name string, p Provider) error {
+	if p.Account == "" {
+		return nil
+	}
+	if p.IsPool() {
+		return fmt.Errorf("pool %q names account %q; a pool runs on its members' accounts", name, p.Account)
+	}
+	a, ok := cfg.Accounts[p.Account]
+	if !ok {
+		return fmt.Errorf("provider %q names unknown account %q", name, p.Account)
+	}
+	v, _ := vendor.Lookup(a.Vendor)
+	if _, ok := v.Endpoint(string(p.Kind)); !ok {
+		return fmt.Errorf("provider %q runs %s, which account %q's vendor %s does not serve (it serves %s)",
+			name, p.Kind, p.Account, v.Name, strings.Join(v.Kinds(), ", "))
+	}
+	if p.PiProvider != "" {
+		return fmt.Errorf("provider %q sets both account and pi_provider; pick one", name)
+	}
+	return nil
 }
 
 func validateCodex(name string, p Provider) error {
