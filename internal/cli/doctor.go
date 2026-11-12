@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/abcdlsj/ak/internal/bind"
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/quota"
 	"github.com/abcdlsj/ak/internal/secrets"
@@ -42,7 +44,7 @@ func newDoctorCmd() *cobra.Command {
 }
 
 func runDoctor(cfg *config.Config) error {
-	problems, warnings := 0, 0
+	d := &doctor{}
 
 	// 1. Provider keys left in settings.json. This is the worst case: no error
 	// is raised, requests just silently go to the wrong provider.
@@ -55,83 +57,54 @@ func runDoctor(cfg *config.Config) error {
 			continue
 		}
 		clean = false
-		problems++
-		fmt.Printf("✗ %s still has provider-specific keys in env:\n", path)
-		for _, k := range residual {
-			fmt.Printf("    %s\n", k)
-		}
-		fmt.Println("  These override the environment variables ak-* commands inject, so")
-		fmt.Println("  those commands silently reach the wrong provider.")
-		fmt.Println("  Remove them (run `ak import --from claude-settings` first to keep them).")
-		fmt.Println("  Keep the global preference keys, e.g. NODE_EXTRA_CA_CERTS and")
-		fmt.Println("  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC.")
+		d.bad("%s still has provider-specific keys in env", path)
+		d.details(residual)
+		d.note("These override the environment variables ak-* commands inject, so")
+		d.note("those commands silently reach the wrong provider.")
+		d.hint("Keep them with `ak import --from claude-settings`, then remove them")
+		d.hint("Keep global preferences, e.g. NODE_EXTRA_CA_CERTS and CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
 	}
 	if clean {
-		fmt.Println("✓ no provider keys left in settings.json")
+		d.fine("no provider keys left in settings.json")
 	}
 
 	// 2. bin_dir must be on PATH.
 	binDir := config.ExpandHome(cfg.Settings.BinDir)
-	if !onPath(binDir) {
-		problems++
-		fmt.Printf("✗ %s is not on PATH, ak-* commands cannot be invoked directly\n", binDir)
+	if onPath(binDir) {
+		d.fine("%s is on PATH", binDir)
 	} else {
-		fmt.Printf("✓ %s is on PATH\n", binDir)
+		d.bad("%s is not on PATH, ak-* commands cannot be invoked directly", binDir)
+		d.hint("Add it with `export PATH=\"%s:$PATH\"` in your shell profile", binDir)
 	}
 
 	// 3. Engine binaries must resolve.
-	if hasKind(cfg, config.KindClaude) {
-		if p := lookPathOr(cfg.Settings.ClaudeBin, "claude"); p == "" {
-			problems++
-			fmt.Println("✗ claude executable not found")
-		} else {
-			fmt.Printf("✓ claude: %s\n", p)
-		}
-	}
-	if hasKind(cfg, config.KindCodex) {
-		if p := lookPathOr(cfg.Settings.CodexBin, "codex"); p == "" {
-			problems++
-			fmt.Println("✗ codex executable not found")
-		} else {
-			fmt.Printf("✓ codex: %s\n", p)
-		}
-	}
-	if hasKind(cfg, config.KindPi) {
-		if p := lookPathOr(cfg.Settings.PiBin, "pi"); p == "" {
-			problems++
-			fmt.Println("✗ pi executable not found")
-		} else {
-			fmt.Printf("✓ pi: %s\n", p)
+	for _, k := range config.Kinds {
+		if hasKind(cfg, k) {
+			d.engineBin(cfg, k)
 		}
 	}
 
 	// 4. Generated commands must match the config on disk.
-	drifted, err := driftReport(cfg)
-	if err != nil {
-		problems++
-		fmt.Printf("✗ cannot check the commands against the config: %v\n", err)
-	} else {
-		if len(drifted) > 0 {
-			problems++
-			fmt.Println("✗ these commands do not match the config, run `ak sync` to fix:")
-			for _, d := range drifted {
-				fmt.Printf("    %s\n", filepath.Base(d))
-			}
-		} else if len(cfg.Providers) > 0 {
-			fmt.Println("✓ all commands match the config")
-		}
+	switch drifted, err := driftReport(cfg); {
+	case err != nil:
+		d.bad("cannot check the commands against the config: %v", err)
+	case len(drifted) > 0:
+		d.bad("these commands do not match the config")
+		d.details(baseNames(drifted))
+		d.hint("Run `ak sync` to regenerate them")
+	case len(cfg.Providers) > 0:
+		d.fine("all commands match the config")
 	}
 
 	// 5. ak passes each new claude session its own id and records it, so the
 	// SessionStart hook only adds sessions ak did not start (a fork).
 	if hasKind(cfg, config.KindClaude) {
 		if missing := hookMissing(cfg); len(missing) == 0 {
-			fmt.Println("✓ usage attribution hook installed")
+			d.fine("usage attribution hook installed")
 		} else {
-			fmt.Println("· usage attribution hook not installed; sessions ak starts are attributed anyway. `ak hook install` also covers forked sessions:")
-			for _, m := range missing {
-				fmt.Printf("    %s\n", m)
-			}
+			d.check(out.Unknown, "usage attribution hook not installed; sessions ak starts are attributed anyway")
+			d.details(missing)
+			d.hint("Run `ak hook install` so forked sessions are attributed too")
 		}
 	}
 
@@ -143,10 +116,10 @@ func runDoctor(cfg *config.Config) error {
 		}
 		if fi, err := os.Stat(path); err == nil {
 			if fi.Mode().Perm() != 0o600 {
-				problems++
-				fmt.Printf("✗ %s has mode %o, expected 600\n", path, fi.Mode().Perm())
+				d.bad("%s has mode %o, expected 600", path, fi.Mode().Perm())
+				d.hint("Run `chmod 600 %s`", path)
 			} else {
-				fmt.Printf("✓ %s mode is 600\n", filepath.Base(path))
+				d.fine("%s mode is 600", filepath.Base(path))
 			}
 		}
 	}
@@ -154,49 +127,42 @@ func runDoctor(cfg *config.Config) error {
 	// 6b. An auth_key with no entry in auth.json launches with no key.
 	for _, name := range cfg.Names() {
 		if p := cfg.Providers[name]; p.AuthKey != "" && p.APIKey == "" {
-			problems++
-			fmt.Printf("✗ %s names auth_key %q, which auth.json does not hold; set it with `ak edit %s --key -`\n", name, p.AuthKey, name)
+			d.bad("%s names auth_key %q, which auth.json does not hold", name, p.AuthKey)
+			d.hint("Set it with `ak edit %s --key -`", name)
 		}
 	}
 
 	// 6c. A default left pointing at a provider that is gone or of another
 	// kind; the command that would use it stops with the same message.
 	for _, err := range config.ValidateDefaults(cfg) {
-		problems++
-		fmt.Printf("✗ %v; fix it with `ak default`\n", err)
+		d.bad("%v", err)
+		d.hint("Fix it with `ak default`")
 	}
 
 	// 7. A codex provider_id that the base config also uses cannot be told
 	// apart in the session logs, so its usage is reported under the raw id.
 	if names := codexIDCollisions(cfg); len(names) > 0 {
-		warnings++
-		fmt.Println("! these codex providers reuse a model_provider id declared in ~/.codex/config.toml:")
-		for _, n := range names {
-			fmt.Printf("    %s\n", n)
-		}
-		fmt.Println("  Session logs record only the id, so ak cannot tell the two apart and")
-		fmt.Println("  `ak usage` reports the id itself instead of the provider. Give each")
-		fmt.Println("  provider its own id in providers.toml, then run `ak sync`.")
+		d.notice("these codex providers reuse a model_provider id declared in ~/.codex/config.toml")
+		d.details(names)
+		d.note("Session logs record only the id, so ak cannot tell the two apart and")
+		d.note("`ak usage` reports the id itself instead of the provider.")
+		d.hint("Give each provider its own id in providers.toml, then run `ak sync`")
 	}
 
 	// 8. Keys ak does not know are ignored, usually a misspelt field.
 	if keys, err := config.UnknownKeys(); err == nil && len(keys) > 0 {
-		warnings++
-		fmt.Println("! providers.toml has keys ak ignores (misspelt?); the next save drops them:")
-		for _, k := range keys {
-			fmt.Printf("    %s\n", k)
-		}
+		d.notice("providers.toml has keys ak ignores (misspelt?)")
+		d.details(keys)
+		d.note("The next save drops them.")
 	}
 
 	// 9. A referenced key must resolve now, or the command fails at launch.
-	if bad := keyRefProblems(cfg); len(bad) > 0 {
-		problems++
-		fmt.Println("✗ these providers' api_key_ref does not resolve:")
-		for _, b := range bad {
-			fmt.Printf("    %s\n", b)
-		}
+	if failed := keyRefProblems(cfg); len(failed) > 0 {
+		d.bad("these providers' api_key_ref does not resolve")
+		d.details(failed)
+		d.hint("Fix each reference, or set the key with `ak edit <provider> --key -`")
 	} else if hasKeyRef(cfg) {
-		fmt.Println("✓ all referenced keys resolve")
+		d.fine("all referenced keys resolve")
 	}
 
 	// 10. Pools route through the local gateway, which must be running.
@@ -206,20 +172,17 @@ func runDoctor(cfg *config.Config) error {
 			addr = config.DefaultGatewayAddr
 		}
 		if gatewayUp(addr) {
-			fmt.Printf("✓ pool gateway reachable at %s\n", addr)
+			d.fine("pool gateway reachable at %s", addr)
 		} else {
-			warnings++
-			fmt.Printf("! %d pool(s) configured but nothing is listening on %s; a pool command starts it, or run `ak serve`\n", len(pools), addr)
+			d.notice("%s configured but nothing is listening on %s", count(len(pools), "pool"), addr)
+			d.hint("Run `ak serve`, or any pool command, which starts it")
 		}
 	}
 
 	// 11. A quota plugin that does not load is skipped by `ak quota`.
 	if errs := quota.PluginErrors(); len(errs) > 0 {
-		warnings++
-		fmt.Println("! these quota plugins do not load and are skipped:")
-		for _, err := range errs {
-			fmt.Printf("    %s\n", err)
-		}
+		d.notice("these quota plugins do not load and are skipped")
+		d.details(errorLines(errs))
 	}
 
 	// 12. A smart pool ranks members by their quota; one without a source
@@ -235,9 +198,8 @@ func runDoctor(cfg *config.Config) error {
 			}
 		}
 		if len(blind) > 0 {
-			warnings++
-			fmt.Printf("! smart pool %s cannot read the quota of %s; they rank after members with allowance that resets\n",
-				name, strings.Join(blind, ", "))
+			d.notice("smart pool %s cannot read the quota of %s", name, strings.Join(blind, ", "))
+			d.note("They rank after members with allowance that resets.")
 		}
 	}
 
@@ -246,35 +208,158 @@ func runDoctor(cfg *config.Config) error {
 	if store, err := bind.Default(); err == nil {
 		list, err := store.List()
 		if err != nil {
-			problems++
-			fmt.Printf("✗ bindings: %v\n", err)
+			d.bad("bindings: %v", err)
 		}
 		for _, b := range list {
 			if b.Target == bind.Native {
 				continue
 			}
 			if err := config.ValidateTarget(cfg, config.Kind(b.Engine), b.Target); err != nil {
-				problems++
-				fmt.Printf("✗ %s bound at %s: %v; `ak unbind %s` there\n", b.Engine, displayPlace(b.Place), err, b.Engine)
+				d.bad("%s bound at %s: %v", b.Engine, displayPlace(b.Place), err)
+				d.hint("Run `ak unbind %s` there", b.Engine)
 			}
 		}
 	}
 
 	if len(cfg.Providers) == 0 {
-		fmt.Println("\nNo providers configured yet. Use `ak add` or `ak import --from claude-settings`.")
+		out.Empty(os.Stdout, "No providers configured yet.", "Add one with `ak add`, or `ak import --from claude-settings`.")
 		return nil
 	}
+	d.finish()
+	return d.err()
+}
 
-	if problems > 0 {
-		fmt.Printf("\nFound %d problem(s).\n", problems)
-		return fmt.Errorf("%d problem(s) need attention", problems)
+// doctor is one run's result: the checks it printed, how many found something
+// wrong, and what to do about it, printed as hints under them.
+type doctor struct {
+	problems int
+	warnings int
+	hints    []string
+}
+
+// check writes a check line: the state's mark, then what was checked.
+func (d *doctor) check(l out.Level, format string, a ...any) {
+	fmt.Printf("%s %s\n", out.Mark(l), fmt.Sprintf(format, a...))
+}
+
+// fine writes a check that passed.
+func (d *doctor) fine(format string, a ...any) {
+	d.check(out.Fine, format, a...)
+}
+
+// notice writes a check worth a look, and counts the warning.
+func (d *doctor) notice(format string, a ...any) {
+	d.warnings++
+	d.check(out.Notice, format, a...)
+}
+
+// bad writes a check that failed, and counts the problem.
+func (d *doctor) bad(format string, a ...any) {
+	d.problems++
+	d.check(out.Broken, format, a...)
+}
+
+// details writes the dim lines under a check: the names it found.
+func (d *doctor) details(lines []string) {
+	for _, s := range lines {
+		fmt.Println("    " + out.Dim(s))
 	}
-	if warnings > 0 {
-		fmt.Printf("\nNo problems, %d warning(s).\n", warnings)
-		return nil
+}
+
+// note writes a dim line under a check, explaining what it means.
+func (d *doctor) note(format string, a ...any) {
+	fmt.Println("  " + out.Dim(fmt.Sprintf(format, a...)))
+}
+
+// hint records what to do about a failed check, printed once under them all.
+func (d *doctor) hint(format string, a ...any) {
+	h := fmt.Sprintf(format, a...)
+	for _, have := range d.hints {
+		if have == h {
+			return
+		}
 	}
-	fmt.Println("\nAll checks passed.")
+	d.hints = append(d.hints, h)
+}
+
+// finish prints what to do about what failed, then the result line.
+func (d *doctor) finish() {
+	if len(d.hints) > 0 {
+		fmt.Println()
+		for _, h := range d.hints {
+			out.Hint(os.Stdout, "%s", h)
+		}
+	}
+	fmt.Println()
+	fmt.Println(d.summary())
+}
+
+// summary is the result line: how many problems, and the warnings when there
+// are any.
+func (d *doctor) summary() string {
+	line := "No problems"
+	if d.problems > 0 {
+		line = count(d.problems, "problem")
+	}
+	if d.warnings > 0 {
+		line += " · " + count(d.warnings, "warning")
+	}
+	return out.Bold(line)
+}
+
+// err is the command's failure when a check found a problem.
+func (d *doctor) err() error {
+	switch {
+	case d.problems == 1:
+		return errors.New("1 problem needs attention")
+	case d.problems > 1:
+		return fmt.Errorf("%d problems need attention", d.problems)
+	}
 	return nil
+}
+
+// errorLines is errors as the text a detail line shows.
+func errorLines(errs []error) []string {
+	lines := make([]string, len(errs))
+	for i, err := range errs {
+		lines[i] = err.Error()
+	}
+	return lines
+}
+
+// baseNames is paths by their file name, which is what the generated commands
+// differ in.
+func baseNames(paths []string) []string {
+	names := make([]string, len(paths))
+	for i, p := range paths {
+		names[i] = filepath.Base(p)
+	}
+	return names
+}
+
+// count names n of what: "1 pool", "2 pools".
+func count(n int, what string) string {
+	if n == 1 {
+		return "1 " + what
+	}
+	return fmt.Sprintf("%d %ss", n, what)
+}
+
+// engineBin checks that engine k's executable resolves, naming what was found.
+func (d *doctor) engineBin(cfg *config.Config, k config.Kind) {
+	configured, name := cfg.Settings.ClaudeBin, "claude"
+	switch k {
+	case config.KindCodex:
+		configured, name = cfg.Settings.CodexBin, "codex"
+	case config.KindPi:
+		configured, name = cfg.Settings.PiBin, "pi"
+	}
+	if p := lookPathOr(configured, name); p != "" {
+		d.fine("%s: %s", name, p)
+		return
+	}
+	d.bad("%s executable not found", name)
+	d.hint("Install %s, or set %s_bin in providers.toml", name, name)
 }
 
 // keyRefProblems resolves every api_key_ref and names the ones that fail, so

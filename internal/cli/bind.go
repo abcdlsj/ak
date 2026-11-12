@@ -10,6 +10,7 @@ import (
 	"github.com/abcdlsj/ak/internal/bind"
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/launch"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/spf13/cobra"
 )
 
@@ -136,14 +137,11 @@ or the one --engine names. Nothing is written into the directory.`,
 			} else if len(kinds) == 0 {
 				kinds = config.Kinds
 			}
-			var place string
 			for _, k := range kinds {
-				if place, err = store.Set(wd, string(k), target); err != nil {
+				if _, err = store.Set(wd, string(k), target); err != nil {
 					return err
 				}
-			}
-			for _, k := range kinds {
-				fmt.Printf("%s in %s now runs %s\n", k, displayPlace(place), describeTarget(target))
+				out.Done(os.Stdout, "%s here runs %s", k, describeTarget(target))
 			}
 			return nil
 		},
@@ -152,6 +150,7 @@ or the one --engine names. Nothing is written into the directory.`,
 	return cmd
 }
 
+// describeTarget is how a target reads after "runs": "on kimi", "natively".
 func describeTarget(t string) string {
 	if t == "" || t == bind.Native {
 		return "natively"
@@ -187,19 +186,23 @@ func newUnbindCmd() *cobra.Command {
 				return err
 			}
 			if !removed {
-				fmt.Printf("nothing is bound at %s\n", displayPlace(place))
+				fmt.Printf("Nothing bound at %s.\n", displayPlace(place))
 				// A binding further up still applies; say where it is.
 				for _, k := range config.Kinds {
 					if engine != "" && string(k) != engine {
 						continue
 					}
 					if b, ok, _ := store.Lookup(wd, string(k)); ok {
-						fmt.Printf("%s here follows %s, bound at %s\n", k, b.Target, displayPlace(b.Place))
+						out.Hint(os.Stdout, "%s here follows %s, bound at %s", k, b.Target, displayPlace(b.Place))
 					}
 				}
 				return nil
 			}
-			fmt.Printf("unbound %s\n", displayPlace(place))
+			if engine == "" {
+				out.Done(os.Stdout, "unbound every engine here")
+				return nil
+			}
+			out.Done(os.Stdout, "unbound %s here", engine)
 			return nil
 		},
 	}
@@ -219,28 +222,46 @@ func newBindingsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			for _, k := range config.Kinds {
-				if t := cfg.Settings.EngineDefault(k); t != "" {
-					fmt.Printf("%-7s %-24s default\n", k, t)
-				}
-			}
 			list, err := store.List()
 			if err != nil {
 				return err
 			}
-			for _, b := range list {
-				fmt.Printf("%-7s %-24s %s\n", b.Engine, b.Target, displayPlace(b.Place))
+			if len(list) == 0 && !hasEngineDefaults(cfg) {
+				out.Empty(os.Stdout, "Nothing bound.", "Bind one with `ak bind <provider>`.")
+				return nil
 			}
-			if len(list) == 0 && cfg.Settings.DefaultClaude == "" && cfg.Settings.DefaultCodex == "" && cfg.Settings.DefaultPi == "" {
-				fmt.Println("Nothing bound. `ak bind <provider>` in a repository, or `ak default claude <provider>`.")
-			}
+			out.Table(os.Stdout, []string{"engine", "runs on", "place"}, bindingRows(cfg, list))
 			return nil
 		},
 	}
 }
 
+// bindingRows is the engine defaults and the bindings: what each engine runs
+// on, and where that was set.
+func bindingRows(cfg *config.Config, list []bind.Binding) [][]string {
+	var rows [][]string
+	for _, k := range config.Kinds {
+		if t := cfg.Settings.EngineDefault(k); t != "" {
+			rows = append(rows, []string{string(k), t, "default"})
+		}
+	}
+	for _, b := range list {
+		rows = append(rows, []string{b.Engine, b.Target, displayPlace(b.Place)})
+	}
+	return rows
+}
+
+// hasEngineDefaults reports whether any engine has a default target.
+func hasEngineDefaults(cfg *config.Config) bool {
+	for _, k := range config.Kinds {
+		if cfg.Settings.EngineDefault(k) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func newWhichCmd() *cobra.Command {
-	var short bool
 	return &cobra.Command{
 		Use:       "which [engine...]",
 		Short:     "Show what claude/codex/pi typed here runs on, and why",
@@ -269,29 +290,47 @@ func newWhichCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			failed := false
-			for _, k := range kinds {
-				r, err := resolveEngine(cfg, store, k, wd)
-				target := r.Target
-				if target == "" {
-					target = bind.Native
-				}
-				switch {
-				case err != nil:
-					failed = true
-					fmt.Printf("%-7s ✗ %v\n", k, err)
-				case short:
-					fmt.Printf("%s=%s\n", k, target)
-				default:
-					fmt.Printf("%-7s %-24s %s\n", k, target, r.Source)
-				}
-			}
-			if failed {
+			rows, broken := whichRows(cfg, store, kinds, wd)
+			out.Table(os.Stdout, []string{"engine", "runs on", "why"}, rows)
+			if broken {
 				return errors.New("a binding or default points at a provider that cannot run it")
 			}
 			return nil
 		},
 	}
+}
+
+// whichRows is what each engine runs on here, and which rule chose it; one
+// that cannot run is marked broken and says why.
+func whichRows(cfg *config.Config, store *bind.Store, kinds []config.Kind, dir string) ([][]string, bool) {
+	var rows [][]string
+	broken := false
+	for _, k := range kinds {
+		r, err := resolveEngine(cfg, store, k, dir)
+		switch {
+		case err != nil:
+			broken = true
+			rows = append(rows, []string{out.Mark(out.Broken) + " " + string(k), out.Or(r.Target), out.Err(whyLine(r, err))})
+		case r.Target == "":
+			rows = append(rows, []string{string(k), out.Dim(bind.Native), r.Source})
+		default:
+			rows = append(rows, []string{string(k), r.Target, r.Source})
+		}
+	}
+	return rows, broken
+}
+
+// whyLine is why a resolution failed, without the engine and target the row
+// already names.
+func whyLine(r resolution, err error) string {
+	cause := errors.Unwrap(err)
+	if cause == nil {
+		return err.Error()
+	}
+	if r.Source == "" {
+		return cause.Error()
+	}
+	return r.Source + ": " + cause.Error()
 }
 
 // newResolveCmd is what the shell functions ask before each engine command:

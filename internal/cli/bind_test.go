@@ -95,3 +95,54 @@ func TestShellInitRuns(t *testing.T) {
 		}
 	}
 }
+
+// One row per engine: what it runs on and why; a target that cannot run is
+// marked broken in its row.
+func TestWhichRows(t *testing.T) {
+	t.Setenv(overrideEnv, "")
+	root := t.TempDir()
+	store := &bind.Store{Path: filepath.Join(root, "bindings.json"), Repo: func(string) string { return "" }}
+	cfg := config.Default()
+	cfg.Providers["kimi"] = config.Provider{Kind: config.KindClaude, BaseURL: "https://k", APIKey: "k"}
+	if _, err := store.Set(root, "claude", "kimi"); err != nil {
+		t.Fatal(err)
+	}
+	rows, broken := whichRows(cfg, store, config.Kinds, root)
+	if broken {
+		t.Fatal("a valid binding is not broken")
+	}
+	if len(rows) != len(config.Kinds) {
+		t.Fatalf("rows = %q", rows)
+	}
+	if rows[0][1] != "kimi" || !strings.Contains(rows[0][2], "bound at") {
+		t.Errorf("claude row = %q", rows[0])
+	}
+	if rows[1][1] != bind.Native {
+		t.Errorf("codex runs on %q, want native", rows[1][1])
+	}
+	if _, err := store.Set(root, "codex", "gone"); err != nil {
+		t.Fatal(err)
+	}
+	rows, broken = whichRows(cfg, store, config.Kinds, root)
+	if !broken {
+		t.Fatal("a binding to a removed provider must be broken")
+	}
+	if !strings.HasPrefix(rows[1][0], "✗") || rows[1][1] != "gone" {
+		t.Errorf("broken row = %q", rows[1])
+	}
+}
+
+// The engine defaults come first, then the bindings, each with where it was
+// set; nothing bound is empty.
+func TestBindingRows(t *testing.T) {
+	cfg := config.Default()
+	cfg.Settings.DefaultCodex = "gpt"
+	list := []bind.Binding{{Place: "/w/repo/.git", Engine: "claude", Target: "kimi"}}
+	rows := bindingRows(cfg, list)
+	if len(rows) != 2 || rows[0][0] != "codex" || rows[0][2] != "default" || rows[1][2] != "/w/repo" {
+		t.Errorf("rows = %q", rows)
+	}
+	if !hasEngineDefaults(cfg) || hasEngineDefaults(config.Default()) {
+		t.Error("hasEngineDefaults is wrong")
+	}
+}
