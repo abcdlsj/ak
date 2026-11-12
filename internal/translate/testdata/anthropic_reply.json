@@ -1,0 +1,14 @@
+{
+  "id": "msg_01",
+  "type": "message",
+  "role": "assistant",
+  "model": "glm-5",
+  "content": [
+    {"type": "thinking", "thinking": "The file prints hi; check the rest.", "signature": "c2lnLTI="},
+    {"type": "text", "text": "It prints hi. Let me check the tests."},
+    {"type": "tool_use", "id": "toolu_02", "name": "Read", "input": {"file_path": "/src/main_test.go"}}
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {"input_tokens": 120, "cache_read_input_tokens": 30, "cache_creation_input_tokens": 0, "output_tokens": 45}
+}

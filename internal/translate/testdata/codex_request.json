@@ -1,0 +1,26 @@
+{
+  "model": "command-code",
+  "instructions": "You are Codex, a coding agent.",
+  "input": [
+    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "What does main.go do?"}]},
+    {"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "Read the file first."}]},
+    {"type": "function_call", "id": "fc_1", "call_id": "call_01", "name": "shell", "arguments": "{\"command\":[\"cat\",\"main.go\"]}"},
+    {"type": "function_call_output", "call_id": "call_01", "output": "package main\n\nfunc main() { println(\"hi\") }"}
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "shell",
+      "description": "Runs a shell command and returns its output.",
+      "strict": false,
+      "parameters": {"type": "object", "properties": {"command": {"type": "array", "items": {"type": "string"}}}, "required": ["command"]}
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "reasoning": {"effort": "high", "summary": "auto"},
+  "store": false,
+  "stream": true,
+  "include": ["reasoning.encrypted_content"],
+  "prompt_cache_key": "thread-0001"
+}

@@ -1,0 +1,63 @@
+event: response.created
+data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_01","object":"response","created_at":1794470000,"status":"in_progress","model":"deepseek/deepseek-v4.1-flash","output":[]}}
+
+event: response.in_progress
+data: {"type":"response.in_progress","sequence_number":1,"response":{"id":"resp_01","object":"response","created_at":1794470000,"status":"in_progress","model":"deepseek/deepseek-v4.1-flash","output":[]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"type":"reasoning","id":"rs_2","summary":[]}}
+
+event: response.reasoning_summary_part.added
+data: {"type":"response.reasoning_summary_part.added","sequence_number":3,"output_index":0,"item_id":"rs_2","summary_index":0,"part":{"type":"summary_text","text":""}}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","sequence_number":4,"output_index":0,"item_id":"rs_2","summary_index":0,"delta":"The file prints hi; check the rest."}
+
+event: response.reasoning_summary_text.done
+data: {"type":"response.reasoning_summary_text.done","sequence_number":5,"output_index":0,"item_id":"rs_2","summary_index":0,"text":"The file prints hi; check the rest."}
+
+event: response.reasoning_summary_part.done
+data: {"type":"response.reasoning_summary_part.done","sequence_number":6,"output_index":0,"item_id":"rs_2","summary_index":0,"part":{"type":"summary_text","text":"The file prints hi; check the rest."}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":7,"output_index":0,"item":{"type":"reasoning","id":"rs_2","summary":[{"type":"summary_text","text":"The file prints hi; check the rest."}]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":8,"output_index":1,"item":{"type":"message","id":"msg_2","status":"in_progress","role":"assistant","content":[]}}
+
+event: response.content_part.added
+data: {"type":"response.content_part.added","sequence_number":9,"output_index":1,"item_id":"msg_2","content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":10,"output_index":1,"item_id":"msg_2","content_index":0,"delta":"It prints hi. "}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":11,"output_index":1,"item_id":"msg_2","content_index":0,"delta":"Let me check the tests."}
+
+event: response.output_text.done
+data: {"type":"response.output_text.done","sequence_number":12,"output_index":1,"item_id":"msg_2","content_index":0,"text":"It prints hi. Let me check the tests."}
+
+event: response.content_part.done
+data: {"type":"response.content_part.done","sequence_number":13,"output_index":1,"item_id":"msg_2","content_index":0,"part":{"type":"output_text","text":"It prints hi. Let me check the tests.","annotations":[]}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":14,"output_index":1,"item":{"type":"message","id":"msg_2","status":"completed","role":"assistant","content":[{"type":"output_text","text":"It prints hi. Let me check the tests.","annotations":[]}]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":15,"output_index":2,"item":{"type":"function_call","id":"fc_2","call_id":"call_02","name":"Read","arguments":"","status":"in_progress"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":16,"output_index":2,"item_id":"fc_2","delta":"{\"file_path\":"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":17,"output_index":2,"item_id":"fc_2","delta":"\"/src/main_test.go\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","sequence_number":18,"output_index":2,"item_id":"fc_2","arguments":"{\"file_path\":\"/src/main_test.go\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":19,"output_index":2,"item":{"type":"function_call","id":"fc_2","call_id":"call_02","name":"Read","arguments":"{\"file_path\":\"/src/main_test.go\"}","status":"completed"}}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":20,"response":{"id":"resp_01","object":"response","created_at":1794470000,"status":"completed","model":"deepseek/deepseek-v4.1-flash","output":[],"usage":{"input_tokens":150,"input_tokens_details":{"cached_tokens":30},"output_tokens":45,"output_tokens_details":{"reasoning_tokens":12},"total_tokens":195}}}
+

@@ -1,0 +1,31 @@
+{
+  "model": "bili/glm-5",
+  "max_tokens": 32000,
+  "stream": true,
+  "system": [
+    {"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude.", "cache_control": {"type": "ephemeral"}}
+  ],
+  "thinking": {"type": "enabled", "budget_tokens": 4000},
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem.",
+      "input_schema": {
+        "type": "object",
+        "properties": {"file_path": {"type": "string", "description": "The absolute path to the file to read"}},
+        "required": ["file_path"]
+      }
+    }
+  ],
+  "messages": [
+    {"role": "user", "content": [{"type": "text", "text": "What does main.go do?"}]},
+    {"role": "assistant", "content": [
+      {"type": "thinking", "thinking": "I need to read main.go first.", "signature": "c2lnLTE="},
+      {"type": "tool_use", "id": "toolu_01", "name": "Read", "input": {"file_path": "/src/main.go"}}
+    ]},
+    {"role": "user", "content": [
+      {"type": "tool_result", "tool_use_id": "toolu_01", "content": "package main\n\nfunc main() { println(\"hi\") }"}
+    ]}
+  ],
+  "metadata": {"user_id": "user_abc_session_1"}
+}
