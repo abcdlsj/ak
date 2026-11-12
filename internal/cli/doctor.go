@@ -17,6 +17,7 @@ import (
 	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/quota"
+	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/shim"
 	"github.com/spf13/cobra"
@@ -179,9 +180,13 @@ func runDoctor(cfg *config.Config) error {
 		}
 	}
 
-	// 11. A quota plugin that does not load is skipped by `ak quota`.
+	// 11. A quota plugin or vendor file that does not load is skipped.
 	if errs := quota.PluginErrors(); len(errs) > 0 {
 		d.notice("these quota plugins do not load and are skipped")
+		d.details(errorLines(errs))
+	}
+	if errs := vendor.Errors(); len(errs) > 0 {
+		d.notice("these vendor files in vendors.d do not load and are skipped")
 		d.details(errorLines(errs))
 	}
 

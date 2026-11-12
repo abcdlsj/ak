@@ -47,8 +47,9 @@ type registry struct {
 	errs    []error // user plugin files that did not load
 }
 
-// loadRegistry reads the user's plugins from dir. A file that fails is
-// reported and skipped; the rest still load. An empty or missing dir is fine.
+// loadRegistry reads the user's plugins from dir: TOML specs and
+// executables. A file that fails is reported and skipped; the rest still
+// load. An empty or missing dir is fine.
 func loadRegistry(dir string) registry {
 	var r registry
 	seen := map[string]bool{}
@@ -57,21 +58,27 @@ func loadRegistry(dir string) registry {
 		if err != nil && !os.IsNotExist(err) {
 			r.errs = append(r.errs, fmt.Errorf("quota plugins: %w", err))
 		}
+		add := func(src Source, file string) {
+			if seen[src.ID()] {
+				r.errs = append(r.errs, fmt.Errorf("%s: id %q is already declared by another file", file, src.ID()))
+				return
+			}
+			seen[src.ID()] = true
+			r.sources = append(r.sources, src)
+		}
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".toml") {
+			file := filepath.Join(dir, e.Name())
+			if !strings.HasSuffix(e.Name(), ".toml") {
+				if pr, ok := asProgram(dir, e); ok {
+					add(pr, file)
+				}
 				continue
 			}
-			file := filepath.Join(dir, e.Name())
 			b, err := os.ReadFile(file)
 			if err == nil {
 				var pl *plugin
 				if pl, err = parsePlugin(file, b); err == nil {
-					if seen[pl.ID()] {
-						err = fmt.Errorf("%s: id %q is already declared by another file", file, pl.ID())
-					} else {
-						seen[pl.ID()] = true
-						r.sources = append(r.sources, pl)
-					}
+					add(pl, file)
 				}
 			}
 			if err != nil {

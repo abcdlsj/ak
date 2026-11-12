@@ -31,6 +31,13 @@ func newVendorListCmd() *cobra.Command {
 		Short:   "List the vendors and the engines each serves",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Loading the config reads the user's vendors in vendors.d.
+			if _, err := loadConfig(); err != nil {
+				return err
+			}
+			for _, err := range vendor.Errors() {
+				warnf("ak: vendor skipped: %v", err)
+			}
 			if kind != "" {
 				if _, ok := parseKind(kind); !ok {
 					return fmt.Errorf("unknown engine %q; must be %s", kind, kindList())

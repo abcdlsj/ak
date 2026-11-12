@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"maps"
 	"slices"
 	"strings"
@@ -60,15 +61,6 @@ func (c *Config) Vendor(p Provider) (vendor.Vendor, bool) {
 	return vendor.Lookup(c.Accounts[p.Account].Vendor)
 }
 
-// endpoint is what a provider's account gives it for its engine.
-func (c *Config) endpoint(p Provider) (vendor.Endpoint, bool) {
-	v, ok := c.Vendor(p)
-	if !ok {
-		return vendor.Endpoint{}, false
-	}
-	return v.Endpoint(string(p.Kind))
-}
-
 // inherited pairs each provider field an endpoint can set with the
 // endpoint's value. Resolve and Stored walk it in opposite directions, so
 // the two always agree on what an account provides.
@@ -102,7 +94,9 @@ func (c *Config) resolve(p Provider) Provider {
 	}
 	a := c.Accounts[p.Account]
 	p.APIKey, p.APIKeyRef, p.AuthKey, p.Secrets = a.APIKey, a.APIKeyRef, "", a.Secrets
-	e, ok := c.endpoint(p)
+	v, _ := c.Vendor(p)
+	p.Quota = cmp.Or(p.Quota, v.Quota)
+	e, ok := v.Endpoint(string(p.Kind))
 	if !ok {
 		return p
 	}
@@ -140,7 +134,11 @@ func (c *Config) Stored(p Provider) Provider {
 		return p
 	}
 	p.APIKey, p.APIKeyRef, p.AuthKey, p.Secrets = "", "", "", nil
-	e, ok := c.endpoint(p)
+	v, _ := c.Vendor(p)
+	if p.Quota == v.Quota {
+		p.Quota = ""
+	}
+	e, ok := v.Endpoint(string(p.Kind))
 	if !ok {
 		return p
 	}

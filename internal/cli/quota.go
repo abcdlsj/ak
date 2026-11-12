@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/quota"
 	"github.com/abcdlsj/ak/internal/secrets"
@@ -22,37 +22,39 @@ import (
 func newQuotaCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:               "quota [name...]",
+		Use:               "quota [account|provider...]",
 		ValidArgsFunction: completeProviders,
-		Short:             "Query provider balance and plan usage",
-		Long: `Ask each provider's balance API what is left.
+		Short:             "Query the balance and plan of each account",
+		Long: `Ask what is left: once per account, which every provider on it shares,
+and once per provider with an endpoint of its own. A provider named is asked
+through its account; a pool through its members.
 
-The source is detected from the endpoint host (deepseek, openrouter, moonshot,
-siliconflow, stepfun, kimi, zhipu, minimax), or named with the provider's quota
-field (newapi is never detected). TOML plugins in ~/.config/ak/quota.d add or
-override sources. A provider with quota_cmd runs that script instead. Given no
-names, every provider is asked. A pool is asked through its members.`,
+The source is the account vendor's, else detected from the endpoint host
+(deepseek, kimi, zhipu, commandcode, opencode-go, …), else named with quota.
+~/.config/ak/quota.d adds sources: a TOML spec for one request, or any
+executable (a script, a Go binary) that prints the quota as JSON; see
+docs/status.md. quota_cmd runs a command for one provider.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
 				return err
 			}
-			names, err := quotaTargets(cfg, args)
+			holders, err := core.Holders(cfg, args)
 			if err != nil {
 				return err
 			}
-			if len(names) == 0 {
-				out.Empty(os.Stdout, "No providers to query.", "")
+			if len(holders) == 0 {
+				out.Empty(os.Stdout, "Nothing to query.", "Sign in with `ak login <vendor>`, or add a provider with `ak add`.")
 				return nil
 			}
 			for _, err := range quota.PluginErrors() {
 				fmt.Fprintln(os.Stderr, "warning: quota plugin skipped:", err)
 			}
-			results := queryQuotas(cmd.Context(), cfg, names)
+			results := queryQuotas(cmd.Context(), holders)
 			if asJSON {
 				return json.NewEncoder(os.Stdout).Encode(results)
 			}
-			printQuota(results)
+			printQuota(holders, results)
 			return nil
 		},
 	}
@@ -86,10 +88,10 @@ func newQuotaWaitCmd() *cobra.Command {
 		timeout time.Duration
 	)
 	cmd := &cobra.Command{
-		Use:   "wait <name>",
-		Short: "Block until a provider has allowance again",
-		Long: `Return as soon as the provider has allowance: no plan window used up and
-no balance at zero. For a pool, as soon as any member does.
+		Use:   "wait <account|provider>",
+		Short: "Block until an account or provider has allowance again",
+		Long: `Return as soon as it has allowance: no plan window used up and no balance
+at zero. A provider waits on its account; a pool, on any member's.
 
   ak quota wait kimi && ak-kimi -p "..."
   ak quota wait pool --timeout 6h
@@ -104,7 +106,7 @@ every --every when there is none, and says when on stderr. It exits 1 on
 			if err != nil {
 				return err
 			}
-			names, err := quotaTargets(cfg, args)
+			holders, err := core.Holders(cfg, args)
 			if err != nil {
 				return err
 			}
@@ -114,13 +116,7 @@ every --every when there is none, and says when on stderr. It exits 1 on
 				ctx, cancel = context.WithTimeout(ctx, timeout)
 				defer cancel()
 			}
-			return waitQuota(ctx, cfg, names, every, func(ctx context.Context, name string, p config.Provider) quota.Quota {
-				key, err := secrets.Default().Resolve(p)
-				if err != nil {
-					return quota.Quota{Provider: name, Error: err.Error()}
-				}
-				return quota.Query(ctx, name, p, key)
-			})
+			return waitQuota(ctx, holders, every, askQuota)
 		},
 	}
 	cmd.Flags().DurationVar(&every, "every", time.Minute, "How often to read the quota when no reset time is known")
@@ -131,10 +127,10 @@ every --every when there is none, and says when on stderr. It exits 1 on
 // quotaPollMax bounds one sleep, so a plan that resets early is noticed.
 const quotaPollMax = 10 * time.Minute
 
-// waitQuota polls the providers' quota until one has allowance. A provider
-// that cannot be read at all (no source) is an error rather than a wait.
-func waitQuota(ctx context.Context, cfg *config.Config, names []string, every time.Duration,
-	ask func(context.Context, string, config.Provider) quota.Quota) error {
+// waitQuota polls the holders' quota until one has allowance. One that cannot
+// be read at all (no source) is an error rather than a wait.
+func waitQuota(ctx context.Context, holders []core.Holder, every time.Duration,
+	ask func(context.Context, core.Holder) quota.Quota) error {
 	if every <= 0 {
 		every = time.Minute
 	}
@@ -142,8 +138,9 @@ func waitQuota(ctx context.Context, cfg *config.Config, names []string, every ti
 		var soonest *time.Time
 		var reasons []string
 		readable := 0
-		for _, n := range names {
-			q := ask(ctx, n, cfg.Providers[n])
+		for _, h := range holders {
+			n := h.Name
+			q := ask(ctx, h)
 			if q.NoSource {
 				reasons = append(reasons, n+": no balance source")
 				continue
@@ -164,7 +161,7 @@ func waitQuota(ctx context.Context, cfg *config.Config, names []string, every ti
 			reasons = append(reasons, n+": spent")
 		}
 		if readable == 0 {
-			return fmt.Errorf("cannot read the quota of %s; set quota or quota_cmd", strings.Join(names, ", "))
+			return fmt.Errorf("cannot read the quota of %s; set quota or quota_cmd", strings.Join(holderNames(holders), ", "))
 		}
 		wait := every
 		if soonest != nil {
@@ -184,131 +181,86 @@ func waitQuota(ctx context.Context, cfg *config.Config, names []string, every ti
 	}
 }
 
-// queryQuotas asks each named provider's balance API, in parallel.
-func queryQuotas(ctx context.Context, cfg *config.Config, names []string) []quota.Quota {
-	resolver := secrets.Default()
-	results := make([]quota.Quota, len(names))
-	// Providers on the same account (same key, host and source) get
-	// the same answer, so each account is asked once.
-	type job struct {
-		name    string
-		p       config.Provider
-		key     string
-		targets []int
+// askQuota reads one holder's balance.
+func askQuota(ctx context.Context, h core.Holder) quota.Quota {
+	key, err := secrets.Default().Resolve(h.Provider)
+	if err != nil {
+		return quota.Quota{Provider: h.Name, Error: err.Error()}
 	}
-	var jobs []*job
-	byKey := map[string]*job{}
-	for i, name := range names {
-		p := cfg.Providers[name]
-		key, err := resolver.Resolve(p)
-		if err != nil {
-			results[i] = quota.Quota{Provider: name, Error: err.Error()}
-			continue
-		}
-		k := quota.DedupKey(p, key)
-		if j := byKey[k]; j != nil {
-			j.targets = append(j.targets, i)
-			continue
-		}
-		j := &job{name: name, p: p, key: key, targets: []int{i}}
-		byKey[k] = j
-		jobs = append(jobs, j)
-	}
-	// Ask in parallel: one slow vendor should not hold up the rest.
-	const parallel = 8
-	sem := make(chan struct{}, parallel)
+	return quota.Query(ctx, h.Name, h.Provider, key)
+}
+
+// queryQuotas reads every holder's balance in parallel: one slow vendor
+// should not hold up the rest.
+func queryQuotas(ctx context.Context, holders []core.Holder) []quota.Quota {
+	results := make([]quota.Quota, len(holders))
+	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
-	for _, j := range jobs {
+	for i, h := range holders {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(j *job) {
+		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			q := quota.Query(ctx, j.name, j.p, j.key)
-			for _, i := range j.targets {
-				q.Provider = names[i]
-				results[i] = q
-			}
-		}(j)
+			results[i] = askQuota(ctx, h)
+		}()
 	}
 	wg.Wait()
 	return results
 }
 
-// quotaTargets expands the requested names into concrete providers: a pool
-// becomes its members, and no provider is listed twice. With no names, every
-// provider is included.
-func quotaTargets(cfg *config.Config, args []string) ([]string, error) {
-	seen := map[string]bool{}
-	var out []string
-	add := func(n string) {
-		if !seen[n] {
-			seen[n] = true
-			out = append(out, n)
-		}
+func holderNames(hs []core.Holder) []string {
+	out := make([]string, len(hs))
+	for i, h := range hs {
+		out[i] = h.Name
 	}
-	expand := func(n string) error {
-		p, ok := cfg.Providers[n]
-		if !ok {
-			return fmt.Errorf("provider %q does not exist", n)
-		}
-		if p.IsPool() {
-			for _, m := range cfg.Leaves(n) {
-				add(m)
-			}
-			return nil
-		}
-		add(n)
-		return nil
-	}
-	if len(args) == 0 {
-		for _, n := range cfg.Names() {
-			if err := expand(n); err != nil {
-				return nil, err
-			}
-		}
-		return out, nil
-	}
-	for _, n := range args {
-		if err := expand(n); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
+	return out
 }
 
-// printQuota writes the table, then what to do about providers no balance
-// source serves: a gap in coverage, counted once rather than on every row.
-func printQuota(results []quota.Quota) {
+// printQuota writes one row per holder, then what to do about those no
+// balance source serves: a gap in coverage, counted once rather than on
+// every row.
+func printQuota(holders []core.Holder, results []quota.Quota) {
 	cells := make([][]string, 0, len(results))
 	var noSource []string
-	for _, q := range results {
+	for i, q := range results {
 		if q.NoSource {
 			noSource = append(noSource, q.Provider)
 		}
-		cells = append(cells, quotaRow(q))
+		cells = append(cells, append([]string{holderCell(holders[i])}, quotaRow(q)...))
 	}
-	out.Table(os.Stdout, []string{"provider", "source", "balance", "plan", "note"}, cells)
+	out.Table(os.Stdout, []string{"account / provider", "source", "balance", "plan", "note"}, cells)
 	if len(noSource) == 0 {
 		return
 	}
 	fmt.Println()
-	out.Hint(os.Stdout, "%d providers have no balance source; relays and gateways usually have none", len(noSource))
-	out.Hint(os.Stdout, "set `quota = \"<id>\"` in providers.toml; `ak vendor list` and ~/.config/ak/quota.d add sources")
+	out.Hint(os.Stdout, "no balance source: %s (relays and gateways usually have none)", strings.Join(noSource, ", "))
+	out.Hint(os.Stdout, "give its vendor a quota source, or add one to ~/.config/ak/quota.d: a TOML spec or any executable printing JSON")
 }
 
-// quotaRow is one provider's balance reading; a failed read says why in the
-// note, a provider with no source says nothing.
+// holderCell names a holder: an account with the providers on it, or a
+// provider of its own.
+func holderCell(h core.Holder) string {
+	if !h.Account {
+		return h.Name
+	}
+	if len(h.Users) == 0 {
+		return h.Name + out.Dim(" · no providers")
+	}
+	return h.Name + out.Dim(" · "+strings.Join(h.Users, ", "))
+}
+
+// quotaRow is one balance reading, without whose it is; a failed read says
+// why in the note, one with no source says nothing.
 func quotaRow(q quota.Quota) []string {
 	switch {
 	case q.NoSource:
-		return []string{q.Provider, out.Or(""), out.Or(""), out.Or(""), out.Or("")}
+		return []string{out.Or(""), out.Or(""), out.Or(""), out.Or("")}
 	case q.Error != "":
-		return []string{q.Provider, out.Or(q.Source), out.Or(""), out.Or(""),
+		return []string{out.Or(q.Source), out.Or(""), out.Or(""),
 			out.Mark(out.Broken) + " " + out.Reason(q.Error)}
 	}
-	return []string{q.Provider, out.Or(q.Source), out.Or(balanceText(q)),
-		out.Or(usageText(q)), out.Or(q.Detail)}
+	return []string{out.Or(q.Source), out.Or(balanceText(q)), out.Or(usageText(q)), out.Or(q.Detail)}
 }
 
 // balanceText is a quota's money left, empty when the source reports none.

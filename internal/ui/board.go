@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/quota"
 	"github.com/abcdlsj/ak/internal/secrets"
@@ -64,28 +65,29 @@ func newBoard(cfg *config.Config) *board {
 	return &board{cfg: cfg, cards: boardCards(cfg), spinner: sp}
 }
 
-// boardCards lists the accounts, then the providers on no account that a
-// balance source serves, each once.
+// boardCards is a card per balance holder: each account, then each
+// provider with an endpoint of its own that a balance source serves.
 func boardCards(cfg *config.Config) []*card {
+	holders, _ := core.Holders(cfg, nil)
 	var out []*card
-	for _, n := range cfg.AccountNames() {
-		p, ok := cfg.AccountProvider(n)
-		if !ok {
+	for _, h := range holders {
+		if !h.Account {
+			if !quota.HasSource(h.Provider) {
+				continue
+			}
+			out = append(out, &card{title: h.Name, sub: string(h.Provider.Kind) + " · " + hostOf(h.Provider.BaseURL), p: h.Provider, hue: hueOf(h.Name)})
 			continue
 		}
-		v, _ := vendor.Lookup(cfg.Accounts[n].Vendor)
+		acc := cfg.Accounts[h.Name]
+		v, _ := vendor.Lookup(acc.Vendor)
 		sub := v.Name
-		if u := cfg.Accounts[n].User; u != "" {
-			sub += " · " + u
+		if acc.User != "" {
+			sub += " · " + acc.User
 		}
-		out = append(out, &card{title: n, sub: sub, p: p, hue: hueOf(v.ID)})
-	}
-	for _, n := range cfg.Names() {
-		p := cfg.Providers[n]
-		if p.Account != "" || p.IsPool() || !quota.HasSource(p) {
-			continue
+		if len(h.Users) > 0 {
+			sub += " · " + strings.Join(h.Users, ", ")
 		}
-		out = append(out, &card{title: n, sub: string(p.Kind) + " · " + hostOf(p.BaseURL), p: p, hue: hueOf(n)})
+		out = append(out, &card{title: h.Name, sub: sub, p: h.Provider, hue: hueOf(v.ID)})
 	}
 	return out
 }

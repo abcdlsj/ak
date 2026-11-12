@@ -176,6 +176,27 @@ own key are dropped. `ak login` again renews an account's credentials,
 `ak logout` removes one no provider runs on, and `ak accounts rename` renames
 one with its providers.
 
+**Your own vendors.** A TOML file in `~/.config/ak/vendors.d/` adds a vendor,
+or replaces a built-in with the same `id`, so a company gateway or a relay
+gets accounts like any other:
+
+```toml
+# ~/.config/ak/vendors.d/acme.toml
+id = "acme"
+name = "Acme AI"
+short = "acme"                 # what provider names call it
+quota = "acme"                 # its balance source, from quota.d
+[engines.claude]
+base_url = "https://ai.acme.internal/api"
+[engines.codex]
+base_url = "https://ai.acme.internal/api/v1/codex"
+model = "gpt-5.6-sol"
+```
+
+Then `ak login acme --key -` and `ak add --account acme --kind claude`. A file
+that does not load is skipped with a warning, in `ak vendor list` and
+`ak doctor`.
+
 A provider of its own (`--base-url`, `--key`) still works as before, for a
 relay or anything ak has no vendor for. The vendor data comes from cc-switch's
 presets plus subscriptions; vendors that need protocol translation are left

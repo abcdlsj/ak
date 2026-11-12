@@ -16,12 +16,15 @@ and on its root when the base ends in a compat path such as `/anthropic`.
 
 ## Balance and quota
 
-`ak quota` asks each provider's balance API what is left. The source is
+`ak quota` asks what is left once per account, which every provider on it
+shares, and once per provider with an endpoint and key of its own. Naming a
+provider asks its account. The source is the account vendor's `quota`, else
 detected from the endpoint host, so most vendors work with nothing extra:
 
 ```sh
-ak quota                 # every provider
-ak quota deepseek        # one
+ak quota                 # every account and provider of its own
+ak quota command-code    # one account
+ak quota deepseek        # one provider, or its account
 ak quota --json          # machine-readable
 ```
 
@@ -33,6 +36,9 @@ ak quota --json          # machine-readable
 | `siliconflow` | `api.siliconflow.cn` | balance |
 | `stepfun` | `api.stepfun.com`, `api.stepfun.ai` | balance |
 | `kimi` | `api.kimi.com` (Kimi For Coding) | 5h and weekly windows |
+| `commandcode` | `api.commandcode.ai` (Command Code plans) | 5h and weekly windows |
+| `opencode-go` | `opencode.ai` (OpenCode Go) | 5h, weekly and monthly windows |
+| `opendesign` | `open-design.ai` (Design Plan, `ak login opendesign`) | windows and balance |
 | `zhipu` | `open.bigmodel.cn`, `api.z.ai` (GLM Coding Plan) | 5h and weekly windows |
 | `minimax` | `api.minimaxi.com`, `api.minimax.cn` (Coding Plan) | 5h and weekly windows |
 | `minimax-intl` | `api.minimax.io` (Coding Plan) | 5h and weekly windows |
@@ -87,9 +93,24 @@ A balance reads `[balance]` instead: `value`, optional `used`/`limit`,
 `internal/quota/plugins/` use the same format. A file that does not load is
 skipped with a warning naming it, in `ak quota` and `ak doctor`.
 
-**Scripts.** The script prints the answer as JSON (a balance, or plan windows:
-`{"windows":[{"name":"5h","used":40}]}`) or a bare number, and is asked with
-`AK_QUOTA_KEY` and `AK_QUOTA_BASE_URL` in the environment:
+**Programs.** Where one request and a few paths are not enough, any
+executable in `~/.config/ak/quota.d/` is a source too, in any language: a
+shell script, a Go binary. Its file name without the extension is its id, and
+it is used only where named (`quota = "<id>"` on a vendor or provider). It is
+run with `AK_QUOTA_KEY`, `AK_QUOTA_BASE_URL` and `AK_QUOTA_VAR_<NAME>` (the
+provider's `quota_vars` and the account's sign-in secrets) in the environment,
+and prints the answer as JSON or a bare number taken as a balance:
+
+```json
+{"windows": [{"name": "daily", "used": 42, "resets": "2026-11-13T00:00:00+08:00"}],
+ "balance": 12.5, "currency": "USD", "detail": "Pro"}
+```
+
+`used` is the share used, 0 to 100. A non-zero exit fails the reading with
+what the program wrote to stderr; it has 20 seconds.
+
+**Scripts.** `quota_cmd` runs a shell command for one provider, with the same
+environment and output:
 
 ```toml
 [providers.myrelay]

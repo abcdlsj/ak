@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -382,6 +383,8 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The user's vendors first: accounts and providers resolve against them.
+	vendor.LoadDir(filepath.Join(filepath.Dir(path), "vendors.d"))
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return Default(), nil

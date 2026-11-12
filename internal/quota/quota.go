@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -202,19 +203,43 @@ func resolve(p config.Provider) (Source, error) {
 	}
 }
 
-// runScript runs the provider's quota_cmd. The key and base URL are passed in
-// the environment so they never appear on the command line.
+// runScript runs the provider's quota_cmd.
 func runScript(ctx context.Context, p config.Provider, key string) (Quota, error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "sh", "-c", p.QuotaCmd)
-	cmd.Env = append(os.Environ(), "AK_QUOTA_KEY="+key, "AK_QUOTA_BASE_URL="+p.BaseURL)
-	for k, v := range p.QuotaVars {
-		cmd.Env = append(cmd.Env, "AK_QUOTA_VAR_"+strings.ToUpper(k)+"="+v)
-	}
-	out, err := cmd.Output()
+	q, err := run(ctx, exec.CommandContext(ctx, "sh", "-c", p.QuotaCmd), p, key)
 	if err != nil {
 		return Quota{}, fmt.Errorf("quota_cmd: %w", err)
+	}
+	return q, nil
+}
+
+// run runs a balance program and reads what it prints. The key, base URL
+// and vars are passed in the environment so they never appear on the
+// command line; an account's secrets are vars too. A failure says what the
+// program said on stderr.
+func run(ctx context.Context, cmd *exec.Cmd, p config.Provider, key string) (Quota, error) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	cmd.Cancel = func() error { return cmd.Process.Kill() }
+	cmd.Env = append(os.Environ(), "AK_QUOTA_KEY="+key, "AK_QUOTA_BASE_URL="+p.BaseURL)
+	vars := maps.Clone(p.QuotaVars)
+	if vars == nil {
+		vars = map[string]string{}
+	}
+	maps.Copy(vars, p.Secrets)
+	for k, v := range vars {
+		cmd.Env = append(cmd.Env, "AK_QUOTA_VAR_"+strings.ToUpper(k)+"="+v)
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return Quota{}, fmt.Errorf("gave no answer in 20s")
+	}
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return Quota{}, errors.New(msg)
+		}
+		return Quota{}, err
 	}
 	return parseScript(out)
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -49,16 +50,9 @@ ak usage. No model request is sent: ak check does that.`,
 			}
 
 			health := core.Statuses(cfg)
-			// A pool has no balance of its own; its members are asked when listed.
-			var leaves []string
-			for _, n := range names {
-				if !cfg.Providers[n].IsPool() {
-					leaves = append(leaves, n)
-				}
-			}
-			quotas := map[string]quota.Quota{}
-			for _, q := range queryQuotas(cmd.Context(), cfg, leaves) {
-				quotas[q.Provider] = q
+			quotas, err := providerQuotas(cmd.Context(), cfg, names)
+			if err != nil {
+				return err
 			}
 			used := map[string]usage.ProviderRow{}
 			if rows, err := usage.Load(cfg); err != nil {
@@ -74,6 +68,46 @@ ak usage. No model request is sent: ak check does that.`,
 			return nil
 		},
 	}
+}
+
+// providerQuotas reads each holder among names once and gives every
+// provider its holder's reading: a provider on an account, the account's.
+// A pool has no balance of its own and gets none.
+func providerQuotas(ctx context.Context, cfg *config.Config, names []string) (map[string]quota.Quota, error) {
+	var leaves []string
+	for _, n := range names {
+		if !cfg.Providers[n].IsPool() {
+			leaves = append(leaves, n)
+		}
+	}
+	if len(leaves) == 0 {
+		return map[string]quota.Quota{}, nil
+	}
+	holders, err := core.Holders(cfg, leaves)
+	if err != nil {
+		return nil, err
+	}
+	byHolder := map[string]quota.Quota{}
+	for i, q := range queryQuotas(ctx, holders) {
+		byHolder[holderKey(holders[i].Account, holders[i].Name)] = q
+	}
+	out := map[string]quota.Quota{}
+	for _, n := range leaves {
+		if a := cfg.Providers[n].Account; a != "" {
+			out[n] = byHolder[holderKey(true, a)]
+		} else {
+			out[n] = byHolder[holderKey(false, n)]
+		}
+	}
+	return out, nil
+}
+
+// holderKey keeps an account and a provider of the same name apart.
+func holderKey(account bool, name string) string {
+	if account {
+		return "account:" + name
+	}
+	return "provider:" + name
 }
 
 // printStatus writes the table, then what to do about providers no balance
