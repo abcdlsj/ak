@@ -15,6 +15,7 @@ import (
 	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/quota"
 	"github.com/abcdlsj/ak/internal/secrets"
+	"github.com/abcdlsj/ak/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -56,8 +57,27 @@ names, every provider is asked. A pool is asked through its members.`,
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
-	cmd.AddCommand(newQuotaWaitCmd())
+	cmd.AddCommand(newQuotaWaitCmd(), newQuotaBoardCmd())
 	return cmd
+}
+
+func newQuotaBoardCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "board",
+		Aliases: []string{"ui"},
+		Short:   "Every plan and balance as cards, in a full-screen view",
+		Long: `Show each account, and each provider on its own with a balance source, as a
+card: every allowance window with the share used as a big pixel number, a
+tick bar and when it resets, and money left. r reads them again.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			return ui.RunBoard(cfg)
+		},
+	}
 }
 
 func newQuotaWaitCmd() *cobra.Command {

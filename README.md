@@ -71,6 +71,7 @@ ak login <vendor> / logout      sign in to a vendor as an account, or remove one
 ak accounts                     accounts and the providers on each
 ak import --from <source>       copy providers over
 ak usage | quota | check | models   the parts of status, for scripts
+ak quota board                  every plan and balance as cards, full screen
 ak bind / unbind / bindings     what claude/codex/pi typed in a repository run on
 ak default <engine> <name>      what they run on where nothing is bound
 ak which                        what they run on here, and why

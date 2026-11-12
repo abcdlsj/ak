@@ -96,6 +96,12 @@ skipped with a warning naming it, in `ak quota` and `ak doctor`.
 quota_cmd = "my-balance-check --json"
 ```
 
+`ak quota board` shows the same readings full screen, one card per account
+and per provider on its own with a balance source: each allowance window's
+share used as a large pixel number over a tick bar, in the card's colour,
+amber past 80% and red once spent, with when it resets; money left the same
+way. `r` reads them again, `q` quits.
+
 `ak quota wait <name>` blocks until the provider has allowance again (for a
 pool, any member), reading the quota again at the reset time the vendor gave,
 or every `--every` (a minute) when there is none; `--timeout` gives up with
