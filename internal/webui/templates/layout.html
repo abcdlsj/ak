@@ -11,7 +11,7 @@
 </head>
 <body>
 {{if .Signed}}<header class="top">
-  <a class="brand" href="/ui/accounts" aria-label="ak"><img class="logo" src="/ui/static/icon.svg" alt="" width="15" height="15"></a>
+  <a class="brand" href="/ui/accounts" aria-label="ak"><img class="logo" src="/ui/static/icon.svg" alt="" width="21" height="21"></a>
   <nav>
     <a href="/ui/accounts"{{if eq .Page "accounts" "device"}} class="on"{{end}}>Accounts</a>
     <a href="/ui/routes"{{if eq .Page "routes"}} class="on"{{end}}>Routes</a>
@@ -26,12 +26,12 @@
 <main>
 {{with .Flash}}<p class="flash">{{.}}</p>{{end}}
 {{template "content" .}}
+</main>
 {{if .Signed}}
 <footer class="foot">
   <span>ak serve</span>
   {{with .Addr}}<span class="dim">·</span><span class="mono">{{.}}</span>{{end}}
 </footer>
 {{end}}
-</main>
 </body>
 </html>

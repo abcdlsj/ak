@@ -333,6 +333,7 @@ func (c *call) removeAccount() {
 type routeView struct {
 	Name, Model, Strategy, Kind string
 	Members                     []string
+	Hue                         int
 }
 
 func (c *call) routes() {
@@ -340,7 +341,7 @@ func (c *call) routes() {
 	var views []routeView
 	for _, n := range cfg.Service.RouteNames() {
 		r := cfg.Service.Routes[n]
-		v := routeView{Name: n, Model: r.Model, Members: r.Members, Strategy: r.Strategy, Kind: "alias"}
+		v := routeView{Name: n, Model: r.Model, Members: r.Members, Strategy: r.Strategy, Kind: "alias", Hue: hueOf(n)}
 		if r.IsPool() {
 			v.Kind = "pool"
 			if v.Strategy == "" {
@@ -390,6 +391,7 @@ func (c *call) tokens() {
 	type tokenView struct {
 		Name, Created string
 		Routes        []string
+		Hue           int
 	}
 	var views []tokenView
 	for _, n := range cfg.Service.TokenNames() {
@@ -398,7 +400,7 @@ func (c *call) tokens() {
 		if !t.Created.IsZero() {
 			created = t.Created.Local().Format("2006-01-02 15:04")
 		}
-		views = append(views, tokenView{Name: n, Routes: t.Routes, Created: created})
+		views = append(views, tokenView{Name: n, Routes: t.Routes, Created: created, Hue: hueOf("token:" + n)})
 	}
 	targets := append(cfg.Service.RouteNames(), cfg.AccountNames()...)
 	c.u.render(c.w, "tokens", map[string]any{"Tokens": views, "Targets": targets}, c)
@@ -496,11 +498,11 @@ func (c *call) usage() {
 		"Days": days,
 		"Heat": buildHeatYear(c.u.b.Usage(usageYear), c.u.now()),
 		"Tiles": []tileView{
-			{Label: "Requests", Value: number(totals.Requests)},
-			{Label: "Failed", Value: number(totals.Failed)},
-			{Label: "Input", Value: humanize(totals.Input)},
-			{Label: "Output", Value: humanize(totals.Output)},
-			{Label: "Cache", Value: humanize(totals.Cache)},
+			tile("Requests", totals.Requests, ""),
+			tile("Failed", totals.Failed, ""),
+			tile("Input", totals.Input, ""),
+			tile("Output", totals.Output, ""),
+			tile("Cache", totals.Cache, ""),
 		},
 		"Tables": []struct {
 			Title  string

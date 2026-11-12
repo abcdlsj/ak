@@ -181,9 +181,20 @@ type amountView struct {
 	Name, Note, Value, Label string
 }
 
-// tileView is one headline number above a page's tables.
+// tileView is one headline number above a page's tables: the digits the
+// pixel font draws and, for a count too big to draw, the unit after them.
 type tileView struct {
-	Label, Value, Note string
+	Label, Value, Unit string
+}
+
+// tile is a headline number. A count is drawn whole; a token count is
+// shortened to three figures and carries its unit.
+func tile(label string, n int64, _ string) tileView {
+	if n < 10_000 {
+		return tileView{Label: label, Value: strconv.FormatInt(n, 10)}
+	}
+	num, unit := size(n)
+	return tileView{Label: label, Value: num, Unit: unit}
 }
 
 // meters turns a reading's windows into the card's rows.

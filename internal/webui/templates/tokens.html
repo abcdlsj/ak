@@ -10,19 +10,23 @@
 {{end}}
 
 {{if .Tokens}}
-<table class="grid">
-  <thead><tr><th>machine</th><th>routes</th><th class="right">created</th><th></th></tr></thead>
-  <tbody>
-  {{range .Tokens}}
-  <tr>
-    <td><b>{{.Name}}</b></td>
-    <td>{{if .Routes}}{{template "chips" .Routes}}{{else}}<span class="note">all</span>{{end}}</td>
-    <td class="right mono">{{.Created}}</td>
-    <td class="right"><form method="post" action="/ui/tokens/revoke" data-confirm="Revoke {{.Name}}? Its machine stops working at once."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><button class="link bad">Revoke</button></form></td>
-  </tr>
-  {{end}}
-  </tbody>
-</table>
+<div class="cards">
+{{range .Tokens}}
+<section class="card hue-{{.Hue}}">
+  <div class="card-head">
+    <span class="mark">■</span><b>{{.Name}}</b>
+    <span class="spacer"></span>
+    <span class="when">{{.Created}}</span>
+  </div>
+  <p class="sub">{{if .Routes}}may ask these routes and accounts only{{else}}may ask every route{{end}}</p>
+  <div class="targets">{{template "chips" .Routes}}</div>
+  <form method="post" action="/ui/tokens/revoke" data-confirm="Revoke {{.Name}}? Its machine stops working at once." class="card-foot">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}">
+    <button class="link bad">Revoke</button>
+  </form>
+</section>
+{{end}}
+</div>
 {{else}}
 {{template "empty" "No tokens yet."}}
 {{end}}

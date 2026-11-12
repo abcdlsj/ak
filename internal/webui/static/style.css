@@ -60,12 +60,16 @@
 }
 
 body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
   font-family: 'Avenir Next', Avenir, ui-sans-serif, system-ui, -apple-system,
     'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   max-width: 66rem;
   margin: 0 auto;
-  padding: 1.5rem 1.5rem 4rem;
+  padding: 1.5rem 1.5rem 2rem;
 }
+main { flex: 1 }
 
 .mono, code, pre, .num { font-family: var(--mono); font-variant-numeric: tabular-nums }
 .right { text-align: right }
@@ -130,6 +134,10 @@ h3 { font-size: .95rem; margin: 0 0 .8rem }
 .card-head .mark { color: var(--hue); font-size: .75rem }
 .sub { color: var(--text-muted); font-size: .82rem; margin: .1rem 0 .5rem }
 .card-foot { margin-top: auto; padding-top: .8rem; display: flex; justify-content: flex-end }
+.spacer { flex: 1 }
+.card-head .when { color: var(--text-muted); font-size: .78rem; font-variant-numeric: tabular-nums }
+.targets { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; margin-top: .2rem }
+.targets .go { font-size: .82rem; color: var(--text-main); overflow-wrap: break-word }
 
 /* One allowance: name and reset left, the share used as a pixel number
    right, a tick bar under them. */
@@ -192,15 +200,14 @@ details.add > summary:hover { border-color: var(--links); color: var(--text-brig
 details.add[open] > summary { margin-bottom: 1.1rem }
 
 /* Panels hold forms; the gate is a login page on its own. */
-.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; align-items: start }
+.panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; align-items: start }
 .panel {
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 1rem 1.1rem;
+  padding: 1.1rem 1.25rem;
   background: var(--background-alt);
 }
 .panel.narrow { max-width: 34rem }
-.panels .stack { max-width: 26rem }
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; align-items: start }
 .gate {
   max-width: 26rem;
@@ -259,6 +266,47 @@ label.check input, .checks input[type='checkbox'] { width: auto; margin: 0 }
 fieldset { border: 1px solid var(--border); border-radius: 8px; padding: .5rem .9rem }
 legend { color: var(--text-muted); font-size: .82rem; padding: 0 .3rem }
 
+input:not([type='checkbox']):not([type='radio']),
+select,
+textarea {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .45rem .6rem;
+  background: var(--background);
+  color: var(--text-main);
+  font: inherit;
+  font-size: .92rem;
+}
+textarea { resize: vertical; min-height: 5rem }
+select {
+  appearance: none;
+  padding-right: 2.1rem;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.15rem) calc(50% + 1px),
+    calc(100% - .8rem) calc(50% + 1px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+input[type='checkbox'],
+input[type='radio'] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--action);
+}
+::placeholder { color: var(--text-muted); opacity: 1 }
+
 button.link {
   border: 0;
   background: none;
@@ -283,7 +331,9 @@ button.link.bad { color: var(--bad) }
   background: var(--background-alt);
 }
 .tile-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted) }
-.tile-value { font-size: 1.5rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums }
+.tile-value { display: flex; align-items: flex-end; gap: .25rem; line-height: 1.2; padding: .1rem 0 }
+.tile-value .pix { height: 1.15rem; color: var(--text-bright) }
+.tile-unit { font-size: .95rem; color: var(--text-muted); margin-bottom: .05rem }
 .tile-note { font-size: .78rem; color: var(--text-muted) }
 
 /* Usage a day: GitHub's year, one column a week, one row a weekday, the
@@ -391,7 +441,7 @@ td.bar-cell { width: 8rem }
   display: flex;
   align-items: baseline;
   gap: .5rem;
-  margin-top: 3.5rem;
+  margin-top: auto;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
   color: var(--text-muted);

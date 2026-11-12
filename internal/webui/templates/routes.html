@@ -3,20 +3,26 @@
 <p class="lede">A model name of its own: an alias of another, or a pool over several.</p>
 
 {{if .Routes}}
-<table class="grid routes">
-  <thead><tr><th>name</th><th>kind</th><th>strategy</th><th>to</th><th></th></tr></thead>
-  <tbody>
-  {{range .Routes}}
-  <tr>
-    <td><b class="mono">{{.Name}}</b></td>
-    <td><span class="chip">{{.Kind}}</span></td>
-    <td>{{with .Strategy}}<span class="chip">{{.}}</span>{{end}}</td>
-    <td class="mono">{{if .Members}}{{template "chips" .Members}}{{else}}{{.Model}}{{end}}</td>
-    <td class="right"><form method="post" action="/ui/routes/remove" data-confirm="Remove route {{.Name}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><button class="link bad">Remove</button></form></td>
-  </tr>
-  {{end}}
-  </tbody>
-</table>
+<div class="cards">
+{{range .Routes}}
+<section class="card hue-{{.Hue}}">
+  <div class="card-head">
+    <span class="mark">■</span><b class="mono">{{.Name}}</b>
+    <span class="spacer"></span>
+    <span class="chip">{{.Kind}}</span>
+    {{with .Strategy}}<span class="chip">{{.}}</span>{{end}}
+  </div>
+  <p class="sub">{{if .Members}}a pool, asked in turn{{else}}an alias{{end}}</p>
+  <div class="targets">
+    {{if .Members}}{{template "chips" .Members}}{{else}}<span class="mono go">{{.Model}}</span>{{end}}
+  </div>
+  <form method="post" action="/ui/routes/remove" data-confirm="Remove route {{.Name}}?" class="card-foot">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}">
+    <button class="link bad">Remove</button>
+  </form>
+</section>
+{{end}}
+</div>
 {{else}}
 {{template "empty" "No routes yet."}}
 {{end}}

@@ -14,7 +14,10 @@
 {{end}}
 
 {{define "tile"}}
-<div class="tile"><span class="tile-label">{{.Label}}</span><span class="tile-value">{{.Value}}</span>{{with .Note}}<span class="tile-note">{{.}}</span>{{end}}</div>
+<div class="tile">
+  <span class="tile-label">{{.Label}}</span>
+  <span class="tile-value">{{pix .Value}}{{with .Unit}}<span class="tile-unit">{{.}}</span>{{end}}</span>
+</div>
 {{end}}
 
 {{define "chips"}}
