@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -13,7 +12,6 @@ import (
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/quota"
-	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,6 +29,7 @@ func RunBoard(cfg *config.Config) error {
 
 // card is one thing with a balance: an account, or a provider on its own.
 type card struct {
+	key   string // the holder's, holderKey
 	title string
 	sub   string // the vendor, or the provider's engine
 	p     config.Provider
@@ -44,16 +43,11 @@ type card struct {
 
 type board struct {
 	cfg     *config.Config
-	cards   []*card
+	quotas  quotaStore
 	spinner spinner.Model
 	width   int
 	height  int
 	scroll  int
-}
-
-type boardReadMsg struct {
-	i int
-	q quota.Quota
 }
 
 // boardTickMsg redraws the "read 2m ago" lines.
@@ -62,7 +56,9 @@ type boardTickMsg struct{}
 func newBoard(cfg *config.Config) *board {
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
-	return &board{cfg: cfg, cards: boardCards(cfg), spinner: sp}
+	b := &board{cfg: cfg, spinner: sp}
+	b.quotas.reset(cfg)
+	return b
 }
 
 // boardCards is a card per balance holder: each account, then each
@@ -75,7 +71,7 @@ func boardCards(cfg *config.Config) []*card {
 			if !quota.HasSource(h.Provider) {
 				continue
 			}
-			out = append(out, &card{title: h.Name, sub: string(h.Provider.Kind) + " · " + hostOf(h.Provider.BaseURL), p: h.Provider, hue: hueOf(h.Name)})
+			out = append(out, &card{key: holderKey(false, h.Name), title: h.Name, sub: string(h.Provider.Kind) + " · " + hostOf(h.Provider.BaseURL), p: h.Provider, hue: hueOf(h.Name)})
 			continue
 		}
 		acc := cfg.Accounts[h.Name]
@@ -87,7 +83,7 @@ func boardCards(cfg *config.Config) []*card {
 		if len(h.Users) > 0 {
 			sub += " · " + strings.Join(h.Users, ", ")
 		}
-		out = append(out, &card{title: h.Name, sub: sub, p: h.Provider, hue: hueOf(v.ID)})
+		out = append(out, &card{key: holderKey(true, h.Name), title: h.Name, sub: sub, p: h.Provider, hue: hueOf(v.ID)})
 	}
 	return out
 }
@@ -115,40 +111,19 @@ func hueOf(key string) lipgloss.AdaptiveColor {
 }
 
 func (b *board) Init() tea.Cmd {
-	return tea.Batch(b.readAll(), b.spinner.Tick, boardTick())
+	return tea.Batch(b.quotas.read(b.cfg), b.spinner.Tick, boardTick())
 }
 
 func boardTick() tea.Cmd {
 	return tea.Tick(30*time.Second, func(time.Time) tea.Msg { return boardTickMsg{} })
 }
 
-// readAll asks every card's balance, each on its own.
-func (b *board) readAll() tea.Cmd {
-	var cmds []tea.Cmd
-	for i, c := range b.cards {
-		if c.reading {
-			continue
-		}
-		c.reading = true
-		p, title := c.p, c.title
-		cmds = append(cmds, func() tea.Msg {
-			key, err := secrets.Default().Resolve(p)
-			if err != nil {
-				return boardReadMsg{i, quota.Quota{Error: err.Error()}}
-			}
-			return boardReadMsg{i, quota.Query(context.Background(), title, p, key)}
-		})
-	}
-	return tea.Batch(cmds...)
-}
-
 func (b *board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		b.width, b.height = msg.Width, msg.Height
-	case boardReadMsg:
-		c := b.cards[msg.i]
-		c.q, c.read, c.reading, c.readAt = msg.q, true, false, time.Now()
+	case quotaReadMsg:
+		b.quotas.got(msg)
 	case boardTickMsg:
 		return b, boardTick()
 	case spinner.TickMsg:
@@ -160,7 +135,7 @@ func (b *board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "esc", "ctrl+c":
 			return b, tea.Quit
 		case "r":
-			return b, b.readAll()
+			return b, b.quotas.read(b.cfg)
 		case "down", "j":
 			b.scroll++
 		case "up", "k":
@@ -181,15 +156,15 @@ func (b *board) View() string {
 	}
 	head := titleStyle.Render("ak quota") + dimStyle.Render("  ·  every plan at a glance")
 	foot := dimStyle.Render("r refresh  ·  ↑/↓ scroll  ·  q quit")
-	if len(b.cards) == 0 {
+	if len(b.quotas.cards) == 0 {
 		return appStyle.Render(head + "\n\n" + dimStyle.Render("Nothing with a balance to show. Sign in with `ak login <vendor>`.") + "\n\n" + foot)
 	}
 	perRow := max(1, (w-appStyle.GetHorizontalPadding()+1)/(cardWidth+1))
 	var rows []string
-	for i := 0; i < len(b.cards); i += perRow {
+	for i := 0; i < len(b.quotas.cards); i += perRow {
 		var line []string
-		for _, c := range b.cards[i:min(i+perRow, len(b.cards))] {
-			line = append(line, b.render(c), " ")
+		for _, c := range b.quotas.cards[i:min(i+perRow, len(b.quotas.cards))] {
+			line = append(line, c.view(b.spinner.View()), " ")
 		}
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, line...))
 	}
@@ -207,15 +182,17 @@ const inner = cardWidth - 4
 
 var cardStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lineColor).Padding(0, 1).Width(cardWidth - 2)
 
-func (b *board) render(c *card) string {
+// view draws the card; spin is the spinner's frame for a reading under
+// way.
+func (c *card) view(spin string) string {
 	hue := lipgloss.NewStyle().Foreground(c.hue)
 	var s strings.Builder
-	s.WriteString(spread(hue.Bold(true).Render("■ ")+lipgloss.NewStyle().Bold(true).Render(c.title), b.freshness(c), inner) + "\n")
+	s.WriteString(spread(hue.Bold(true).Render("■ ")+lipgloss.NewStyle().Bold(true).Render(c.title), c.freshness(spin), inner) + "\n")
 	s.WriteString(dimStyle.Render(truncate(c.sub, inner)) + "\n")
 
 	switch q := c.q; {
 	case !c.read:
-		s.WriteString("\n" + b.spinner.View() + dimStyle.Render(" reading…") + "\n")
+		s.WriteString("\n" + spin + dimStyle.Render(" reading…") + "\n")
 	case q.NoSource:
 		s.WriteString("\n" + dimStyle.Render("no balance source for this vendor") + "\n")
 	case q.Error != "":
@@ -235,10 +212,10 @@ func (b *board) render(c *card) string {
 }
 
 // freshness is when the card was read, or that it is being read.
-func (b *board) freshness(c *card) string {
+func (c *card) freshness(spin string) string {
 	switch {
 	case c.reading:
-		return b.spinner.View()
+		return spin
 	case !c.read:
 		return ""
 	}

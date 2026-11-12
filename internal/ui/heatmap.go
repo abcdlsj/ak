@@ -306,10 +306,7 @@ func heatFooter(cells []heatCell, weeks int, truncated bool, width int) string {
 		strings.Repeat(" ", labelWide) + dimStyle.Render(caption) + "\n"
 }
 
-// pad right-pads s with spaces to width n.
+// pad right-pads s with spaces to n cells on screen.
 func pad(s string, n int) string {
-	if len(s) >= n {
-		return s
-	}
-	return s + strings.Repeat(" ", n-len(s))
+	return s + strings.Repeat(" ", max(n-lipgloss.Width(s), 0))
 }

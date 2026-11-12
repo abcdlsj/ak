@@ -42,7 +42,7 @@ func TestBoardCardsFit(t *testing.T) {
 	b.Update(tea.WindowSizeMsg{Width: 140, Height: 60})
 	soon := time.Now().Add(2*time.Hour + 14*time.Minute)
 	bal, used, limit := 14.47, 5.53, 20.0
-	b.Update(boardReadMsg{0, quota.Quota{Windows: []quota.Window{
+	b.Update(quotaReadMsg{"account:goat", quota.Quota{Windows: []quota.Window{
 		{Name: "5h", Used: 42, Resets: &soon}, {Name: "weekly", Used: 100},
 	}, Balance: &bal, Used: &used, Limit: &limit, Currency: "USD"}})
 	view := b.View()
@@ -54,7 +54,7 @@ func TestBoardCardsFit(t *testing.T) {
 			t.Errorf("board lacks %q:\n%s", want, ansi.Strip(view))
 		}
 	}
-	for _, line := range strings.Split(b.render(b.cards[0]), "\n") {
+	for _, line := range strings.Split(b.quotas.cards[0].view(""), "\n") {
 		if w := ansi.StringWidth(line); w != cardWidth {
 			t.Fatalf("card line is %d wide, want %d: %q", w, cardWidth, ansi.Strip(line))
 		}

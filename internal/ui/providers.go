@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"fmt"
 	"sort"
 	"strings"
@@ -218,7 +219,8 @@ func (p *providersPage) view(a *app, width, height int) string {
 	// The detail beside the list when there is room; below a narrow list,
 	// only what would make the launch fail.
 	if width >= 100 {
-		listW := width * 11 / 20
+		// The detail is as wide as its longest lines need; the list keeps the rest.
+		listW := width - min(max(width*2/5, 46), 60) - 2
 		list := p.list(a, names, listW, height-lipgloss.Height(top))
 		detail := detailPanel(a, name, width-listW-2)
 		return top + lipgloss.JoinHorizontal(lipgloss.Top,
@@ -233,18 +235,19 @@ func (p *providersPage) view(a *app, width, height int) string {
 
 func (p *providersPage) list(a *app, names []string, width, height int) string {
 	cfg := a.cfg
-	nameW, kindW := len("PROVIDER"), len("KIND")
+	nameW, kindW, onW := len("PROVIDER"), len("ENGINE"), len("RUNS ON")
 	for _, n := range names {
-		nameW = max(nameW, lipgloss.Width(cfg.Settings.Prefix+n))
+		nameW = max(nameW, lipgloss.Width(n))
 		kindW = max(kindW, len(cfg.Providers[n].Kind))
+		onW = max(onW, lipgloss.Width(runsOn(cfg, n)))
 	}
-	// Status mark, name, kind; the model takes what is left.
-	modelW := max(width-nameW-kindW-10, 8)
+	// The model takes what is left; runs-on gives way first on a narrow list.
+	onW = min(onW, max(width/3, 12))
+	modelW := max(width-nameW-kindW-onW-16, 8)
 
 	var b strings.Builder
-	head := rowNumber(-1) + fmt.Sprintf("    %-*s  %-*s  %s", nameW, "PROVIDER", kindW, "KIND", "MODEL")
-	b.WriteString(headStyle.Render(head))
-	b.WriteString("\n")
+	head := rowNumber(-1) + fmt.Sprintf("    %-*s  %-*s  %-*s  %s", nameW, "PROVIDER", kindW, "ENGINE", onW, "RUNS ON", "MODEL")
+	b.WriteString(headStyle.Render(head) + "\n")
 
 	// Keep the cursor in view when the list is taller than the page.
 	rows := max(height-1, 3)
@@ -266,17 +269,38 @@ func (p *providersPage) list(a *app, names []string, width, height int) string {
 		r.add(badgeStyle, rowNumber(i))
 		st, mark := statusMark(a, n)
 		r.add(st, mark)
-		r.add(rowStyle, fmt.Sprintf(" %-*s  %-*s  %s", nameW, cfg.Settings.Prefix+n, kindW, pr.Kind, truncate(dash(pr.Model), modelW)))
-		if cfg.Settings.Default == n {
-			r.add(badgeStyle, " ★")
+		r.add(rowStyle, " "+pad(n, nameW)+"  "+pad(string(pr.Kind), kindW)+"  ")
+		r.add(dimStyle, pad(truncate(runsOn(cfg, n), onW), onW)+"  ")
+		model := truncate(pr.Model, modelW)
+		if model == "" {
+			r.add(dimStyle, "-")
+		} else {
+			r.add(rowStyle, model)
 		}
-		b.WriteString(r.render(width))
-		b.WriteString("\n")
+		if cfg.Settings.Default == n {
+			r.add(badgeStyle, "  ★")
+		}
+		b.WriteString(r.render(width) + "\n")
 	}
 	if len(names) > start+rows {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more", len(names)-start-rows)))
 	}
 	return b.String()
+}
+
+// runsOn names what a provider talks to, short: its account, a pool's
+// strategy, the provider pi knows, or its endpoint's host.
+func runsOn(cfg *config.Config, name string) string {
+	p := cfg.Providers[name]
+	switch {
+	case p.Account != "":
+		return p.Account
+	case p.IsPool():
+		return "pool · " + p.StrategyOrDefault()
+	case p.PiProvider != "":
+		return "pi · " + p.PiProvider
+	}
+	return hostOf(p.BaseURL)
 }
 
 // rowNumber is the launch digit for row i, blank past nine or for the header.
@@ -325,88 +349,134 @@ func mappingSummary(p config.Provider) string {
 	return strings.Join(parts, ", ")
 }
 
-// detailPanel shows everything about one provider at a glance.
+// detailPanel shows one provider at a glance: what it runs on and how it
+// signs in, its models, what is left of its plan when that has been read,
+// and its recent usage. A field with nothing to say is left out.
 func detailPanel(a *app, name string, width int) string {
-	p := a.cfg.Providers[name]
+	cfg := a.cfg
+	p := cfg.Providers[name]
 	inner := max(width-4, 10)
 
 	var b strings.Builder
-	title := name
+	title := titleStyle.Render(name)
+	if cfg.Settings.Default == name {
+		title += badgeStyle.Render("  ★ default")
+	}
+	b.WriteString(title + "\n")
+	sub := string(p.Kind) + " · " + cfg.Settings.Prefix + name
 	if p.Display != "" && p.Display != name {
-		title += dimStyle.Render("  " + p.Display)
+		sub = p.Display + " · " + sub
 	}
-	b.WriteString(titleStyle.Render(title) + "\n")
-	b.WriteString(dimStyle.Render(truncate(core.CommandPath(a.cfg, name), inner)) + "\n\n")
+	b.WriteString(dimStyle.Render(truncate(sub, inner)) + "\n\n")
 
+	// Each block is its fields; an empty block takes no room, and the
+	// blocks are a blank line apart.
+	var blocks []string
+	var cur strings.Builder
 	field := func(label, value string) {
-		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render(fmt.Sprintf("%-9s", label)), truncate(value, inner-10)))
+		if value != "" {
+			cur.WriteString(labelStyle.Render(pad(label, detailLabelW)) + truncate(value, inner-detailLabelW) + "\n")
+		}
 	}
-	field("engine", string(p.Kind))
+	block := func(text string) {
+		if text != "" {
+			blocks = append(blocks, strings.TrimRight(text, "\n"))
+		}
+	}
+	flush := func() { block(cur.String()); cur.Reset() }
+
 	if p.IsPool() {
 		field("members", strings.Join(p.Members, ", "))
 		field("strategy", p.StrategyOrDefault())
-		if len(p.MemberModels) > 0 {
-			field("mapping", mappingSummary(p))
-		}
+		field("mapping", mappingSummary(p))
 	} else {
 		if p.Account != "" {
-			field("account", accountSummary(a.cfg, p.Account))
+			field("account", accountSummary(cfg, p.Account))
 		}
-		field("endpoint", dash(p.BaseURL))
-		if p.Account == "" {
-			field("key", keySummary(p))
+		if p.PiProvider == "" {
+			field("endpoint", p.BaseURL)
 		}
 	}
-	field("model", dash(p.Model))
-	if p.Quota != "" || p.QuotaCmd != "" {
-		q := p.Quota
-		if q == "" {
-			q = "auto"
-		}
-		if p.QuotaCmd != "" {
-			q = "script"
-		}
-		field("balance", q)
-	}
+	field("sign-in", authSummary(cfg, p))
+	flush()
+
+	field("model", p.Model)
 	switch p.Kind {
 	case config.KindClaude:
-		if p.Opus != "" || p.Sonnet != "" || p.Haiku != "" {
-			field("tiers", fmt.Sprintf("opus %s · sonnet %s · haiku %s", dash(p.Opus), dash(p.Sonnet), dash(p.Haiku)))
+		if p.Opus != p.Model || p.Sonnet != p.Model || p.Haiku != p.Model {
+			field("tiers", tiersSummary(p))
 		}
 	case config.KindCodex:
-		field("wire api", dash(p.WireAPI))
-		field("effort", dash(p.Reasoning))
+		field("wire api", p.WireAPI)
+		field("effort", p.Reasoning)
 	case config.KindPi:
-		if p.PiProvider != "" {
-			field("pi provider", p.PiProvider)
-		} else {
-			field("pi provider", provider.PiProviderID(name))
+		if p.PiProvider == "" && !p.IsPool() {
+			field("pi api", cmp.Or(p.PiAPI, "anthropic-messages"))
 		}
-		field("pi api", dash(p.PiAPI))
 	}
-	if vs := variantNames(a.cfg, name); len(vs) > 0 {
-		field("variants", strings.Join(vs, " "))
-	}
-	if p.DefaultVariant != "" {
-		field("default variant", p.DefaultVariant)
-	}
+	field("launch", launchSummary(cfg, name))
+	flush()
 
-	b.WriteString("\n")
-	b.WriteString(usageSummary(a, name))
-
+	block(planSummary(a, name, inner))
+	block(usageSummary(a, name))
 	if p.IsPool() {
-		if flow := poolFlow(a, name, inner); flow != "" {
-			b.WriteString("\n" + flow + "\n")
-		}
+		block(poolFlow(a, name, inner))
 	}
-
 	if st, ok := a.statuses[name]; ok && !st.OK() {
-		b.WriteString("\n")
 		for _, pr := range st.Problems() {
-			b.WriteString(errStyle.Render("✗ "+pr) + "\n")
+			cur.WriteString(errStyle.Render("✗ "+pr) + "\n")
 		}
+		flush()
 	}
-	return panelStyle.Width(width - 2).Render(strings.TrimRight(b.String(), "\n"))
+	b.WriteString(strings.Join(blocks, "\n\n"))
+	return panelStyle.Width(width - 2).Render(b.String())
+}
+
+// detailLabelW is the width of the detail panel's labels.
+const detailLabelW = 10
+
+// authSummary says how a provider signs in. Only a provider that needs a
+// key and has none says it is missing.
+func authSummary(cfg *config.Config, p config.Provider) string {
+	switch {
+	case p.IsPool():
+		return "each member's own"
+	case p.PiProvider != "":
+		return "pi's own sign-in"
+	case p.Account != "":
+		if !cfg.Accounts[p.Account].HasKey() {
+			return errStyle.Render("the account has no key")
+		}
+		return "the account's key"
+	}
+	return keySummary(p)
+}
+
+// tiersSummary lists the claude model tiers.
+func tiersSummary(p config.Provider) string {
+	return fmt.Sprintf("opus %s · sonnet %s · haiku %s", dash(p.Opus), dash(p.Sonnet), dash(p.Haiku))
+}
+
+// launchSummary is what a bare launch picks: the default variant, or that
+// it asks among the variants.
+func launchSummary(cfg *config.Config, name string) string {
+	if v := cfg.Providers[name].DefaultVariant; v != "" {
+		return "always " + v
+	}
+	if vs := variantNames(cfg, name); len(vs) > 0 {
+		return "asks: " + strings.Join(vs, " ")
+	}
+	return ""
+}
+
+// planSummary is what is left of the provider's account or own plan, once
+// the Accounts page has read it this run.
+func planSummary(a *app, name string, width int) string {
+	q, ok := a.quotaOf(name)
+	if !ok || q.Error != "" || q.NoSource {
+		return ""
+	}
+	return planBars(q, width)
 }
 
 // accountSummary names an account and its vendor.

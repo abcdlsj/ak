@@ -1,115 +1,85 @@
 package ui
 
 import (
-	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
-	"github.com/abcdlsj/ak/internal/quota"
-	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/vendor"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// accountsPage lists the accounts: the vendor of each, who signed in, the
-// providers on it and what is left of its plan or balance, read when the
-// page is first shown and on b.
+// accountsPage lists what holds a balance, the accounts first, then the
+// providers with an endpoint of their own that a balance source serves;
+// the selected one's card is beside the list, as `ak quota board` draws it.
+// The balances are read the first time the page is shown and again on r.
 type accountsPage struct {
 	cursor int
-	quotas map[string]quota.Quota
-	asked  bool
 }
 
-type accountQuotaMsg struct {
-	account string
-	q       quota.Quota
-}
-
-func newAccountsPage() *accountsPage { return &accountsPage{quotas: map[string]quota.Quota{}} }
+func newAccountsPage() *accountsPage { return &accountsPage{} }
 
 func (p *accountsPage) title() string     { return "Accounts" }
 func (p *accountsPage) capturing() bool   { return false }
 func (p *accountsPage) consumesEsc() bool { return false }
 
 func (p *accountsPage) help() []string {
-	return []string{"a sign in", "enter sign in again", "n new provider", "d remove", "b balance"}
+	return []string{"a sign in", "enter sign in again", "n new provider", "d remove", "r refresh"}
 }
 
 // shown reads the balances the first time the page is opened: a key away
 // from the launcher, it is a request for them.
 func (p *accountsPage) shown(a *app) tea.Cmd {
-	if p.asked {
+	if a.quotas.started {
+		a.quotas.reset(a.cfg)
 		return nil
 	}
-	return p.loadQuotas(a)
+	return a.quotas.read(a.cfg)
 }
 
-// loadQuotas asks every account's balance, each on its own.
-func (p *accountsPage) loadQuotas(a *app) tea.Cmd {
-	p.asked = true
-	p.quotas = map[string]quota.Quota{}
-	var cmds []tea.Cmd
-	for _, name := range a.cfg.AccountNames() {
-		pr, ok := a.cfg.AccountProvider(name)
-		if !ok {
-			continue
-		}
-		cmds = append(cmds, func() tea.Msg {
-			key, err := secrets.Default().Resolve(pr)
-			if err != nil {
-				return accountQuotaMsg{name, quota.Quota{Error: err.Error()}}
-			}
-			return accountQuotaMsg{name, quota.Query(context.Background(), name, pr, key)}
-		})
+func (p *accountsPage) selected(a *app) (*card, bool) {
+	cards := a.quotas.cards
+	if len(cards) == 0 {
+		return nil, false
 	}
-	return tea.Batch(cmds...)
-}
-
-func (p *accountsPage) selected(cfg *config.Config) (string, bool) {
-	names := cfg.AccountNames()
-	if len(names) == 0 {
-		return "", false
-	}
-	p.cursor = clamp(p.cursor, 0, len(names)-1)
-	return names[p.cursor], true
+	p.cursor = clamp(p.cursor, 0, len(cards)-1)
+	return cards[p.cursor], true
 }
 
 func (p *accountsPage) update(a *app, msg tea.Msg) tea.Cmd {
-	switch msg := msg.(type) {
-	case accountQuotaMsg:
-		p.quotas[msg.account] = msg.q
+	k, ok := msg.(tea.KeyMsg)
+	if !ok {
 		return nil
-	case tea.KeyMsg:
-		return p.keys(a, msg.String())
 	}
-	return nil
-}
-
-func (p *accountsPage) keys(a *app, k string) tea.Cmd {
-	switch k {
+	switch k.String() {
 	case "up", "k":
 		p.cursor = max(p.cursor-1, 0)
 		return nil
 	case "down", "j":
 		p.cursor++
-		p.selected(a.cfg)
+		p.selected(a)
 		return nil
 	case "a":
 		return a.open(newLoginOverlay(vendor.Vendor{}, "", nil))
-	case "b":
-		return p.loadQuotas(a)
+	case "r":
+		return a.quotas.read(a.cfg)
 	}
-	name, ok := p.selected(a.cfg)
+	c, ok := p.selected(a)
 	if !ok {
 		return nil
 	}
-	acc := a.cfg.Accounts[name]
-	v, _ := vendor.Lookup(acc.Vendor)
-	switch k {
+	name, isAccount := strings.CutPrefix(c.key, "account:")
+	if !isAccount {
+		// A provider of its own is edited on the home page.
+		if k.String() == "enter" || k.String() == "e" {
+			return a.open(newFormOverlay(EditDraft(a.cfg, name)))
+		}
+		return nil
+	}
+	v, _ := vendor.Lookup(a.cfg.Accounts[name].Vendor)
+	switch k.String() {
 	case "enter", "e":
 		return a.open(newLoginOverlay(v, name, nil))
 	case "n":
@@ -121,7 +91,7 @@ func (p *accountsPage) keys(a *app, k string) tea.Cmd {
 			if err := core.RemoveAccount(a.cfg, name); err != nil {
 				return a.notify(err.Error(), true)
 			}
-			delete(p.quotas, name)
+			a.quotas.reset(a.cfg)
 			return a.notify("removed account "+name, false)
 		}))
 	}
@@ -129,89 +99,93 @@ func (p *accountsPage) keys(a *app, k string) tea.Cmd {
 }
 
 func (p *accountsPage) view(a *app, width, height int) string {
-	names := a.cfg.AccountNames()
-	if len(names) == 0 {
+	cards := a.quotas.cards
+	if len(cards) == 0 {
 		return dimStyle.Render("No accounts yet. Press a to sign in to a vendor; its providers then share one key and one balance.")
 	}
-	p.selected(a.cfg)
-	cols := [][]string{{"ACCOUNT", "VENDOR", "USER", "PROVIDERS"}}
-	for _, n := range names {
-		acc := a.cfg.Accounts[n]
-		vname := acc.Vendor
-		if v, ok := vendor.Lookup(acc.Vendor); ok {
-			vname = v.Name
-		}
-		users := a.cfg.UsersOf(n)
-		cols = append(cols, []string{n, vname, dash(acc.User), dash(strings.Join(users, ", "))})
+	sel, _ := p.selected(a)
+	list := p.list(a, cards, max(width-cardWidth-2, 24))
+	if width < cardWidth+28 {
+		return list + "\n" + sel.view(a.spinner.View())
 	}
-	widths := make([]int, len(cols[0]))
-	for _, c := range cols {
-		for i, s := range c {
-			widths[i] = max(widths[i], len(s))
-		}
-	}
-	line := func(c []string) string {
-		var parts []string
-		for i, s := range c {
-			parts = append(parts, fmt.Sprintf("%-*s", widths[i], s))
-		}
-		return strings.Join(parts, "  ")
-	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(width-cardWidth-2).Render(list), "  ", sel.view(a.spinner.View()))
+}
 
+// list is one row per holder: its mark, name, what it is and who uses it,
+// and the fullest window at a glance.
+func (p *accountsPage) list(a *app, cards []*card, width int) string {
+	nameW := len("ACCOUNT")
+	for _, c := range cards {
+		nameW = max(nameW, lipgloss.Width(c.title))
+	}
 	var b strings.Builder
-	b.WriteString(headStyle.Render("    "+line(cols[0])+"  PLAN") + "\n")
-	for i, n := range names {
+	b.WriteString(headStyle.Render(fmt.Sprintf("    %-*s  %-6s  %s", nameW, "ACCOUNT", "USED", "FOR")) + "\n")
+	for i, c := range cards {
 		r := row{picked: i == p.cursor}
 		if r.picked {
 			r.add(rowStyle, "▌ ")
 		} else {
 			r.add(rowStyle, "  ")
 		}
-		if a.cfg.Accounts[n].HasKey() {
-			r.add(okStyle, "●")
-		} else {
-			r.add(errStyle, "●")
-		}
-		r.add(rowStyle, " "+line(cols[i+1])+"  ")
-		st, text := p.plan(a, n)
-		r.add(st, text)
+		st, mark := holderMark(a.cfg, c)
+		r.add(st, mark)
+		r.add(rowStyle, " "+pad(c.title, nameW)+"  ")
+		r.add(fullest(c, a.spinner.View()))
+		r.add(dimStyle, "  "+truncate(usedBy(a.cfg, c), max(width-nameW-16, 8)))
 		b.WriteString(r.render(width) + "\n")
 	}
 	return b.String()
 }
 
-// plan is what is left of an account, as far as its balance reading says.
-func (p *accountsPage) plan(a *app, name string) (lipgloss.Style, string) {
-	q, ok := p.quotas[name]
-	switch {
-	case !ok && p.asked:
-		return dimStyle, a.spinner.View()
-	case !ok:
-		return dimStyle, "b to read"
-	case q.NoSource:
-		return dimStyle, "-"
-	case q.Error != "":
-		return errStyle, "✗ " + q.Error
+// holderMark is green when a reading came back, red when it failed or the
+// account has no key, dim until then.
+func holderMark(cfg *config.Config, c *card) (lipgloss.Style, string) {
+	if name, ok := strings.CutPrefix(c.key, "account:"); ok && !cfg.Accounts[name].HasKey() {
+		return errStyle, "●"
 	}
-	return rowStyle, planText(q)
+	switch {
+	case !c.read:
+		return dimStyle, "·"
+	case c.q.Error != "":
+		return errStyle, "●"
+	}
+	return okStyle, "●"
 }
 
-// planText is a balance and its plan windows on one line.
-func planText(q quota.Quota) string {
-	var parts []string
-	if q.Balance != nil {
-		s := strconv.FormatFloat(*q.Balance, 'f', 2, 64)
-		if q.Currency != "" {
-			s += " " + q.Currency
-		}
-		parts = append(parts, s)
+// fullest is the share used of the holder's fullest window, coloured, six
+// cells wide: the one number that says whether it can take more work.
+func fullest(c *card, spin string) (lipgloss.Style, string) {
+	switch {
+	case c.reading && !c.read:
+		return dimStyle, pad(spin, 6)
+	case !c.read || c.q.NoSource:
+		return dimStyle, pad("-", 6)
+	case c.q.Error != "":
+		return errStyle, pad("✗", 6)
 	}
-	for _, w := range q.Windows {
-		s := fmt.Sprintf("%s %.0f%%", w.Name, w.Used)
-		if w.Resets != nil {
-			s += " ↻" + w.Resets.Local().Format("01-02 15:04")
-		}
-		parts = append(parts, s)
+	most := -1.0
+	for _, w := range c.q.Windows {
+		most = max(most, w.Used)
 	}
-	return dash(strings.Join(parts, " · "))
+	if most < 0 {
+		if c.q.Balance != nil {
+			return rowStyle, pad(money(*c.q.Balance), 6)
+		}
+		return dimStyle, pad("-", 6)
+	}
+	return lipgloss.NewStyle().Foreground(usedColor(most, accentColor)), pad(fmt.Sprintf("%.0f%%", most), 6)
+}
+
+// usedBy is who uses the holder: an account's providers, or a provider's
+// engine.
+func usedBy(cfg *config.Config, c *card) string {
+	name, ok := strings.CutPrefix(c.key, "account:")
+	if !ok {
+		return "own endpoint"
+	}
+	users := cfg.UsersOf(name)
+	if len(users) == 0 {
+		return "no providers yet"
+	}
+	return strings.Join(users, ", ")
 }

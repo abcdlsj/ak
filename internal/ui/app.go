@@ -86,6 +86,7 @@ type app struct {
 	overlay  overlay
 	statuses map[string]core.Status
 	usage    usageState
+	quotas   quotaStore
 	spinner  spinner.Model
 	flash    flash
 
@@ -225,6 +226,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case statusesMsg:
 		a.statuses = msg
+		return a, nil
+	case quotaReadMsg:
+		a.quotas.got(msg)
 		return a, nil
 	case poolStatsMsg:
 		a.poolStats, a.poolStatsErr = msg.stats.Pools, msg.err

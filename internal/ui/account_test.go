@@ -5,6 +5,7 @@ import (
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func accountConfig() *config.Config {
@@ -56,5 +57,23 @@ func TestDraftSignInFirst(t *testing.T) {
 	d.ApplyPick(config.Default())
 	if v, ok := d.SignInFirst(); !ok || v.ID != "opendesign" {
 		t.Fatalf("SignInFirst = %v, %v", v.ID, ok)
+	}
+}
+
+// A provider says it is missing a key only when it signs in with one.
+func TestAuthSummary(t *testing.T) {
+	cfg := accountConfig()
+	cfg.Accounts["empty"] = config.Account{Vendor: "kimi-coding"}
+	cases := map[string]config.Provider{
+		"pi's own sign-in":       {Kind: config.KindPi, PiProvider: "commandcode"},
+		"each member's own":      {Kind: config.KindClaude, Members: []string{"goat"}},
+		"the account's key":      {Kind: config.KindClaude, Account: "goat"},
+		"the account has no key": {Kind: config.KindClaude, Account: "empty"},
+		"missing":                {Kind: config.KindClaude, BaseURL: "https://x"},
+	}
+	for want, p := range cases {
+		if got := ansi.Strip(authSummary(cfg, p)); got != want {
+			t.Errorf("%+v: %q, want %q", p, got, want)
+		}
 	}
 }
