@@ -148,35 +148,55 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // login serves the login form and checks the password.
 func (u *UI) login(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		tok := randomID()
-		setCookie(w, r, loginCookie, tok, 600)
-		u.render(w, "login", map[string]any{"CSRF": tok}, nil)
+		u.loginForm(w, r, 0, "")
 		return
 	}
 	now := u.now()
 	if locked, until := u.sessions.locked(now); locked {
 		w.Header().Set("Retry-After", fmt.Sprint(int(until.Sub(now).Seconds())+1))
-		w.WriteHeader(http.StatusTooManyRequests)
-		u.render(w, "login", map[string]any{"Error": "Too many failed logins; try again in a few minutes."}, nil)
+		u.loginForm(w, r, http.StatusTooManyRequests, "Too many failed logins; try again in a few minutes.")
 		return
 	}
 	c, err := r.Cookie(loginCookie)
 	if err != nil || !equal(r.PostFormValue("csrf"), c.Value) {
-		http.Error(w, "ak: the login form is stale; reload the page", http.StatusForbidden)
+		u.loginForm(w, r, http.StatusForbidden, "That form had expired; log in again.")
 		return
 	}
 	hash := u.b.Config().Service.AdminPassword
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(r.PostFormValue("password"))) != nil {
 		u.sessions.failed(now)
-		tok := randomID()
-		setCookie(w, r, loginCookie, tok, 600)
-		w.WriteHeader(http.StatusUnauthorized)
-		u.render(w, "login", map[string]any{"CSRF": tok, "Error": "Wrong password."}, nil)
+		u.loginForm(w, r, http.StatusUnauthorized, "Wrong password.")
 		return
 	}
 	setCookie(w, r, loginCookie, "", -1)
 	setCookie(w, r, sessionCookie, u.sessions.start(), int(sessionTTL.Seconds()))
 	http.Redirect(w, r, "/ui/accounts", http.StatusSeeOther)
+}
+
+// loginToken is the form's CSRF token: the browser's existing ak_login cookie
+// when it has one. Reusing it keeps a form already on screen valid, so a
+// second tab or a reload does not make the first one fail to submit.
+func (u *UI) loginToken(w http.ResponseWriter, r *http.Request) string {
+	if c, err := r.Cookie(loginCookie); err == nil && c.Value != "" {
+		return c.Value
+	}
+	tok := randomID()
+	setCookie(w, r, loginCookie, tok, 600)
+	return tok
+}
+
+// loginForm renders the login page with a token, why it is back, and a status
+// (0 for 200). It always answers with the form, so an expired one is answered
+// by a fresh one rather than a dead end.
+func (u *UI) loginForm(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	data := map[string]any{"CSRF": u.loginToken(w, r)}
+	if msg != "" {
+		data["Error"] = msg
+	}
+	if status != 0 {
+		w.WriteHeader(status)
+	}
+	u.render(w, "login", data, nil)
 }
 
 // render writes a page in the layout.

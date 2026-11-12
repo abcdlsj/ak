@@ -167,6 +167,28 @@ func TestTokenNeverOpensUI(t *testing.T) {
 	}
 }
 
+func TestLoginFormSurvivesASecondVisit(t *testing.T) {
+	s := newSite(t, true)
+	first := s.csrf("/ui/login")
+	if again := s.csrf("/ui/login"); again != first {
+		t.Fatalf("a second visit changed the form token")
+	}
+	if rec := s.do("POST", "/ui/login", url.Values{"csrf": {first}, "password": {password}}); rec.Code != http.StatusSeeOther {
+		t.Errorf("the first form after a second visit: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestStaleLoginFormIsAnsweredWithAFreshOne(t *testing.T) {
+	s := newSite(t, true)
+	rec := s.do("POST", "/ui/login", url.Values{"csrf": {"stale"}, "password": {password}})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a stale form: %d", rec.Code)
+	}
+	if !csrfRe.MatchString(rec.Body.String()) {
+		t.Errorf("a stale form is a dead end, no form to try again: %s", rec.Body)
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	s := newSite(t, true)
 	for range maxFailures {
