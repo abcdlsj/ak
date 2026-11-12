@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/quota"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -187,5 +189,21 @@ func TestOnboardingOpensAddForm(t *testing.T) {
 	b.Init()
 	if b.overlay != nil {
 		t.Fatalf("overlay = %T with providers configured", b.overlay)
+	}
+}
+
+func TestBoardShowsRemoteAccounts(t *testing.T) {
+	s := quotaStore{cards: []*card{
+		{key: "account:kimi", title: "kimi", read: true},
+		{key: "account:home", title: "home", read: true, q: quota.Quota{Accounts: []quota.Quota{
+			{Provider: "home/a", Windows: []quota.Window{{Name: "5h", Used: 10}}}, {Provider: "home/b"},
+		}}},
+	}}
+	var titles []string
+	for _, c := range s.shown() {
+		titles = append(titles, c.title)
+	}
+	if strings.Join(titles, ",") != "kimi,home/a,home/b" {
+		t.Errorf("cards = %v", titles)
 	}
 }

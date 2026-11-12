@@ -50,6 +50,9 @@ type Quota struct {
 	// NoSource marks a provider no balance source serves, which is a gap in
 	// coverage rather than a failure.
 	NoSource bool `json:"no_source,omitempty"`
+	// Accounts are, for an ak service, the readings of the accounts it
+	// holds, each named <remote>/<account>.
+	Accounts []Quota `json:"accounts,omitempty"`
 }
 
 // Spent reports whether the provider has nothing left to spend: a plan window
@@ -163,6 +166,9 @@ func Query(ctx context.Context, name string, p config.Provider, key string) Quot
 	q.Provider, q.Source = name, src.ID()
 	if err != nil {
 		q.Error = err.Error()
+	}
+	for i := range q.Accounts {
+		q.Accounts[i].Provider = name + "/" + q.Accounts[i].Provider
 	}
 	return q
 }

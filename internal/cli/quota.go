@@ -228,6 +228,10 @@ func printQuota(holders []core.Holder, results []quota.Quota) {
 			noSource = append(noSource, q.Provider)
 		}
 		cells = append(cells, append([]string{holderCell(holders[i])}, quotaRow(q)...))
+		// A remote ak service's own accounts, under it.
+		for _, a := range q.Accounts {
+			cells = append(cells, append([]string{"  " + a.Provider}, quotaRow(a)...))
+		}
 	}
 	out.Table(os.Stdout, []string{"account / provider", "source", "balance", "plan", "note"}, cells)
 	if len(noSource) == 0 {

@@ -156,14 +156,15 @@ func (b *board) View() string {
 	}
 	head := titleStyle.Render("ak quota") + dimStyle.Render("  ·  every plan at a glance")
 	foot := dimStyle.Render("r refresh  ·  ↑/↓ scroll  ·  q quit")
-	if len(b.quotas.cards) == 0 {
+	cards := b.quotas.shown()
+	if len(cards) == 0 {
 		return appStyle.Render(head + "\n\n" + dimStyle.Render("Nothing with a balance to show. Sign in with `ak login <vendor>`.") + "\n\n" + foot)
 	}
 	perRow := max(1, (w-appStyle.GetHorizontalPadding()+1)/(cardWidth+1))
 	var rows []string
-	for i := 0; i < len(b.quotas.cards); i += perRow {
+	for i := 0; i < len(cards); i += perRow {
 		var line []string
-		for _, c := range b.quotas.cards[i:min(i+perRow, len(b.quotas.cards))] {
+		for _, c := range cards[i:min(i+perRow, len(cards))] {
 			line = append(line, c.view(b.spinner.View()), " ")
 		}
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, line...))
@@ -204,7 +205,9 @@ func (c *card) view(spin string) string {
 		if q.Balance != nil {
 			s.WriteString("\n" + balance(q, c.hue))
 		}
-		if len(q.Windows) == 0 && q.Balance == nil {
+		if len(q.Accounts) > 0 {
+			s.WriteString("\n" + dimStyle.Render(fmt.Sprintf("an ak service: %d accounts, a card each", len(q.Accounts))) + "\n")
+		} else if len(q.Windows) == 0 && q.Balance == nil {
 			s.WriteString("\n" + dimStyle.Render("the vendor reported nothing to show") + "\n")
 		}
 	}

@@ -83,6 +83,23 @@ func readCard(c *card) tea.Cmd {
 	}
 }
 
+// shown is the cards the board draws: an ak service, once read, as a card
+// for each of its accounts, in its place.
+func (s *quotaStore) shown() []*card {
+	var out []*card
+	for _, c := range s.cards {
+		if !c.read || len(c.q.Accounts) == 0 {
+			out = append(out, c)
+			continue
+		}
+		for _, q := range c.q.Accounts {
+			out = append(out, &card{key: c.key + "/" + q.Provider, title: q.Provider, sub: c.title + " · " + dash(q.Source),
+				p: c.p, hue: hueOf(q.Provider), q: q, read: true, readAt: c.readAt, reading: c.reading})
+		}
+	}
+	return out
+}
+
 // got records a reading.
 func (s *quotaStore) got(m quotaReadMsg) {
 	if c, ok := s.byKey[m.key]; ok {

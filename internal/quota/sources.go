@@ -161,3 +161,31 @@ func spanName(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dm", d/time.Minute)
 }
+
+// remote: an ak service, GET <root>/ak/v1/quota with the account's token ->
+// {"accounts": [Quota…]}, the readings of the accounts the token reaches.
+// It is named only: an ak service has no host of its own to detect. The
+// service may sit under a path, so the base URL is kept, less a /v1.
+type remote struct{}
+
+// RemoteSource is the id a remote's vendor names as its quota source.
+const RemoteSource = "ak"
+
+func (remote) ID() string        { return RemoteSource }
+func (remote) Match(string) bool { return false }
+
+func (remote) Fetch(ctx context.Context, p config.Provider, key string) (Quota, error) {
+	var r struct {
+		Accounts []Quota `json:"accounts"`
+	}
+	base := strings.TrimSuffix(strings.TrimRight(p.BaseURL, "/"), "/v1")
+	if err := getJSON(ctx, base+"/ak/v1/quota", key, &r); err != nil {
+		return Quota{}, err
+	}
+	q := Quota{Kind: "remote", Detail: fmt.Sprintf("%d accounts", len(r.Accounts))}
+	for _, a := range r.Accounts {
+		a.Accounts = nil
+		q.Accounts = append(q.Accounts, a)
+	}
+	return q, nil
+}

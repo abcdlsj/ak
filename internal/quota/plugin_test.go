@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -388,5 +389,25 @@ func TestQuotaVarsTemplate(t *testing.T) {
 	}
 	if err := checkTemplate("{{var.}}"); err == nil {
 		t.Error("empty var name accepted")
+	}
+}
+
+func TestRemoteSource(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ak/ak/v1/quota" || r.Header.Get("Authorization") != "Bearer tok" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		io.WriteString(w, `{"accounts":[{"provider":"kimi","source":"kimi","windows":[{"name":"5h","used":40}]},{"provider":"dsk","error":"no key"}]}`)
+	}))
+	defer srv.Close()
+	p := config.Provider{BaseURL: srv.URL + "/ak/v1", Quota: RemoteSource}
+	q := Query(context.Background(), "home", p, "tok")
+	if q.Error != "" || len(q.Accounts) != 2 || q.Accounts[0].Provider != "home/kimi" || q.Accounts[0].Windows[0].Used != 40 ||
+		q.Accounts[1].Error != "no key" {
+		t.Fatalf("remote = %+v", q)
+	}
+	if spent, _ := q.Spent(); spent {
+		t.Error("a remote with allowance reads as spent")
 	}
 }
