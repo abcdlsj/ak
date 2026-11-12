@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/spf13/cobra"
 )
 
@@ -38,6 +38,7 @@ type listRow struct {
 	Command    string   `json:"command"`
 	Kind       string   `json:"kind"`
 	Display    string   `json:"display,omitempty"`
+	Account    string   `json:"account,omitempty"`
 	BaseURL    string   `json:"base_url"`
 	Model      string   `json:"model,omitempty"`
 	PiProvider string   `json:"pi_provider,omitempty"`
@@ -55,6 +56,7 @@ func listRows(cfg *config.Config) []listRow {
 			Command:    cfg.Settings.Prefix + name,
 			Kind:       string(p.Kind),
 			Display:    p.Display,
+			Account:    p.Account,
 			BaseURL:    p.BaseURL,
 			Model:      p.Model,
 			PiProvider: p.PiProvider,
@@ -69,7 +71,7 @@ func listRows(cfg *config.Config) []listRow {
 func printList(cfg *config.Config) {
 	rows := listRows(cfg)
 	if len(rows) == 0 {
-		fmt.Println("No providers yet. Add one with `ak add`, or `ak import --from claude-settings`.")
+		out.Empty(os.Stdout, "No providers yet.", "Add one with `ak add`, sign in with `ak login <vendor>`, or `ak import --from cc-switch`.")
 		return
 	}
 	// A display name is shown only where it says something the name does not,
@@ -84,26 +86,26 @@ func printList(cfg *config.Config) {
 	for _, r := range rows {
 		withDisplay = withDisplay || display(r) != ""
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	header := "command\tengine\tmodel\tendpoint"
+	head := []string{"command", "engine", "model", "runs on"}
 	if withDisplay {
-		header += "\tdisplay"
+		head = append(head, "display")
 	}
-	fmt.Fprintln(w, header)
+	var cells [][]string
 	for _, r := range rows {
-		mark := ""
+		cmd := r.Command
 		if r.Default {
-			mark = " *"
+			cmd += " " + out.Warn("★")
 		}
-		line := fmt.Sprintf("%s%s\t%s\t%s\t%s", r.Command, mark, r.Kind, dash(r.Model), dash(endpoint(r)))
+		row := []string{cmd, r.Kind, out.Or(r.Model), out.Or(runsOn(r))}
 		if withDisplay {
-			line += "\t" + display(r)
+			row = append(row, out.Or(display(r)))
 		}
-		fmt.Fprintln(w, line)
+		cells = append(cells, row)
 	}
-	w.Flush()
+	out.Table(os.Stdout, head, cells)
 	if cfg.Settings.Default != "" {
-		fmt.Println("\n* marks the default provider")
+		fmt.Println()
+		out.Hint(os.Stdout, "★ the default provider, which the launcher opens on")
 	}
 }
 
@@ -112,6 +114,15 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// runsOn is what the command talks to: its account, the members of a pool,
+// a provider pi knows, or the upstream URL.
+func runsOn(r listRow) string {
+	if r.Account != "" {
+		return "account " + r.Account
+	}
+	return endpoint(r)
 }
 
 // endpoint is what the command talks to: the upstream URL, or the members of a
