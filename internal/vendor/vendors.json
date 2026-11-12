@@ -26,6 +26,7 @@
   {
     "id": "kimi-coding",
     "name": "Kimi For Coding",
+    "short": "kimi",
     "category": "official",
     "website_url": "https://www.kimi.com/code/",
     "api_key_url": "https://www.kimi.com/code/",
@@ -105,6 +106,7 @@
   {
     "id": "deepseek",
     "name": "DeepSeek",
+    "short": "dpsk",
     "category": "official",
     "website_url": "https://platform.deepseek.com",
     "api_key_url": "https://platform.deepseek.com/api_keys",
@@ -149,6 +151,7 @@
   {
     "id": "stepfun-plan",
     "name": "StepFun Step Plan",
+    "short": "stepfun",
     "category": "official",
     "website_url": "https://platform.stepfun.com/docs/zh/step-plan/overview",
     "api_key_url": "https://platform.stepfun.com/interface-key",
@@ -163,6 +166,7 @@
   {
     "id": "stepfun-api",
     "name": "StepFun API",
+    "short": "stepfun",
     "category": "official",
     "website_url": "https://platform.stepfun.com",
     "api_key_url": "https://platform.stepfun.com/interface-key",
@@ -177,6 +181,7 @@
   {
     "id": "qwen-coding",
     "name": "千问AI平台 Coding Plan",
+    "short": "qwen",
     "category": "coding-plan",
     "website_url": "https://bailian.console.aliyun.com",
     "engines": {
@@ -189,6 +194,7 @@
   {
     "id": "qwencloud-coding",
     "name": "QwenCloud For Coding",
+    "short": "qwen",
     "category": "coding-plan",
     "website_url": "https://www.qwencloud.com",
     "api_key_url": "https://home.qwencloud.com/api-keys",
@@ -208,6 +214,7 @@
   {
     "id": "volcengine-coding",
     "name": "火山 Coding Plan",
+    "short": "volc",
     "category": "coding-plan",
     "website_url": "https://www.volcengine.com/activity/codingplan",
     "api_key_url": "https://www.volcengine.com/activity/codingplan",
@@ -297,6 +304,7 @@
   {
     "id": "kimi-global",
     "name": "Kimi Global",
+    "short": "kimi",
     "category": "global",
     "website_url": "https://platform.kimi.ai",
     "api_key_url": "https://platform.kimi.ai/console/api-keys",
@@ -321,6 +329,7 @@
   {
     "id": "kimi-coding-global",
     "name": "Kimi For Coding Global",
+    "short": "kimi",
     "category": "global",
     "website_url": "https://www.kimi.ai/code",
     "api_key_url": "https://www.kimi.ai/code",
@@ -349,6 +358,7 @@
   {
     "id": "zhipu-en",
     "name": "Zhipu GLM en",
+    "short": "zhipu",
     "category": "global",
     "website_url": "https://z.ai",
     "api_key_url": "https://z.ai/subscribe",
@@ -373,6 +383,7 @@
   {
     "id": "minimax-en",
     "name": "MiniMax en",
+    "short": "minimax",
     "category": "global",
     "website_url": "https://platform.minimax.io",
     "api_key_url": "https://platform.minimax.io/subscribe/coding-plan",
@@ -400,6 +411,7 @@
   {
     "id": "stepfun-en",
     "name": "StepFun en",
+    "short": "stepfun",
     "category": "global",
     "website_url": "https://platform.stepfun.ai/step-plan",
     "api_key_url": "https://platform.stepfun.ai/interface-key",
@@ -419,6 +431,7 @@
   {
     "id": "stepfun-api-en",
     "name": "StepFun API en",
+    "short": "stepfun",
     "category": "global",
     "website_url": "https://platform.stepfun.ai",
     "api_key_url": "https://platform.stepfun.ai/interface-key",
@@ -459,6 +472,7 @@
   {
     "id": "siliconflow",
     "name": "SiliconFlow",
+    "short": "sf",
     "category": "aggregator",
     "website_url": "https://siliconflow.cn",
     "api_key_url": "https://cloud.siliconflow.cn/account/ak",
@@ -473,6 +487,7 @@
   {
     "id": "siliconflow-en",
     "name": "SiliconFlow en",
+    "short": "sf",
     "category": "aggregator",
     "website_url": "https://siliconflow.com",
     "api_key_url": "https://cloud.siliconflow.com/account/ak",
@@ -506,6 +521,7 @@
   {
     "id": "opencode-go",
     "name": "OpenCode Go",
+    "short": "opencode",
     "category": "aggregator",
     "website_url": "https://opencode.ai/go",
     "api_key_url": "https://opencode.ai/go",
@@ -535,6 +551,7 @@
   {
     "id": "command-code",
     "name": "Command Code",
+    "short": "commandcode",
     "category": "aggregator",
     "website_url": "https://commandcode.ai",
     "api_key_url": "https://commandcode.ai/settings/keys",

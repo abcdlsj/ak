@@ -61,7 +61,7 @@ sign-in when it has one, a device sign-in, or pasting a key.`,
 			fmt.Println()
 			out.Hint(os.Stdout, "add a provider on it, one per engine:")
 			for _, k := range v.Kinds() {
-				out.Hint(os.Stdout, "  `ak add <name> --account %s --kind %s`", name, k)
+				out.Hint(os.Stdout, "  `ak add --account %s --kind %s`", name, k)
 			}
 			return nil
 		},

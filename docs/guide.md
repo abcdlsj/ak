@@ -159,12 +159,15 @@ ak login command-code                   reads the Command Code CLI's sign-in
 ak login opencode-go                    reads OpenCode's, else asks for the key
 ak login opendesign                     approve a code in the browser
 ak login kimi-coding work --key -       a second account, named work
-ak add goat --account command-code --kind claude
+ak add --account command-code --kind claude      named commandcode-claude
 ak add goatx --account command-code --kind codex --model gpt-6-luna
 ak accounts                             accounts, who signed in, their providers
 ```
 
-A provider on an account stores only what it overrides: a field it leaves
+A provider given no name is named `<source>-<engine>` after what it runs on:
+its vendor by its short name (`commandcode`, `kimi`, `dpsk`, `sf`), the
+provider pi knows, or its endpoint's host (`cpa-codex`); a taken name gets
+`-2`. A provider on an account stores only what it overrides: a field it leaves
 unset follows the vendor, so a vendor that moves is followed by the next ak.
 `ak add kimi --vendor kimi-coding --key -` makes the account and the provider
 in one go. `ak edit old --account <name>` moves a provider with its own

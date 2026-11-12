@@ -251,8 +251,11 @@ func newAddCmd() *cobra.Command {
 		Short: "Add a provider",
 		Long: `Add a provider and generate its command immediately.
 
-  ak add goat --account goat --kind claude       # on an account from ak login
+  ak add --account goat --kind claude            # on an account from ak login: commandcode-claude
   ak add kimi --vendor kimi-coding --key -       # makes account kimi-coding, types the key
+
+A provider given no name is named <source>-<engine> after what it runs on:
+its vendor (kimi, commandcode, dpsk), the provider pi knows, or its host.
   ak add kimi --kind claude --base-url https://api.moonshot.cn/anthropic --key sk-... --model kimi-k2.7-code
   ak add pool --kind claude --member kimi --member cpa --strategy rotate
   ak add        # with no --vendor, --account, --base-url or --member, opens a form`,
@@ -299,8 +302,8 @@ func newAddCmd() *cobra.Command {
 				}
 				name, p = d.Name, d.Provider()
 			}
-			if name == "" {
-				return fmt.Errorf("a provider name is required")
+			if name, err = core.NameFor(cfg, name, p); err != nil {
+				return err
 			}
 			if err := core.Add(cfg, name, p); err != nil {
 				return err
@@ -416,7 +419,7 @@ func runForm(cmd *cobra.Command, d *ui.Draft, cfg *config.Config) error {
 			d.UseAccount(cfg, v.ID)
 		}
 	}
-	return runHuh(d.Form(func(n string) bool { _, ok := cfg.Providers[n]; return ok }))
+	return runHuh(d.Form(cfg))
 }
 
 func runHuh(f *huh.Form) error {

@@ -9,7 +9,7 @@ import (
 func TestReason(t *testing.T) {
 	cases := map[string]string{
 		`401 Unauthorized: {"success":false,"error":{"code":"UNAUTHORIZED","message":"Invalid token."}}`: "401 Invalid token.",
-		`key rejected (HTTP 401): {"error":{"message":"Bad key","type":"authentication_error"}}`:          "401 Bad key",
+		`key rejected (HTTP 401): {"error":{"message":"Bad key","type":"authentication_error"}}`:         "401 Bad key",
 		`HTTP 502: Proxy Error`: "HTTP 502: Proxy Error",
 		"dial tcp:\n  refused":  "dial tcp: refused",
 	}

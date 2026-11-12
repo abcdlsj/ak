@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/core"
 )
 
 func accountConfig() *config.Config {
@@ -15,7 +16,7 @@ func accountConfig() *config.Config {
 }
 
 // Picking an account makes a provider that leaves its endpoint and key to
-// the account, named after it unless that is taken.
+// the account, suggested a name after its vendor.
 func TestDraftOnAccount(t *testing.T) {
 	cfg := accountConfig()
 	d := NewDraft("")
@@ -25,8 +26,11 @@ func TestDraftOnAccount(t *testing.T) {
 		t.Fatal("an account needs no sign-in")
 	}
 	p := d.Provider()
-	if p.Account != "goat" || p.BaseURL != "" || p.APIKey != "" || d.Name != "goat-codex" {
-		t.Errorf("name %q, provider %+v", d.Name, p)
+	if p.Account != "goat" || p.BaseURL != "" || p.APIKey != "" {
+		t.Errorf("provider %+v", p)
+	}
+	if got := core.SuggestName(cfg, p); got != "commandcode-codex" {
+		t.Errorf("suggested name %q, want commandcode-codex", got)
 	}
 	if d.defaults.Model == "" {
 		t.Error("the form has no account default to show")

@@ -30,7 +30,7 @@ func (o *formOverlay) build(a *app) *huh.Form {
 	if o.form == nil {
 		f := o.draft.PickForm(a.cfg)
 		if !o.picking {
-			f = o.draft.Form(func(n string) bool { _, ok := a.cfg.Providers[n]; return ok })
+			f = o.draft.Form(a.cfg)
 		}
 		o.form = f.WithWidth(min(a.contentWidth(), 80)).WithShowHelp(true)
 	}
@@ -88,7 +88,9 @@ func (o *formOverlay) save(a *app) (bool, tea.Cmd) {
 	p := o.draft.Provider()
 	var err error
 	if o.draft.IsNew() {
-		err = core.Add(a.cfg, o.draft.Name, p)
+		if o.draft.Name, err = core.NameFor(a.cfg, o.draft.Name, p); err == nil {
+			err = core.Add(a.cfg, o.draft.Name, p)
+		}
 	} else {
 		err = core.Edit(a.cfg, o.draft.Orig(), o.draft.Name, p)
 	}

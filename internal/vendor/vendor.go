@@ -7,6 +7,7 @@
 package vendor
 
 import (
+	"cmp"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -18,8 +19,11 @@ var data []byte
 
 // Vendor is one provider of models and the endpoints it serves them on.
 type Vendor struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Short is what provider names call the vendor, where its id is longer
+	// than the name people use: commandcode, kimi, dpsk.
+	Short      string `json:"short,omitempty"`
 	Category   string `json:"category"`
 	WebsiteURL string `json:"website_url,omitempty"`
 	APIKeyURL  string `json:"api_key_url,omitempty"`
@@ -129,6 +133,9 @@ func Lookup(id string) (Vendor, bool) {
 	}
 	return Vendor{}, false
 }
+
+// ShortName is what a provider name calls the vendor.
+func (v Vendor) ShortName() string { return cmp.Or(v.Short, v.ID) }
 
 // Endpoint returns where the vendor serves the engine of kind.
 func (v Vendor) Endpoint(kind string) (Endpoint, bool) {

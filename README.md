@@ -30,8 +30,8 @@ Prebuilt binaries are on the [releases](https://github.com/abcdlsj/ak/releases) 
 go install github.com/abcdlsj/ak@latest
 ak                                       # with nothing set up, opens the add form
 ak login opencode-go                     # or sign in to a vendor first
-ak add og --account opencode-go --kind claude
-ak og
+ak add --account opencode-go --kind claude   # named opencode-claude
+ak opencode-claude
 ```
 
 `ak login` reads a sign-in another tool already has, runs a device sign-in, or

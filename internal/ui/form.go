@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
@@ -243,12 +244,6 @@ func (d *Draft) SignInFirst() (vendor.Vendor, bool) {
 func (d *Draft) UseAccount(cfg *config.Config, name string) {
 	d.choice, d.Account = "", name
 	d.defaults = endpointOf(cfg, name, config.Kind(d.Kind))
-	if d.Name == "" && name != "" {
-		d.Name = name
-		if _, taken := cfg.Providers[name]; taken {
-			d.Name = name + "-" + d.Kind
-		}
-	}
 }
 
 // ApplyPick takes the pick step's choice of account; a vendor to sign in to
@@ -279,8 +274,9 @@ func selectOf(title string, value *string, opts ...huh.Option[string]) *huh.Sele
 }
 
 // Form builds the provider form for the draft's engine and account, known
-// by now. taken reports names already in use.
-func (d *Draft) Form(taken func(string) bool) *huh.Form {
+// by now. A new provider's name may be left blank: it is then named after
+// what it runs on (core.SuggestName), which the field shows.
+func (d *Draft) Form(cfg *config.Config) *huh.Form {
 	onAccount := d.Account != ""
 	def := func(v string) string {
 		if v == "" {
@@ -291,12 +287,16 @@ func (d *Draft) Form(taken func(string) bool) *huh.Form {
 
 	basics := []huh.Field{
 		huh.NewInput().Title("Name").Value(&d.Name).
-			Description("The command becomes ak-<name>").
+			Description("The command becomes ak-<name>; blank takes the name shown").
+			PlaceholderFunc(func() string { return core.SuggestName(cfg, d.Provider()) }, &d.BaseURL).
 			Validate(func(s string) error {
+				if s == "" && !d.existing {
+					return nil
+				}
 				if err := config.ValidateName(s); err != nil {
 					return err
 				}
-				if taken(s) && !(d.existing && s == d.orig) {
+				if _, taken := cfg.Providers[s]; taken && !(d.existing && s == d.orig) {
 					return fmt.Errorf("provider %q already exists", s)
 				}
 				return nil
