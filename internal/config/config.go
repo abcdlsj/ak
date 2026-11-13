@@ -28,6 +28,11 @@ const DefaultGatewayAddr = "127.0.0.1:17877"
 // caller fast rather than let a runaway one starve the machine.
 const DefaultMaxInflight = 256
 
+// DefaultMaxConcurrency is how many requests one member takes at once when
+// neither it nor the settings say. An agent fires several turns at once; a
+// vendor that sees more than this tends to answer 429.
+const DefaultMaxConcurrency = 16
+
 // Pool strategies decide which member a request goes to.
 const (
 	// StrategyOrder tries members in order, failing over to the next.
@@ -86,6 +91,10 @@ type Settings struct {
 	// MaxInflight bounds how many requests the gateway handles at once; over
 	// it a request is refused with 503 rather than queued. 0 means no bound.
 	MaxInflight int `toml:"max_inflight"`
+	// MaxConcurrency is how many requests one member takes at once when it
+	// names no bound of its own; extra requests queue rather than reach a
+	// vendor that would answer them with a 429. 0 means no bound.
+	MaxConcurrency int `toml:"max_concurrency"`
 }
 
 // Kinds are the engines, in display order.
@@ -371,8 +380,9 @@ func DataDir() (string, error) { return Dir() }
 // Default returns an empty config pre-filled with defaults.
 func Default() *Config {
 	return &Config{
-		Version:   Version,
-		Settings:  Settings{BinDir: "~/.local/bin", Prefix: "ak-", GatewayAddr: DefaultGatewayAddr, MaxInflight: DefaultMaxInflight},
+		Version: Version,
+		Settings: Settings{BinDir: "~/.local/bin", Prefix: "ak-", GatewayAddr: DefaultGatewayAddr,
+			MaxInflight: DefaultMaxInflight, MaxConcurrency: DefaultMaxConcurrency},
 		Accounts:  map[string]Account{},
 		Providers: map[string]Provider{},
 	}

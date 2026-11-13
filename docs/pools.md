@@ -50,11 +50,12 @@ of reaching the agent; one that breaks after content has begun is passed on as
 it came. A conversation stays with the member that answered it (its engine's
 session header, or Codex's `prompt_cache_key`) so the vendor's prompt cache is
 read again rather than paid for afresh; load still spreads across conversations.
-Requests, their bodies and their streams are bounded: a body over 128 MB or
+Requests, their bodies and their streams are bounded: a body over 32 MB or
 unread for 60 seconds, a stream stalled for 2 minutes, each ends rather than
 hangs. A member's `max_concurrency` queues extra requests instead of sending
-them at once; `settings.max_inflight` (256 by default) refuses over that many
-with 503 rather than queueing. Pools do not translate between protocols: every
+them at once; a member that sets none uses `settings.max_concurrency` (16 by
+default). `settings.max_inflight` (256 by default) refuses over that many with
+503 rather than queueing. Pools do not translate between protocols: every
 member must speak what the engine speaks (the service's routes do; see
 [service.md](service.md)). To aggregate one relay for both
 engines, register its Anthropic endpoint as a `claude` provider and its OpenAI

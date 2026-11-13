@@ -19,6 +19,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
@@ -434,7 +435,11 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request, st *state, name s
 		m := lg.member
 		// A member with a concurrency bound queues its turn; waiting is not
 		// failing and never moves the request to another member.
-		release, ok := s.lanes.acquire(r.Context(), m, lg.p.MaxConcurrency)
+		limit := lg.p.MaxConcurrency
+		if limit <= 0 {
+			limit = s.config().Settings.MaxConcurrency
+		}
+		release, ok := s.lanes.acquire(r.Context(), m, limit)
 		if !ok {
 			return "" // the client went away while waiting
 		}
@@ -1566,16 +1571,26 @@ func (s *state) failed(pool, member string, after time.Duration) {
 	defer s.mu.Unlock()
 	s.fails[k]++
 	s.record(pool, member, false)
-	d := baseCooldown << min(s.fails[k]-1, 10)
-	if d > maxCooldown {
-		d = maxCooldown
+	base := baseCooldown << min(s.fails[k]-1, 10)
+	if base > maxCooldown {
+		base = maxCooldown
 	}
-	// The vendor's own word of when it is back is kept when longer.
+	// The vendor's own word of when it is back is kept as given, longer or
+	// shorter than ours.
+	d := base
 	if after > d {
 		d = after
 	}
 	if d > maxCooldown {
 		d = maxCooldown
+	}
+	// Our own backoff gains a fifth of jitter, so members that failed
+	// together do not come back together, in one burst at the vendor.
+	if d == base {
+		d += time.Duration(rand.Int64N(int64(d/5) + 1))
+		if d > maxCooldown {
+			d = maxCooldown
+		}
 	}
 	s.cool[k] = time.Now().Add(d)
 }
