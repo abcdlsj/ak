@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -20,13 +19,17 @@ const password = "a-long-password"
 // backend is the real service, with quota readings that ask no vendor.
 type backend struct{ *gateway.Server }
 
-func (backend) Quotas(_ context.Context, accounts []string) []quota.Quota {
+func (backend) QuotasNow(accounts []string) []quota.Quota {
 	out := make([]quota.Quota, len(accounts))
 	for i, a := range accounts {
-		out[i] = quota.Quota{Provider: a, Windows: []quota.Window{{Name: "5h", Used: 85}}}
+		out[i] = quota.Quota{Provider: a, Source: "test", Windows: []quota.Window{{Name: "5h", Used: 85}}}
 	}
 	return out
 }
+
+// RefreshQuotas is the background read a page starts; the stub is already
+// read, so there is nothing to fetch.
+func (backend) RefreshQuotas([]string) {}
 
 type site struct {
 	t   *testing.T

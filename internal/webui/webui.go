@@ -10,7 +10,6 @@ package webui
 
 import (
 	"cmp"
-	"context"
 	"embed"
 	"errors"
 	"fmt"
@@ -44,7 +43,8 @@ type Backend interface {
 	Config() *config.Config
 	Reload(*config.Config)
 	Usage(days int) []gateway.UsageRow
-	Quotas(ctx context.Context, accounts []string) []quota.Quota
+	QuotasNow(accounts []string) []quota.Quota
+	RefreshQuotas(accounts []string)
 	Forget(account string)
 }
 
@@ -282,14 +282,16 @@ type accountView struct {
 	Err                string
 	NoSource           bool
 	NoQuota            bool
+	Pending            bool // the first reading of this account is under way
 }
 
 func (c *call) accounts() {
 	cfg := c.u.b.Config()
 	names := cfg.AccountNames()
-	ctx, cancel := context.WithTimeout(c.r.Context(), 20*time.Second)
-	defer cancel()
-	qs := c.u.b.Quotas(ctx, names)
+	// What was read last answers the page at once; a vendor is asked in the
+	// background, so a slow one cannot hold the page for its timeout.
+	qs := c.u.b.QuotasNow(names)
+	c.u.b.RefreshQuotas(names)
 	act := activities(c.u.b.Usage(activityDays), func(r gateway.UsageRow) string { return r.Account })
 	views := make([]accountView, len(names))
 	for i, n := range names {
@@ -304,6 +306,7 @@ func (c *call) accounts() {
 				Label: amount + " " + q.Currency}
 		}
 		views[i].NoQuota = views[i].Err == "" && !q.NoSource && len(views[i].Meters) == 0 && views[i].Balance == nil
+		views[i].Pending = q.Provider == "" && q.Error == "" && q.Source == ""
 	}
 	type vendorOpt struct {
 		ID, Name string

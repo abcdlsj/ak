@@ -63,6 +63,32 @@ func (s *Server) Quotas(ctx context.Context, accounts []string) []quota.Quota {
 	return out
 }
 
+// QuotasNow answers what was read last, without waiting for a vendor: an
+// account with no reading yet gets a zero Quota. A page shows these at once
+// and asks for the rest in the background.
+func (s *Server) QuotasNow(accounts []string) []quota.Quota {
+	out := make([]quota.Quota, len(accounts))
+	for i, a := range accounts {
+		s.readings.mu.Lock()
+		got, ok := s.readings.m[a]
+		s.readings.mu.Unlock()
+		if ok {
+			out[i] = got.q
+		}
+	}
+	return out
+}
+
+// RefreshQuotas reads the accounts' quota in the background, for a page that
+// has already answered with what it had.
+func (s *Server) RefreshQuotas(accounts []string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		s.Quotas(ctx, accounts)
+	}()
+}
+
 // Forget drops the cached reading of an account, as after it signs in again.
 func (s *Server) Forget(account string) {
 	s.readings.mu.Lock()

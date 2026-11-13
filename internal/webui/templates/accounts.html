@@ -14,6 +14,7 @@
   </div>
   <p class="sub">{{.Vendor}}{{with .User}} · {{.}}{{end}}{{with .Users}} · {{join . ", "}}{{end}}</p>
   {{with .Err}}<p class="bad">✗ {{.}}</p>{{end}}
+  {{if .Pending}}<p class="note">reading…</p>{{end}}
   {{range .Meters}}{{template "meter" .}}{{end}}
   {{with .Balance}}{{template "amount" .}}{{end}}
   {{if .Meters}}{{else if .NoQuota}}<p class="note">the vendor reported nothing to show</p>{{end}}
