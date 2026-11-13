@@ -13,10 +13,10 @@
 {{if .Signed}}<header class="top">
   <a class="brand" href="/ui/accounts" aria-label="AK"><img class="logo" src="/ui/static/icon.svg" alt="" width="21" height="21"></a>
   <nav>
-    <a href="/ui/accounts"{{if eq .Page "accounts" "device"}} class="on"{{end}}>Accounts</a>
-    <a href="/ui/routes"{{if eq .Page "routes"}} class="on"{{end}}>Routes</a>
-    <a href="/ui/tokens"{{if eq .Page "tokens"}} class="on"{{end}}>Tokens</a>
-    <a href="/ui/usage"{{if eq .Page "usage"}} class="on"{{end}}>Usage</a>
+    <a href="/ui/accounts"{{if eq .Page "accounts" "device"}} class="on" aria-current="page"{{end}}>Accounts</a>
+    <a href="/ui/routes"{{if eq .Page "routes"}} class="on" aria-current="page"{{end}}>Routes</a>
+    <a href="/ui/tokens"{{if eq .Page "tokens"}} class="on" aria-current="page"{{end}}>Tokens</a>
+    <a href="/ui/usage"{{if eq .Page "usage"}} class="on" aria-current="page"{{end}}>Usage</a>
   </nav>
   <form method="post" action="/ui/logout" class="logout">
     <input type="hidden" name="csrf" value="{{.CSRF}}">

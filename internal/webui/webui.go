@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,7 +73,13 @@ func New(b Backend) *UI {
 	funcs := template.FuncMap{
 		"join": strings.Join, "num": number, "human": humanize, "pix": pix,
 		"contains": func(list []string, s string) bool { return slices.Contains(list, s) },
-		"title":    func(s string) string { return strings.ToUpper(s[:1]) + s[1:] },
+		"plural": func(n int, one, many string) string {
+			if n == 1 {
+				return "1 " + one
+			}
+			return strconv.Itoa(n) + " " + many
+		},
+		"title": func(s string) string { return strings.ToUpper(s[:1]) + s[1:] },
 	}
 	for _, p := range []string{"login", "setup", "accounts", "device", "routes", "tokens", "usage"} {
 		u.pages[p] = template.Must(template.New("layout.html").Funcs(funcs).ParseFS(templateFS,

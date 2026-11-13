@@ -108,7 +108,7 @@ form.logout { margin: 0 }
 .page-head .tabs { margin-top: .35rem }
 
 /* A section heading with a rule to the right, as the TUI draws it. */
-h1 { font-size: 1.5rem; font-weight: 550; letter-spacing: -.005em; margin: 0 0 .3rem }
+h1 { font-size: 1.65rem; font-weight: 550; letter-spacing: -.01em; margin: 0 0 .25rem }
 /* The nav already names the page; the heading stays for a screen reader. */
 .sr-only {
   position: absolute;

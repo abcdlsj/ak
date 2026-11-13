@@ -1,5 +1,5 @@
 {{define "content"}}
-<h1 class="sr-only">Accounts</h1>
+<h1>{{plural (len .Accounts) "account" "accounts"}}</h1>
 <p class="lede">Every plan and balance, one card each.</p>
 
 {{if .Accounts}}
