@@ -380,6 +380,36 @@ func activities(rows []gateway.UsageRow, pick func(gateway.UsageRow) string) map
 	return out
 }
 
+// latencyView is one route's recent timings as a page shows them.
+type latencyView struct {
+	Route            string
+	Requests         string
+	First50, First95 string
+	Total50, Total95 string
+}
+
+// latencyRows turns the service's timings into the Usage page's table.
+func latencyRows(rows []gateway.LatencyRow) []latencyView {
+	out := make([]latencyView, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, latencyView{Route: r.Route, Requests: number(int64(r.Requests)),
+			First50: shortTime(r.First50), First95: shortTime(r.First95),
+			Total50: shortTime(r.Total50), Total95: shortTime(r.Total95)})
+	}
+	return out
+}
+
+// shortTime writes a duration the way an operator reads it: 420ms, 3.2s.
+func shortTime(d time.Duration) string {
+	switch {
+	case d <= 0:
+		return "-"
+	case d < time.Second:
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
 // barWidth is how full a row's bar is, against the largest row.
 func barWidth(v, most int64) int {
 	if most <= 0 || v <= 0 {

@@ -245,6 +245,7 @@ func (s *Server) ServiceHandler() http.Handler {
 	mux.HandleFunc("GET /v1/models", s.handleModels)
 	mux.HandleFunc("GET /ak/v1/usage", s.handleUsage)
 	mux.HandleFunc("GET /ak/v1/quota", s.handleQuota)
+	mux.HandleFunc("GET /ak/v1/stats", s.handleLatency)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}` + "\n"))
@@ -267,6 +268,7 @@ func apiError(w http.ResponseWriter, proto translate.Protocol, status int, msg s
 // and relay to the route's members.
 func (s *Server) handleModel(proto translate.Protocol, count bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
 		cfg := s.config()
 		who, tok, ok := caller(cfg, r)
 		if !ok {
@@ -328,6 +330,13 @@ func (s *Server) handleModel(proto translate.Protocol, count bool) http.HandlerF
 		if count {
 			return // a token count is not a request to bill
 		}
+		// What the agent waited for, and what the whole request took: the
+		// numbers a slow vendor shows up in first.
+		first := t.first
+		if first.IsZero() {
+			first = time.Now()
+		}
+		s.lat.add(name, first.Sub(started), time.Since(started))
 		acct, _, _ := strings.Cut(member, "/")
 		row := UsageRow{Day: time.Now().Format(time.DateOnly), Token: who, Route: name,
 			Account: acct, Model: models[member], Requests: 1, Tokens: t.done()}
@@ -505,6 +514,29 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		days = 7
 	}
 	writeJSON(w, map[string]any{"days": days, "token": who, "rows": s.meter.since(days, who)})
+}
+
+// handleLatency serves GET /ak/v1/stats: each route's recent first-byte and
+// whole-request timings, which is where a slow vendor shows up first.
+func (s *Server) handleLatency(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := caller(s.config(), r); !ok {
+		apiError(w, translate.Chat, http.StatusUnauthorized, "ak: no valid token")
+		return
+	}
+	type row struct {
+		Route    string           `json:"route"`
+		Requests int              `json:"requests"`
+		First    map[string]int64 `json:"first_ms"`
+		Total    map[string]int64 `json:"total_ms"`
+	}
+	rows := s.Latencies()
+	out := make([]row, 0, len(rows))
+	for _, l := range rows {
+		out = append(out, row{Route: l.Route, Requests: l.Requests,
+			First: map[string]int64{"p50": l.First50.Milliseconds(), "p95": l.First95.Milliseconds()},
+			Total: map[string]int64{"p50": l.Total50.Milliseconds(), "p95": l.Total95.Milliseconds()}})
+	}
+	writeJSON(w, map[string]any{"routes": out})
 }
 
 // Usage is every token's usage over the last days days, for the web UI.

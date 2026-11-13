@@ -125,6 +125,9 @@ type Server struct {
 	svcAffinityPath string
 	meter           *meter
 	readings        readings
+	// lat holds the service's recent timings per route.
+	lat *latencies
+
 	// UI, when set, is served by the service under /ui/.
 	UI http.Handler
 }
@@ -148,6 +151,7 @@ func New(cfg *config.Config) *Server {
 		quotaKick:  make(chan struct{}, 1),
 		sst:        newState(),
 		readings:   readings{m: map[string]reading{}},
+		lat:        newLatencies(),
 	}
 	s.cfg.Store(cfg)
 	s.svc.Store(routing(cfg))

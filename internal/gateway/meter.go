@@ -161,6 +161,9 @@ func (m *meter) save() {
 type tap struct {
 	http.ResponseWriter
 	status int
+	// first is when the client saw the first byte of the body, which is
+	// what an agent waits for before it can start.
+	first  time.Time
 	stream bool
 	head   []byte // a stream's incomplete event, or the start of a plain body
 	tokens Tokens
@@ -182,6 +185,9 @@ func (t *tap) WriteHeader(code int) {
 func (t *tap) Write(b []byte) (int, error) {
 	if t.status == 0 {
 		t.WriteHeader(http.StatusOK)
+	}
+	if t.first.IsZero() {
+		t.first = time.Now()
 	}
 	n, err := t.ResponseWriter.Write(b)
 	if t.stream {

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/gateway"
@@ -30,6 +31,13 @@ func (backend) QuotasNow(accounts []string) []quota.Quota {
 // RefreshQuotas is the background read a page starts; the stub is already
 // read, so there is nothing to fetch.
 func (backend) RefreshQuotas([]string) {}
+
+// Latencies is what the Usage page's latency table shows.
+func (backend) Latencies() []gateway.LatencyRow {
+	return []gateway.LatencyRow{{Route: "main", Requests: 12,
+		First50: 420 * time.Millisecond, First95: 1800 * time.Millisecond,
+		Total50: 3 * time.Second, Total95: 9 * time.Second}}
+}
 
 type site struct {
 	t   *testing.T

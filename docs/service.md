@@ -100,6 +100,7 @@ On `service.addr`:
 | `GET /v1/models` | token | the model names the token may use; Anthropic's shape when `anthropic-version` is sent |
 | `GET /ak/v1/quota` | token | the quota readings of the accounts the token may use |
 | `GET /ak/v1/usage?days=7` | token | the token's own usage by day, route and account |
+| `GET /ak/v1/stats` | token | each route's recent first-byte and whole-request p50 and p95 |
 | `GET /healthz` | none | `{"status":"ok"}`, nothing more |
 | `/ui/…` | admin session | the web UI |
 
@@ -201,7 +202,8 @@ favicon and the header's; the login page is that mark above a quiet card.
   column a week, the months above, four shades by quantile, the year's total
   in the pixel font and the peak day named; then requests and tokens by
   token, account and route over 7 or 30 days, each row with a bar against
-  the largest.
+  the largest; and what a route's callers waited for, the first byte and the
+  whole request, p50 and p95 over its last 256 requests.
 
 A page shows what there is first: adding an account, a route or a token is
 behind a `+` at the bottom, so the cards and tables have the page to

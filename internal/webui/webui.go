@@ -45,6 +45,7 @@ type Backend interface {
 	Usage(days int) []gateway.UsageRow
 	QuotasNow(accounts []string) []quota.Quota
 	RefreshQuotas(accounts []string)
+	Latencies() []gateway.LatencyRow
 	Forget(account string)
 }
 
@@ -584,8 +585,9 @@ func (c *call) usage() {
 	}
 	totals := totalsOf(rows)
 	c.u.render(c.w, "usage", map[string]any{
-		"Days": days,
-		"Heat": buildHeatYear(c.u.b.Usage(usageYear), c.u.now()),
+		"Days":    days,
+		"Heat":    buildHeatYear(c.u.b.Usage(usageYear), c.u.now()),
+		"Latency": latencyRows(c.u.b.Latencies()),
 		"Tiles": []tileView{
 			tile("Requests", totals.Requests, ""),
 			tile("Failed", totals.Failed, ""),

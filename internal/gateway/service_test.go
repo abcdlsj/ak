@@ -283,6 +283,19 @@ func TestServiceTranslatedError(t *testing.T) {
 	}
 }
 
+// The service keeps what a route's callers waited for, and says so.
+func TestServiceLatency(t *testing.T) {
+	r := newRig(t, nil)
+	r.do(t, "/v1/messages", withModel(t, "claude_request.json", "dsk", false))
+	rows := r.srv.Latencies()
+	if len(rows) != 1 || rows[0].Route != "dsk" || rows[0].Requests != 1 {
+		t.Fatalf("latency rows = %+v", rows)
+	}
+	if rows[0].First95 <= 0 || rows[0].Total95 < rows[0].First95 {
+		t.Errorf("first byte %+v, total %+v", rows[0].First95, rows[0].Total95)
+	}
+}
+
 func TestServicePoolAndAlias(t *testing.T) {
 	r := newRig(t, func(c *config.Config) {
 		c.Service.Routes = map[string]config.Route{

@@ -35,6 +35,18 @@
   </div>
 </div>
 
+{{with .Latency}}
+<h2>Latency<span class="h2-note">the last 256 requests a route</span></h2>
+<table class="grid">
+  <thead><tr><th>route</th><th class="right">requests</th><th class="right">first byte p50</th><th class="right">p95</th><th class="right">total p50</th><th class="right">p95</th></tr></thead>
+  <tbody>
+  {{range .}}
+  <tr><td><b class="mono">{{.Route}}</b></td><td class="right mono">{{.Requests}}</td><td class="right mono">{{.First50}}</td><td class="right mono">{{.First95}}</td><td class="right mono">{{.Total50}}</td><td class="right mono">{{.Total95}}</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+
 {{range .Tables}}
 <h2>{{.Title}}</h2>
 {{if .Groups}}
