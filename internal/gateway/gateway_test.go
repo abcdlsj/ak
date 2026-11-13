@@ -145,8 +145,10 @@ func TestExhausted(t *testing.T) {
 	}, []string{"a"})
 
 	rec := post(New(cfg).Handler(), "/p/pool/v1/messages", `{"model":"m"}`)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502", rec.Code)
+	// The member's own 503 is what the caller sees; a 502 would say nothing
+	// of who is out or when it is back.
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "a:") {
 		t.Errorf("the exhausted body does not name the member: %s", rec.Body)

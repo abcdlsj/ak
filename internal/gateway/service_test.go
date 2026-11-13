@@ -276,8 +276,10 @@ func TestServiceTranslatedError(t *testing.T) {
 	r := newRig(t, nil)
 	r.chat.status = http.StatusTooManyRequests
 	rec := r.do(t, "/v1/messages", withModel(t, "claude_request.json", "dsk", false))
-	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), `"type":"error"`) {
-		t.Errorf("a failing upstream answered %d %s", rec.Code, rec.Body)
+	// A rate limit reaches the agent as one, in its own protocol, so it can
+	// back off instead of treating a 502 as a broken server.
+	if rec.Code != http.StatusTooManyRequests || !strings.Contains(rec.Body.String(), `"type":"error"`) {
+		t.Errorf("a rate-limited upstream answered %d %s", rec.Code, rec.Body)
 	}
 }
 

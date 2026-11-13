@@ -182,19 +182,32 @@ func TestHeaderWait(t *testing.T) {
 	}
 }
 
-// A gzipped event stream is decompressed before it is inspected, so an error
-// that opens it still fails over.
-func TestGzippedStreamIsInspected(t *testing.T) {
-	setRetries(t, 0)
-	var sawGzip atomic.Bool
+// A stream asks an upstream not to compress it: an event is small, and the
+// decompressor would be another buffer between the token and the agent.
+func TestStreamAsksForIdentity(t *testing.T) {
+	var got atomic.Value
 	a := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			w.Header().Set("Content-Type", "text/event-stream")
-			io.WriteString(w, sse(`data: {"type":"error","error":{"message":"overloaded"}}`))
-			return
-		}
-		sawGzip.Store(true)
+		got.Store(r.Header.Get("Accept-Encoding"))
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, sse(`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}`))
+	}))
+	t.Cleanup(a.Close)
+
+	req := httptest.NewRequest(http.MethodPost, "/p/pool/v1/messages", strings.NewReader(`{"model":"m","stream":true}`))
+	req.Header.Set("Accept-Encoding", "gzip, br")
+	New(twoMemberPool(a.URL, a.URL, config.StrategyOrder)).Handler().ServeHTTP(httptest.NewRecorder(), req)
+	if enc, _ := got.Load().(string); enc != "identity" {
+		t.Errorf("a stream offered %q, want identity", enc)
+	}
+}
+
+// An upstream that compresses a stream anyway is decompressed before the
+// stream is inspected, so an error that opens it still fails over.
+func TestGzippedStreamIsInspected(t *testing.T) {
+	setRetries(t, 0)
+	a := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Content-Encoding", "gzip")
 		zw := gzip.NewWriter(w)
@@ -205,12 +218,8 @@ func TestGzippedStreamIsInspected(t *testing.T) {
 	b := sseServer(t, sse(`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"from b"}}`))
 
 	req := httptest.NewRequest(http.MethodPost, "/p/pool/v1/messages", strings.NewReader(`{"model":"m","stream":true}`))
-	req.Header.Set("Accept-Encoding", "gzip, br")
 	rec := httptest.NewRecorder()
 	New(twoMemberPool(a.URL, b.URL, config.StrategyOrder)).Handler().ServeHTTP(rec, req)
-	if !sawGzip.Load() {
-		t.Fatal("upstream was not offered gzip")
-	}
 	if !strings.Contains(rec.Body.String(), "from b") {
 		t.Errorf("body = %q, want b's stream", rec.Body)
 	}

@@ -11,6 +11,7 @@ package gateway
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -131,6 +132,11 @@ type Server struct {
 func New(cfg *config.Config) *Server {
 	tr, _ := http.DefaultTransport.(*http.Transport)
 	t := tr.Clone()
+	// An agent fires several requests at one vendor at once; the default of
+	// two idle connections per host makes the rest pay a TCP and TLS
+	// handshake every time.
+	t.MaxIdleConns = 128
+	t.MaxIdleConnsPerHost = 32
 	s := &Server{
 		res:    secrets.Cached(secrets.Default()),
 		client: &http.Client{Transport: t, CheckRedirect: sameHost},
@@ -372,7 +378,10 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		}
 		return leg{member: rt.member, p: mp, target: target, body: out}, nil
 	}
-	s.relay(w, r, s.st, name, routes, conv, build, func(status int, msg string) {
+	s.relay(w, r, s.st, name, routes, conv, build, func(status int, retryAfter time.Duration, msg string) {
+		if retryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
+		}
 		http.Error(w, "ak: pool "+name+msg, status)
 	})
 }
@@ -405,9 +414,13 @@ type replyWriter interface {
 // When none answers, fail is told the status and the reason, which starts
 // with ": " or " ". It returns the member that answered, or "".
 func (s *Server) relay(w http.ResponseWriter, r *http.Request, st *state, name string, routes []route,
-	conv string, build func(route) (leg, error), fail func(status int, msg string)) string {
+	conv string, build func(route) (leg, error), fail func(status int, retryAfter time.Duration, msg string)) string {
 	var lastErr string
 	var tried []string
+	// lastStatus and lastRetryAfter are the last answer a member gave, so a
+	// rate limit reaches the agent as a rate limit with its Retry-After,
+	// not as a gateway error it cannot back off from.
+	lastStatus, lastRetryAfter := 0, time.Duration(0)
 	unbuilt := 0
 	for i, rt := range routes {
 		lg, err := build(rt)
@@ -483,10 +496,13 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request, st *state, name s
 			// Nothing was written and no other member can help (a request
 			// that already took the member past its wait): tell the caller
 			// instead of an empty 200.
-			fail(http.StatusGatewayTimeout, ": "+res.err.Error())
+			fail(http.StatusGatewayTimeout, res.retryAfter, ": "+res.err.Error())
 			return ""
 		}
 		lastErr = res.err.Error()
+		if res.status >= 400 {
+			lastStatus, lastRetryAfter = res.status, res.retryAfter
+		}
 		if len(tried) < 8 {
 			tried = append(tried, m+": "+lastErr)
 		}
@@ -501,9 +517,29 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request, st *state, name s
 	status := http.StatusBadGateway
 	if unbuilt == len(routes) {
 		status = http.StatusBadRequest
+	} else if passThrough(lastStatus) {
+		status = lastStatus
 	}
-	fail(status, " exhausted its members: "+lastErr+"\n  "+strings.Join(tried, "\n  "))
+	fail(status, lastRetryAfter, " exhausted its members: "+lastErr+"\n  "+strings.Join(tried, "\n  "))
 	return ""
+}
+
+// readCloser closes the body underneath a decompressor with it.
+type readCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// passThrough reports whether a member's own status is the one to answer
+// with when every member failed: a rate limit or a spent plan says when to
+// come back, which a 502 does not.
+func passThrough(status int) bool {
+	switch status {
+	case http.StatusPaymentRequired, http.StatusTooManyRequests,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
 }
 
 // readBody reads and bounds the request body. It writes the error itself and
@@ -575,7 +611,13 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, lg leg) forward
 	copyHeaders(req.Header, r.Header)
 	// Let the transport negotiate compression itself, so it decompresses the
 	// reply: a gzipped event stream or error body could not be inspected.
+	// A stream is the exception: compressing it buys nothing at the size of
+	// an event, and the decompressor is another buffer between the token and
+	// the agent.
 	req.Header.Del("Accept-Encoding")
+	if stream {
+		req.Header.Set("Accept-Encoding", "identity")
+	}
 	setAuth(req.Header, mp, key)
 	if lg.header != nil {
 		lg.header(req.Header)
@@ -596,6 +638,18 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, lg leg) forward
 		return forwardOutcome{retryable: true, err: err}
 	}
 	defer resp.Body.Close()
+
+	// A stream asked for identity, so an upstream that gzips anyway was not
+	// read by the transport: decompress it here, so the head of a stream can
+	// still be inspected before it is committed.
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Encoding")), "gzip") {
+		if zr, err := gzip.NewReader(resp.Body); err == nil {
+			resp.Body = readCloser{zr, resp.Body}
+			resp.Header.Del("Content-Encoding")
+			resp.Header.Del("Content-Length")
+			resp.ContentLength = -1
+		}
+	}
 
 	code := resp.StatusCode
 	if isRetryableStatus(code) {
@@ -821,6 +875,9 @@ func streamSSE(w http.ResponseWriter, resp *http.Response) forwardOutcome {
 				}
 				if content || len(head) >= streamHead {
 					copyHeaders(w.Header(), resp.Header)
+					w.Header().Set("Cache-Control", "no-cache")
+					// nginx buffers a proxied response unless told not to.
+					w.Header().Set("X-Accel-Buffering", "no")
 					w.WriteHeader(resp.StatusCode)
 					if _, werr := w.Write(head); werr != nil {
 						return forwardOutcome{handled: true, err: fmt.Errorf("%w: %v", errClientWrite, werr)}

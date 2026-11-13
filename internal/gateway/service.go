@@ -319,7 +319,10 @@ func (s *Server) handleModel(proto translate.Protocol, count bool) http.HandlerF
 			return lg, err
 		}
 		t := newTap(w)
-		member := s.relay(t, r, s.sst, final, routes, conv, build, func(status int, msg string) {
+		member := s.relay(t, r, s.sst, final, routes, conv, build, func(status int, retryAfter time.Duration, msg string) {
+			if retryAfter > 0 {
+				t.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
+			}
 			apiError(t, proto, status, "ak: "+name+msg)
 		})
 		if count {

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -249,7 +250,9 @@ func (u reportedUsage) tokens() (Tokens, bool) {
 // read folds the usage one event or body reports into what was seen. Each
 // count is the largest reported: streams repeat or grow them.
 func (t *tap) read(data []byte) {
-	if len(data) == 0 || data[0] != '{' {
+	// A stream's events are many and small; only the one or two that count
+	// tokens carry a usage object, so the rest are skipped by a scan.
+	if len(data) == 0 || data[0] != '{' || !bytes.Contains(data, []byte("usage")) {
 		return
 	}
 	var v struct {
