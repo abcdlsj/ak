@@ -147,7 +147,8 @@ func runDoctor(cfg *config.Config) error {
 		d.details(names)
 		d.note("Session logs record only the id, so ak cannot tell the two apart and")
 		d.note("`ak usage` reports the id itself instead of the provider.")
-		d.hint("Give each provider its own id in providers.toml, then run `ak sync`")
+		d.hint("Drop their provider_id: a provider's own name is already unique.")
+		d.hint("Then run `ak sync`.")
 	}
 
 	// 8. Keys ak does not know are ignored, usually a misspelt field.

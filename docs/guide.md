@@ -299,7 +299,9 @@ sessions ak did not name, such as a fork. Codex
 sessions are attributed by their `provider_id`. An id that the base
 `~/.codex/config.toml` also declares is left alone and reported under the id
 itself, because a log holding nothing but that id cannot say which provider
-ran it; `ak doctor` names the collision. Cost comes from models.dev; models it
+ran it; `ak doctor` names the collision, and dropping the provider's
+`provider_id` clears it — the provider's own name is already unique and is
+what codex falls back to. Cost comes from models.dev; models it
 does not know are reported as unpriced rather than billed as zero. Usage that
 is not an ak provider's (an engine's own login, another tool's provider id)
 is listed apart, under "not in ak"; `--ak-only` leaves it out.
