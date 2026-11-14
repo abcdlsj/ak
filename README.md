@@ -80,7 +80,7 @@ ak which                        what they run on here, and why
 ak acp <engine>                 that engine's ACP server on the provider here
 ak serve                        the pool gateway; with service.addr, the service for other machines
 ak serve token add|list|revoke  the service's tokens, one per machine
-ak remote add <name> <url>      use an ak service as a vendor and account
+ak remote add <name> <url>      use an ak service as a vendor and account; --model sets the providers up too
 ak install / uninstall          set up the shell for the above (zsh, bash, fish)
 ak doctor                       anything that would make a launch misroute
 ak-<name> [args...]             the same as ak <name>, for scripts

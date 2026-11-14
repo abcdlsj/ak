@@ -58,7 +58,8 @@ func TestOnAccount(t *testing.T) {
 func TestValidateServiceOK(t *testing.T) {
 	cfg := serviceCfg(t)
 	cfg.Service = Service{
-		Addr: "127.0.0.1:8787",
+		Addr:      "127.0.0.1:8787",
+		PublicURL: "https://ak.example.com",
 		Routes: map[string]Route{
 			"main": {Members: []string{"opendesign/deepseek-v4-pro", "command-code", "fast"}, Strategy: StrategySmart},
 			"fast": {Model: "command-code/deepseek/deepseek-v4.1-flash"},
@@ -74,6 +75,8 @@ func TestValidateServiceOK(t *testing.T) {
 func TestValidateServiceErrors(t *testing.T) {
 	cases := map[string]Service{
 		"bad addr":         {Addr: "8787"},
+		"bad public url":   {PublicURL: "ak.example.com"},
+		"public url query": {PublicURL: "https://ak.example.com/?x=1"},
 		"route an account": {Routes: map[string]Route{"kimi": {Model: "command-code"}}},
 		"neither":          {Routes: map[string]Route{"x": {}}},
 		"both":             {Routes: map[string]Route{"x": {Model: "kimi", Members: []string{"kimi"}}}},
@@ -105,9 +108,10 @@ func TestServiceRoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cfg := serviceCfg(t)
 	cfg.Service = Service{
-		Addr:   "127.0.0.1:8787",
-		Routes: map[string]Route{"main": {Members: []string{"kimi", "command-code"}, Strategy: StrategyOrder}},
-		Tokens: map[string]Token{"laptop": {Hash: hash, Created: time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)}},
+		Addr:      "127.0.0.1:8787",
+		PublicURL: "https://ak.example.com",
+		Routes:    map[string]Route{"main": {Members: []string{"kimi", "command-code"}, Strategy: StrategyOrder}},
+		Tokens:    map[string]Token{"laptop": {Hash: hash, Created: time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)}},
 	}
 	if err := Save(cfg); err != nil {
 		t.Fatal(err)
@@ -116,7 +120,7 @@ func TestServiceRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Service.Addr != cfg.Service.Addr || len(got.Service.Routes["main"].Members) != 2 ||
+	if got.Service.Addr != cfg.Service.Addr || got.Service.PublicURL != cfg.Service.PublicURL || len(got.Service.Routes["main"].Members) != 2 ||
 		got.Service.Tokens["laptop"].Hash != hash || !got.Service.Tokens["laptop"].Created.Equal(cfg.Service.Tokens["laptop"].Created) {
 		t.Errorf("service did not round-trip: %+v", got.Service)
 	}

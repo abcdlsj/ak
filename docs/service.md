@@ -63,6 +63,7 @@ Everything the service adds is under `[service]` in `providers.toml`, so
 ```toml
 [service]
 addr = "127.0.0.1:8787"            # where the service listens; behind Caddy or nginx
+public_url = "https://ak.example.com"  # where other machines reach it, so a token prints its `ak remote add` line
 admin_password = "$2a$12$..."      # bcrypt, set by `ak serve admin set-password`
 
 [service.routes.main]              # a pool
@@ -173,6 +174,13 @@ its SHA-256 is stored; the comparison hashes what was sent and looks the
 hash up, so a token's characters are never compared one by one. Revoking
 takes effect on the next request: the config reload drops it.
 
+With `service.public_url` set, `ak serve token add` also prints the line that
+sets a machine up, the token in it, so it is one copy and one paste:
+
+```
+ak remote add laptop https://ak.example.com --token ak_...
+```
+
 `ak serve` refuses to start the service on an address that is not loopback
 while no token is defined, and a request without a known token gets 401.
 
@@ -223,19 +231,28 @@ accepted on `/v1/` or `/ak/v1/`.
 ## Clients
 
 ```
-ak remote add home https://ak.example.com --token -
-ak add --account home --kind claude --model main     # claude on the pool main
-ak add --account home --kind codex --model bili      # codex on bili's default
-ak quota                                             # home's accounts among the rest
+ak remote add home https://ak.example.com --token - --model main
+ak home-claude          # or: ak add --account home --kind claude --model main
+ak quota                # home's accounts among the rest
 ```
 
 `ak remote add` checks the server answers `/v1/models` with the token, then
 writes the vendor `vendors.d/home.toml` (claude and pi at the URL on
 Anthropic Messages, codex at `<url>/v1` on Responses, `quota = "ak"`) and the
-account `home` on it with the token as its key. The vendor has no default
-model, so a provider on it names its route with `--model`. Everything after that is ak's usual flow: providers, bindings, the
-launcher. `ak remote list` lists them, `ak remote rm home` removes the
-vendor and the account once no provider runs on it.
+account `home` on it with the token as its key. It lists the model names the
+token may use, each with whether claude, codex and pi reach it natively or by
+translation, so a route name is picked from that list rather than remembered.
+
+The vendor has no default model, so a provider on it names its route with
+`--model`. Given `--model`, `ak remote add` also puts a provider on the
+account for every engine, all on that name, so one command sets a machine up;
+`--kind claude --kind codex` narrows it. A name the service does not list is
+taken too, with a hint, because `<account>/<model>` names any model there.
+The token is needed once: a remote already registered reuses the key it kept,
+so `ak remote add home https://ak.example.com --model main` is enough after
+the first time. Everything after that is ak's usual flow: providers,
+bindings, the launcher. `ak remote list` lists them, `ak remote rm home`
+removes the vendor and the account once no provider runs on it.
 
 The quota source `ak` asks `/ak/v1/quota`, and `ak quota` and
 `ak quota board` show each of the server's accounts as `home/<account>`.
@@ -273,16 +290,15 @@ On the server:
 ```sh
 ak login command-code --key -            # each subscription, as on a laptop
 ak serve admin set-password
-ak serve token add laptop                # prints the token once
-# providers.toml: [service] addr = "127.0.0.1:8787", routes as above
+ak serve token add laptop                # prints the token, and the `ak remote add` line
+# providers.toml: [service] addr = "127.0.0.1:8787", public_url = "https://ak.example.com", routes as above
 systemctl enable --now ak                # deploy/ak.service
 ```
 
 On each machine:
 
 ```sh
-ak remote add home https://ak.example.com --token -
-ak add --account home --kind claude --model main
+ak remote add home https://ak.example.com --token - --model main
 ```
 
 Any other tool takes `https://ak.example.com` (Anthropic) or
@@ -338,7 +354,7 @@ message rather than failing to parse it.
 ## Implementation plan
 
 Each step is one commit, with `gofmt`, `go vet` and `go test` green. All
-nine are done.
+ten are done.
 
 1. This document.
 2. `internal/translate` over bifrost, tests for every pair, plain and
@@ -361,3 +377,7 @@ nine are done.
 8. The web UI: login, sessions, CSRF, rate limit; Accounts, Routes, Tokens,
    Usage. Tests for the security rules and each form.
 9. `deploy/` (systemd unit, Dockerfile, Caddyfile) and README.
+10. Clients, the short way: `[service] public_url`, so `ak serve token add`
+    prints its `ak remote add` line ready to paste; `ak remote add` lists the
+    model names and, given `--model`, puts a provider on the account for each
+    engine, reusing the token it kept.

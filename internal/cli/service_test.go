@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/gateway"
 )
 
@@ -28,6 +29,28 @@ func runRoot(t *testing.T, stdin string, args ...string) (string, error) {
 	var b bytes.Buffer
 	io.Copy(&b, r)
 	return b.String(), err
+}
+
+// runRootErr runs ak with stdin swapped and captures stdout and stderr.
+func runRootErr(t *testing.T, stdin string, args ...string) (string, string, error) {
+	t.Helper()
+	in, _ := os.CreateTemp(t.TempDir(), "in")
+	in.WriteString(stdin)
+	in.Seek(0, 0)
+	rOut, wOut, _ := os.Pipe()
+	rErr, wErr, _ := os.Pipe()
+	oldIn, oldOut, oldErr := os.Stdin, os.Stdout, os.Stderr
+	os.Stdin, os.Stdout, os.Stderr = in, wOut, wErr
+	root := newRoot()
+	root.SetArgs(args)
+	err := root.Execute()
+	wOut.Close()
+	wErr.Close()
+	os.Stdin, os.Stdout, os.Stderr = oldIn, oldOut, oldErr
+	var bo, be bytes.Buffer
+	io.Copy(&bo, rOut)
+	io.Copy(&be, rErr)
+	return bo.String(), be.String(), err
 }
 
 func TestServeTokens(t *testing.T) {
@@ -60,6 +83,37 @@ func TestServeTokens(t *testing.T) {
 	}
 	if cfg, _ := config.Load(); len(cfg.Service.Tokens) != 0 {
 		t.Error("revoke left the token")
+	}
+}
+
+// A service that knows its public URL prints the line that sets a machine up.
+func TestServeTokenPrintsRemoteAdd(t *testing.T) {
+	t.Setenv(config.DirEnv, t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := core.ChangeService(cfg, func(s *config.Service) { s.PublicURL = "https://ak.example.com/" }); err != nil {
+		t.Fatal(err)
+	}
+	tok, said, err := runRootErr(t, "", "serve", "token", "add", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok = strings.TrimSpace(tok)
+	if want := "ak remote add laptop https://ak.example.com --token " + tok; !strings.Contains(said, want) {
+		t.Fatalf("stderr = %q, want %q in it", said, want)
+	}
+	// With no public URL it says how to set one.
+	if err := core.ChangeService(cfg, func(s *config.Service) { s.PublicURL = "" }); err != nil {
+		t.Fatal(err)
+	}
+	if _, said, err = runRootErr(t, "", "serve", "token", "add", "phone"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(said, "service.public_url") {
+		t.Fatalf("stderr = %q, want the public_url hint", said)
 	}
 }
 

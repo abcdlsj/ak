@@ -52,6 +52,12 @@ token may use every one.`,
 			}
 			fmt.Println(tok)
 			out.Done(os.Stderr, "issued token %s; it is shown only this once", name)
+			if url := strings.TrimRight(cfg.Service.PublicURL, "/"); url != "" {
+				out.Hint(os.Stderr, "on the other machine, once ak is installed:")
+				fmt.Fprintf(os.Stderr, "  ak remote add %s %s --token %s\n", name, url, tok)
+			} else {
+				out.Hint(os.Stderr, "next: ak remote add <name> <url> --token -; set service.public_url to print that line ready to paste")
+			}
 			return nil
 		},
 	}

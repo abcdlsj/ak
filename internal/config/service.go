@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -18,6 +19,10 @@ type Service struct {
 	Addr string `toml:"addr,omitempty"`
 	// AdminPassword is the bcrypt hash of the web UI's password.
 	AdminPassword string `toml:"admin_password,omitempty"`
+	// PublicURL is where other machines reach the service, so that
+	// `ak serve token add` can print the `ak remote add` line ready to paste.
+	// Empty: it prints the token alone.
+	PublicURL string `toml:"public_url,omitempty"`
 	// Routes are the aliases and pools, by the model name that picks them.
 	Routes map[string]Route `toml:"routes,omitempty"`
 	// Tokens are the bearer tokens that may call the service, by name.
@@ -104,6 +109,11 @@ func validateService(cfg *Config) error {
 			return fmt.Errorf("service.addr %q: %w", s.Addr, err)
 		}
 	}
+	if s.PublicURL != "" {
+		if err := validatePublicURL(s.PublicURL); err != nil {
+			return err
+		}
+	}
 	for _, name := range s.RouteNames() {
 		if err := validateRoute(cfg, name); err != nil {
 			return err
@@ -113,6 +123,19 @@ func validateService(cfg *Config) error {
 		if err := validateToken(cfg, name, s.Tokens[name]); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validatePublicURL checks the address other machines reach the service at:
+// the base URL alone, http or https.
+func validatePublicURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return fmt.Errorf("service.public_url %q is no http(s) URL; give it as https://host[:port]", raw)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("service.public_url %q carries a query or fragment; give the base URL alone", raw)
 	}
 	return nil
 }
