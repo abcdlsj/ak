@@ -319,6 +319,49 @@ func TestServicePoolAndAlias(t *testing.T) {
 	}
 }
 
+// A conversation's row in the affinity table carries what the reply said about
+// the vendor's cache, which is what decides whether it stays there.
+func TestServiceNotesTheCacheOfAConversation(t *testing.T) {
+	r := newRig(t, func(c *config.Config) {
+		c.Service.Routes = map[string]config.Route{"main": {Members: []string{"bili/glm-5"}}}
+	})
+	if rec := r.do(t, "/v1/messages", withModel(t, "claude_request.json", "main", false),
+		"x-session-affinity", "conv-1"); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	e, ok := r.srv.sst.sticks[key("main", "h:conv-1")]
+	if !ok {
+		t.Fatal("the conversation was not recorded")
+	}
+	if e.member != "bili/glm-5" {
+		t.Errorf("member = %q, want bili/glm-5", e.member)
+	}
+	// The fixture reads 30 tokens from the cache and writes none.
+	if e.cache != 30 {
+		t.Errorf("cache = %d, want the reply's 30", e.cache)
+	}
+}
+
+// A reply that read too little of the vendor's cache does not pin the
+// conversation: the next request takes routing's next choice.
+func TestServiceAffinityLeavesAThinCache(t *testing.T) {
+	r := newRig(t, func(c *config.Config) {
+		c.Service.Routes = map[string]config.Route{
+			"spread": {Members: []string{"bili/glm-5", "kimi"}, Strategy: "rotate"},
+		}
+	})
+	body := withModel(t, "claude_request.json", "spread", false)
+	for i := 0; i < 2; i++ {
+		if rec := r.do(t, "/v1/messages", body, "x-session-affinity", "conv-1"); rec.Code != 200 {
+			t.Fatalf("request %d: %d %s", i, rec.Code, rec.Body)
+		}
+	}
+	if r.both.count() != 1 || r.anth.count() != 1 {
+		t.Errorf("a thin cache still pinned the conversation: bili %d, kimi %d; want one each",
+			r.both.count(), r.anth.count())
+	}
+}
+
 func TestServiceRefusals(t *testing.T) {
 	r := newRig(t, func(c *config.Config) {
 		c.Service.Routes = map[string]config.Route{"fast": {Model: "kimi"}}

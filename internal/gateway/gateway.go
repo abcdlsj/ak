@@ -80,11 +80,24 @@ var errHeaderWait = errors.New("no response headers in time")
 // was interrupted, which says nothing about the member.
 var errClientWrite = errors.New("client write failed")
 
-// Affinity bounds: how long a conversation's answerer is remembered, and how
-// many conversations are kept.
+// Affinity bounds: how long a conversation's answerer is remembered, how many
+// conversations are kept, and when staying there is worth it.
 const (
 	affinityTTL = 24 * time.Hour
 	affinityMax = 512
+	// affinityWarm is how long a conversation may sit idle before the vendor
+	// has let go of its prompt. Past it nothing cached is lost by moving, so
+	// the conversation is free to go where routing puts it. Anthropic and
+	// OpenAI both keep a prefix about five minutes.
+	affinityWarm = 5 * time.Minute
+	// affinityWorth is how many tokens an answer read from the vendor's cache
+	// or wrote to it to be worth keeping the conversation where it answered.
+	// Shorter conversations leave no cache worth reading again, so pinning
+	// them costs the strategy's choice and buys nothing.
+	affinityWorth = 1024
+	// cacheUnknown marks a conversation whose cache was never read: a pool's
+	// own gateway does not tap its replies, so it keeps as it always has.
+	cacheUnknown = -1
 )
 
 // Tunables, package variables so tests can shrink them.
@@ -1347,6 +1360,9 @@ type tokenUse struct {
 type stickEntry struct {
 	member string
 	at     time.Time
+	// cache is how many tokens the last answer read from the vendor's cache
+	// or wrote to it, or cacheUnknown when nobody read it.
+	cache int64
 }
 
 func newState() *state {
@@ -1511,11 +1527,36 @@ func (s *state) order(cfg *config.Config, top, name string, p config.Provider, m
 	return out
 }
 
-// stickOf is the member that answered a conversation, if it is still fresh.
-// The caller holds the lock.
+// noteCache records how much of the answer on member came from the vendor's
+// cache or went into it, which decides whether the conversation is worth
+// keeping there.
+func (s *state) noteCache(pool, member, conv string, cache int64) {
+	if conv == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.sticks[key(pool, conv)]
+	if !ok || e.member != member {
+		return
+	}
+	e.cache = cache
+	s.sticks[key(pool, conv)] = e
+	s.dirty = true
+}
+
+// stickOf is the member that answered a conversation, if keeping it there is
+// still worth what it costs to leave: the vendor has not let go of the prompt,
+// and what it cached of it is more than a name. The caller holds the lock.
 func (s *state) stickOf(pool, conv string, now time.Time) (string, bool) {
 	e, ok := s.sticks[key(pool, conv)]
 	if !ok || now.Sub(e.at) > affinityTTL {
+		return "", false
+	}
+	if now.Sub(e.at) > affinityWarm {
+		return "", false
+	}
+	if e.cache != cacheUnknown && e.cache < affinityWorth {
 		return "", false
 	}
 	return e.member, true
@@ -1562,7 +1603,9 @@ func (s *state) succeeded(pool, member, conv string) {
 	if conv == "" {
 		return
 	}
-	s.sticks[key(pool, conv)] = stickEntry{member: member, at: now}
+	// The cache this answer used is not known yet; noteCache says it once the
+	// reply has been read. A different member has none of it either way.
+	s.sticks[key(pool, conv)] = stickEntry{member: member, at: now, cache: cacheUnknown}
 	s.dirty = true
 	if len(s.sticks) > affinityMax {
 		s.evictSticks(now)
@@ -1605,6 +1648,9 @@ type savedStick struct {
 	Conv   string    `json:"conv"`
 	Member string    `json:"member"`
 	At     time.Time `json:"at"`
+	// Cache is absent for a table written before it was kept, which says
+	// nothing either way, and so keeps as an unread one does.
+	Cache *int64 `json:"cache,omitempty"`
 }
 
 // loadSticks reads the conversation table left by an earlier run, so a gateway
@@ -1629,7 +1675,11 @@ func (s *state) loadSticks(path string) {
 		if x.Pool == "" || x.Conv == "" || x.Member == "" || now.Sub(x.At) > affinityTTL {
 			continue
 		}
-		s.sticks[key(x.Pool, x.Conv)] = stickEntry{member: x.Member, at: x.At}
+		cache := int64(cacheUnknown)
+		if x.Cache != nil {
+			cache = *x.Cache
+		}
+		s.sticks[key(x.Pool, x.Conv)] = stickEntry{member: x.Member, at: x.At, cache: cache}
 	}
 	s.evictSticks(now)
 }
@@ -1653,7 +1703,12 @@ func (s *state) saveSticks(path string) {
 		if !ok {
 			continue
 		}
-		saved = append(saved, savedStick{Pool: pool, Conv: conv, Member: e.member, At: e.at})
+		x := savedStick{Pool: pool, Conv: conv, Member: e.member, At: e.at}
+		if e.cache != cacheUnknown {
+			cache := e.cache
+			x.Cache = &cache
+		}
+		saved = append(saved, x)
 	}
 	s.dirty = false
 	s.mu.Unlock()

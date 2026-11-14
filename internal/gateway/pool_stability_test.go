@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -269,10 +270,69 @@ func TestSticksPersist(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "affinity.json")
 	st := newState()
 	st.succeeded("pool", "a", "conv1")
+	st.noteCache("pool", "a", "conv1", 4096)
 	st.saveSticks(path)
 	other := newState()
 	other.loadSticks(path)
 	if m, ok := other.stickOf("pool", "conv1", time.Now()); !ok || m != "a" {
+		t.Errorf("stick = %q, %v; want a, true", m, ok)
+	}
+	if e := other.sticks[key("pool", "conv1")]; e.cache != 4096 {
+		t.Errorf("cache = %d, want 4096", e.cache)
+	}
+}
+
+// A table written before the cache was kept says nothing either way, so it
+// keeps the conversation as an unread one does.
+func TestSticksWithoutACacheKeep(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "affinity.json")
+	old := `[{"pool":"p","conv":"c","member":"a","at":"` + time.Now().UTC().Format(time.RFC3339Nano) + `"}]`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := newState()
+	st.loadSticks(path)
+	if m, ok := st.stickOf("p", "c", time.Now()); !ok || m != "a" {
+		t.Errorf("stick = %q, %v; want a, true", m, ok)
+	}
+}
+
+// A conversation stays where it is while the vendor's cache of it is worth
+// reading again, and is free to move when it is not.
+func TestAffinityKeepsOnlyACacheWorthKeeping(t *testing.T) {
+	st := newState()
+	st.succeeded("p", "a", "conv")
+	if m, ok := st.stickOf("p", "conv", time.Now()); !ok || m != "a" {
+		t.Fatalf("an unread cache did not keep: %q, %v", m, ok)
+	}
+	st.noteCache("p", "a", "conv", affinityWorth-1)
+	if m, ok := st.stickOf("p", "conv", time.Now()); ok {
+		t.Errorf("a cache of %d tokens kept the conversation on %q; want it free to move", affinityWorth-1, m)
+	}
+	st.noteCache("p", "a", "conv", affinityWorth)
+	if m, ok := st.stickOf("p", "conv", time.Now()); !ok || m != "a" {
+		t.Errorf("a cache of %d tokens did not keep it: %q, %v", affinityWorth, m, ok)
+	}
+}
+
+// Past the time a vendor keeps a prompt, the conversation goes where routing
+// puts it instead of where the cache once was.
+func TestAffinityLetsGoWhenCold(t *testing.T) {
+	st := newState()
+	st.succeeded("p", "a", "conv")
+	st.noteCache("p", "a", "conv", 64<<10)
+	if m, ok := st.stickOf("p", "conv", time.Now().Add(affinityWarm+time.Minute)); ok {
+		t.Errorf("a cold conversation stayed on %q", m)
+	}
+}
+
+// A cache noted for a member that did not answer the conversation says
+// nothing about it.
+func TestAffinityIgnoresAnotherMembersCache(t *testing.T) {
+	st := newState()
+	st.succeeded("p", "a", "conv")
+	st.noteCache("p", "b", "conv", 0)
+	if m, ok := st.stickOf("p", "conv", time.Now()); !ok || m != "a" {
 		t.Errorf("stick = %q, %v; want a, true", m, ok)
 	}
 }

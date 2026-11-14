@@ -338,12 +338,18 @@ func (s *Server) handleModel(proto translate.Protocol, count bool) http.HandlerF
 		}
 		s.lat.add(name, first.Sub(started), time.Since(started))
 		acct, _, _ := strings.Cut(member, "/")
+		u := t.done()
 		row := UsageRow{Day: time.Now().Format(time.DateOnly), Token: who, Route: name,
-			Account: acct, Model: models[member], Requests: 1, Tokens: t.done()}
+			Account: acct, Model: models[member], Requests: 1, Tokens: u}
 		if member == "" || t.status >= 400 {
 			row.Failed = 1
 		}
 		s.meter.add(row)
+		// What the vendor cached of the conversation decides whether the next
+		// request of it stays here; a pool's own gateway never learns it.
+		if member != "" && conv != "" {
+			s.sst.noteCache(final, member, conv, u.CacheRead+u.CacheWrite)
+		}
 	}
 }
 

@@ -70,6 +70,18 @@ so a busier member visibly outranks a quieter one, with each member's totals and
 any cooldown. The gateway answers `GET /stats` with the same data, and
 `GET /healthz` with a cheaper liveness plus each member's cooling state.
 
+**Affinity.** A conversation stays on the member that answered it, so what the
+vendor cached of it is read again rather than paid for afresh elsewhere. It
+stays while the vendor still holds that cache: a conversation idle longer than
+five minutes (what Anthropic and OpenAI keep a prefix) goes where routing puts
+it, and so does one whose answer read from, or wrote to, less than 1024 tokens
+of cache — a cache too thin to be worth the strategy's choice. The service's
+listener reads those counts from the replies it relays; a pool's own gateway
+does not read them, so its conversations stay for the whole five minutes. The
+rule binds a member that is cooling: a conversation moves when its member is
+set aside, and comes back to it only if the new member's cache is too thin to
+keep it.
+
 The affinity table is kept on disk, so a restart keeps every conversation on the
 member the vendor still has it cached at. `ak serve` reloads `providers.toml`
 when it changes (or on SIGHUP), so an edited or renamed pool takes effect
