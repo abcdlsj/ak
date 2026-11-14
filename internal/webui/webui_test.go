@@ -398,3 +398,41 @@ func TestNumber(t *testing.T) {
 		}
 	}
 }
+
+// The page that shows a token also prints the command that puts it on a
+// machine: at service.public_url when it is set, else at the page's address.
+func TestTokenShowsRemoteLine(t *testing.T) {
+	s := newSite(t, true)
+	s.login(password)
+	s.post("/ui/tokens", "/ui/tokens/add", url.Values{"name": {"laptop"}})
+	page := s.do("GET", "/ui/tokens", nil).Body.String()
+	tok := regexp.MustCompile(`ak_[A-Za-z0-9_-]{43}`).FindString(page)
+	if tok == "" {
+		t.Fatal("no token was issued")
+	}
+	if want := "ak remote add laptop http://example.com --token " + tok; !strings.Contains(page, want) {
+		t.Errorf("no %q on the page:\n%s", want, page)
+	}
+	if !strings.Contains(page, "service.public_url") {
+		t.Error("a line named from the page's address is not said to be that")
+	}
+
+	// With a public URL set, that is the address the line names, and no note.
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Service.PublicURL = "https://ak.example.com"
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	s.post("/ui/tokens", "/ui/tokens/add", url.Values{"name": {"phone"}})
+	page = s.do("GET", "/ui/tokens", nil).Body.String()
+	tok = regexp.MustCompile(`ak_[A-Za-z0-9_-]{43}`).FindString(page)
+	if want := "ak remote add phone https://ak.example.com --token " + tok; !strings.Contains(page, want) {
+		t.Errorf("no %q on the page:\n%s", want, page)
+	}
+	if strings.Contains(page, "service.public_url") {
+		t.Error("the note was shown with a public URL set")
+	}
+}

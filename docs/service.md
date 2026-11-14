@@ -181,6 +181,10 @@ sets a machine up, the token in it, so it is one copy and one paste:
 ak remote add laptop https://ak.example.com --token ak_...
 ```
 
+The UI's Tokens page prints the same line when it issues one; with no
+`public_url` set it names the address the page itself answered on, and says
+so, because another machine may not reach that one.
+
 `ak serve` refuses to start the service on an address that is not loopback
 while no token is defined, and a request without a known token gets 401.
 
@@ -205,7 +209,8 @@ favicon and the header's; the login page is that mark above a quiet card.
   provider, route or token uses.
 - **Routes**: aliases and pools as a table, members as chips, with the
   model-name legend beside the form that adds them.
-- **Tokens**: issue one (shown once), limit it to routes, revoke it.
+- **Tokens**: issue one (shown once), the `ak remote add` line that uses it
+  beside it, limit it to routes, revoke it.
 - **Usage**: counts as tiles; the year's tokens a day as GitHub draws it, a
   column a week, the months above, four shades by quantile, the year's total
   in the pixel font and the peak day named; then requests and tokens by

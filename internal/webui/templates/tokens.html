@@ -7,6 +7,13 @@
   <span class="tile-label">issued token — copy it now, it is not shown again</span>
   <code class="select">{{.}}</code>
 </div>
+{{if $.Remote}}
+<div class="issued">
+  <span class="tile-label">on another machine, once ak is installed</span>
+  <code class="select">{{$.Remote}}</code>
+</div>
+{{with $.RemoteNote}}<p class="note">{{.}}</p>{{end}}
+{{end}}
 {{end}}
 
 {{if .Tokens}}

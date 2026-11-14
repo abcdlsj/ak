@@ -29,6 +29,7 @@ type session struct {
 	expires time.Time
 	flash   string // a message for the next page, shown once
 	token   string // a token just issued, shown once
+	remote  string // the command that puts that token on a machine, shown once
 }
 
 // sessions holds the signed-in browsers in memory: a restart signs out.
@@ -109,17 +110,17 @@ func (s *sessions) failed(now time.Time) {
 }
 
 // take reads and clears a session's one-time fields.
-func (s *sessions) take(ss *session) (flash, token string) {
+func (s *sessions) take(ss *session) (flash, token, remote string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	flash, token = ss.flash, ss.token
-	ss.flash, ss.token = "", ""
-	return flash, token
+	flash, token, remote = ss.flash, ss.token, ss.remote
+	ss.flash, ss.token, ss.remote = "", "", ""
+	return flash, token, remote
 }
 
-func (s *sessions) tell(ss *session, flash, token string) {
+func (s *sessions) tell(ss *session, flash, token, remote string) {
 	s.mu.Lock()
-	ss.flash, ss.token = flash, token
+	ss.flash, ss.token, ss.remote = flash, token, remote
 	s.mu.Unlock()
 }
 

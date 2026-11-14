@@ -238,7 +238,12 @@ func (u *UI) render(w http.ResponseWriter, page string, data map[string]any, c *
 	data["Version"] = version.Display()
 	if c != nil {
 		data["CSRF"] = c.ss.csrf
-		data["Flash"], data["Token"] = u.sessions.take(c.ss)
+		data["Flash"], data["Token"], data["Remote"] = u.sessions.take(c.ss)
+		// A line named from the page's own address may be reached by that
+		// browser only; say so rather than have it pasted elsewhere.
+		if data["Remote"] != "" && u.b.Config().Service.PublicURL == "" {
+			data["RemoteNote"] = "this is the address this page answered on; set service.public_url to name another"
+		}
 		data["Signed"] = true
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -258,7 +263,7 @@ type call struct {
 
 // back redirects to a page with a message for it.
 func (c *call) back(page, flash string) {
-	c.u.sessions.tell(c.ss, flash, "")
+	c.u.sessions.tell(c.ss, flash, "", "")
 	http.Redirect(c.w, c.r, "/ui/"+page, http.StatusSeeOther)
 }
 
@@ -507,8 +512,28 @@ func (c *call) addToken() {
 		c.back("tokens", done(err, ""))
 		return
 	}
-	c.u.sessions.tell(c.ss, "Issued "+name+". Copy the token now: it is not shown again.", tok)
+	c.u.sessions.tell(c.ss, "Issued "+name+". Copy the token now: it is not shown again.", tok,
+		remoteLine(c.u.b.Config(), c.r, name, tok))
 	http.Redirect(c.w, c.r, "/ui/tokens", http.StatusSeeOther)
+}
+
+// remoteLine is the command that puts the token named name on another machine:
+// at service.public_url when it is set, else at the address this page answered
+// on, which is where the admin reached the service.
+func remoteLine(cfg *config.Config, r *http.Request, name, tok string) string {
+	base := strings.TrimRight(cfg.Service.PublicURL, "/")
+	if base == "" {
+		scheme := "http"
+		if secure(r) {
+			scheme = "https"
+		}
+		host := r.Host
+		if fh := r.Header.Get("X-Forwarded-Host"); fh != "" {
+			host = fh
+		}
+		base = scheme + "://" + host
+	}
+	return fmt.Sprintf("ak remote add %s %s --token %s", name, base, tok)
 }
 
 func (c *call) revokeToken() {
