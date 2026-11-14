@@ -146,10 +146,10 @@ type RefusalRow struct {
 
 // savedRefusal is one refusal as the file holds it.
 type savedRefusal struct {
-	Account  string    `json:"account"`
-	Model    string    `json:"model"`
-	Protocol string    `json:"protocol"`
-	Refusal  refusal   `json:"refusal"`
+	Account  string  `json:"account"`
+	Model    string  `json:"model"`
+	Protocol string  `json:"protocol"`
+	Refusal  refusal `json:"refusal"`
 }
 
 // load reads the refusals left by an earlier run, so a restart does not ask
