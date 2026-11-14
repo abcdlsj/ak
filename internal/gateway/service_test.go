@@ -585,3 +585,18 @@ func TestServiceAnswersARefusal(t *testing.T) {
 		t.Errorf("the answer does not say what was refused: %s", rec.Body)
 	}
 }
+
+// A name that asks for one model says only what was said of that model.
+func TestServiceRefusedForOneModel(t *testing.T) {
+	r := newRig(t, nil)
+	r.both.statusPath = map[string]int{"/v1/messages": http.StatusForbidden}
+	// glm-5 is what the claude endpoint serves; the refusal is remembered
+	// against it.
+	r.do(t, "/v1/messages", withModel(t, "claude_request.json", "bili", false))
+	if got := r.srv.info(r.srv.config(), "bili").Refused; len(got) != 1 {
+		t.Fatalf("the account's refusals = %+v", got)
+	}
+	if got := r.srv.info(r.srv.config(), "bili/kimi-k3").Refused; len(got) != 0 {
+		t.Errorf("a name for another model carried a refusal: %+v", got)
+	}
+}

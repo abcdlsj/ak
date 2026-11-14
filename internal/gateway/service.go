@@ -544,11 +544,17 @@ func (s *Server) modelsOf(cfg *config.Config, name string) []string {
 	return out
 }
 
-// refusedFor lists what the accounts behind a name have refused.
+// refusedFor lists what the accounts behind a name have refused: a name that
+// asks for one model says only what was said of that one, a bare account says
+// all of it.
 func (s *Server) refusedFor(cfg *config.Config, name string) []RefusalRow {
 	var out []RefusalRow
 	for _, leaf := range leafRefs(cfg, name, 0) {
-		out = append(out, s.ref.of(leaf.Account)...)
+		for _, row := range s.ref.of(leaf.Account) {
+			if leaf.Model == "" || leaf.Model == row.Model {
+				out = append(out, row)
+			}
+		}
 	}
 	slices.SortFunc(out, func(a, b RefusalRow) int {
 		return strings.Compare(a.Model+a.Protocol, b.Model+b.Protocol)
