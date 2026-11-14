@@ -299,10 +299,12 @@ func addRemote(cfg *config.Config, name, base, token string) error {
 	}
 	v := vendor.Vendor{
 		ID: name, Name: "ak at " + hostOnly(base), Category: "ak", WebsiteURL: base, Quota: quota.RemoteSource,
-		Engines: map[string]vendor.Endpoint{
-			"claude": {BaseURL: base},
-			"codex":  {BaseURL: base + "/v1", WireAPI: "responses"},
-			"pi":     {BaseURL: base, PiAPI: "anthropic-messages"},
+		// One endpoint per protocol, because that is what a service answers:
+		// the same key and the same box speak all three.
+		Endpoints: []vendor.Endpoint{
+			{Protocol: vendor.ProtocolAnthropic, BaseURL: base},
+			{Protocol: vendor.ProtocolResponses, BaseURL: base + "/v1"},
+			{Protocol: vendor.ProtocolChat, BaseURL: base + "/v1"},
 		},
 	}
 	data, err := toml.Marshal(v)

@@ -117,6 +117,11 @@ func (c *Config) resolveOn(p Provider, protocol string) Provider {
 			*f.field = f.value
 		}
 	}
+	// The engines name the protocols their own way; an endpoint says the
+	// protocol once and every engine reads it, rather than each vendor
+	// repeating wire_api and pi_api alongside it.
+	p.WireAPI = cmp.Or(p.WireAPI, wireOfProtocol(e.Protocol))
+	p.PiAPI = cmp.Or(p.PiAPI, piAPIOfProtocol(e.Protocol))
 	p.PiAuthHeader = p.PiAuthHeader || e.PiAuthHeader
 	if len(e.Env) > 0 {
 		env := maps.Clone(e.Env)
@@ -124,6 +129,31 @@ func (c *Config) resolveOn(p Provider, protocol string) Provider {
 		p.Env = env
 	}
 	return p
+}
+
+// wireOfProtocol is codex's name for a protocol, and the empty string for one
+// codex cannot speak through its wire_api setting.
+func wireOfProtocol(protocol string) string {
+	switch protocol {
+	case vendor.ProtocolResponses:
+		return "responses"
+	case vendor.ProtocolChat:
+		return "chat"
+	}
+	return ""
+}
+
+// piAPIOfProtocol is pi's name for a protocol.
+func piAPIOfProtocol(protocol string) string {
+	switch protocol {
+	case vendor.ProtocolChat:
+		return "openai-completions"
+	case vendor.ProtocolResponses:
+		return "openai-responses"
+	case vendor.ProtocolAnthropic:
+		return "anthropic-messages"
+	}
+	return ""
 }
 
 // AccountProvider is a provider on the account for its vendor's first
@@ -158,6 +188,14 @@ func (c *Config) Stored(p Provider) Provider {
 		if *f.field == f.value {
 			*f.field = ""
 		}
+	}
+	// The engine settings resolveOn derives from the protocol are not the
+	// provider's either.
+	if p.WireAPI == wireOfProtocol(e.Protocol) {
+		p.WireAPI = ""
+	}
+	if p.PiAPI == piAPIOfProtocol(e.Protocol) {
+		p.PiAPI = ""
 	}
 	if e.PiAuthHeader {
 		p.PiAuthHeader = false
