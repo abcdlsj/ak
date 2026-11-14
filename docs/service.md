@@ -108,8 +108,11 @@ On `service.addr`:
 A token is sent as `Authorization: Bearer <token>` or `x-api-key: <token>`,
 the two ways the engines send a key. Each `/v1/models` entry carries an
 `ak.protocols` object saying, per protocol (`anthropic`, `responses`,
-`chat`), whether the route answers it `native`, `translated`, or `mixed`
-(a pool with members of both). `/v1/models` lists the routes, each account,
+`chat`), whether the route answers it `native`, `translated`, `mixed`
+(a pool with members of both), `absent` (no member serves it) or `refused`
+(the account already said it will not serve that model there). A pool whose
+members answer with different models lists them under `ak.models`, and what an
+account refused is under `ak.refused`. See [endpoints.md](endpoints.md). `/v1/models` lists the routes, each account,
 and each account's engines' default models as `<account>/<model>`; any other
 `<account>/<model>` is accepted too.
 
@@ -319,6 +322,7 @@ Any other tool takes `https://ak.example.com` (Anthropic) or
 | no token, unknown or revoked token | 401 |
 | a model outside the token's routes | 403 |
 | a request bifrost cannot convert | the next member; alone, 400 with the reason |
+| a model the account refuses (403 `permission_error`, 404, 401) | another protocol that serves it, then the next member; remembered for a day, so the next request is answered at once; alone, 403 or 404 saying what the vendor said |
 | `count_tokens` with no Anthropic upstream | 400 saying so; nothing is sent upstream |
 | a translated stream that breaks | an error event in the client's protocol, then the end |
 

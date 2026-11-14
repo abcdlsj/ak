@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/abcdlsj/ak/internal/vendor"
 )
 
 // Service is what `ak serve` needs to answer other machines: where it
@@ -99,6 +101,37 @@ func (c *Config) OnAccount(account string, kind Kind) (Provider, bool) {
 		return Provider{}, false
 	}
 	return c.resolve(Provider{Kind: kind, Account: account}), true
+}
+
+// OnAccountProtocol is a provider on the account for the endpoint speaking
+// protocol, whatever engine would have asked for it: what the service routes a
+// request to when it knows the protocol it arrived in.
+func (c *Config) OnAccountProtocol(account, protocol string) (Provider, bool) {
+	v, ok := c.Vendor(Provider{Account: account})
+	if !ok {
+		return Provider{}, false
+	}
+	e, ok := v.EndpointFor(protocol)
+	if !ok {
+		return Provider{}, false
+	}
+	p := c.resolveOn(Provider{Kind: Kind(kindOf(protocol)), Account: account}, protocol)
+	// The endpoint's own model wins over the one its kind would ask for: a
+	// vendor may serve a different model per protocol.
+	if e.Model != "" {
+		p.Model = e.Model
+	}
+	return p, true
+}
+
+// kindOf names the engine whose shape an endpoint of protocol is closest to,
+// for the fields a provider keeps for an engine alone.
+func kindOf(protocol string) string {
+	switch protocol {
+	case vendor.ProtocolChat, vendor.ProtocolResponses:
+		return string(KindCodex)
+	}
+	return string(KindClaude)
 }
 
 // validateService checks the [service] section.

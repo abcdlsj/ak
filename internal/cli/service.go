@@ -2,10 +2,12 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -114,6 +116,72 @@ func created(t time.Time) string {
 		return ""
 	}
 	return t.Local().Format("2006-01-02 15:04")
+}
+
+// newServeAfterCmd is `ak serve after`: what the service learned about its
+// accounts, and the way to make it ask again.
+func newServeAfterCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "after",
+		Short: "What each account refused, and how to forget it",
+		Long: `A vendor that answers "this model is not on your plan" or "no such model"
+says the same thing to every request after it. The service remembers that for a
+day, so the next request is answered at once instead of asking again.
+
+These are the refusals on record. Buying the model or changing the key makes
+them wrong before they expire: ` + "`--forget`" + ` drops them all.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			forget, err := cmd.Flags().GetBool("forget")
+			if err != nil {
+				return err
+			}
+			dir, err := config.DataDir()
+			if err != nil {
+				return err
+			}
+			path := filepath.Join(dir, "capabilities.json")
+			if forget {
+				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+				out.Done(os.Stdout, "forgot what the accounts refused")
+				return nil
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					out.Empty(os.Stdout, "nothing refused", "the service learns a refusal when a vendor answers one")
+					return nil
+				}
+				return err
+			}
+			var rows []struct {
+				Account  string `json:"account"`
+				Model    string `json:"model"`
+				Protocol string `json:"protocol"`
+				Refusal  struct {
+					Reason string    `json:"reason"`
+					At     time.Time `json:"at"`
+				} `json:"refusal"`
+			}
+			if err := json.Unmarshal(b, &rows); err != nil {
+				return err
+			}
+			if len(rows) == 0 {
+				out.Empty(os.Stdout, "nothing refused", "the service learns a refusal when a vendor answers one")
+				return nil
+			}
+			table := make([][]string, 0, len(rows))
+			for _, r := range rows {
+				table = append(table, []string{r.Account, r.Model, r.Protocol, r.Refusal.Reason, r.Refusal.At.Local().Format("01-02 15:04")})
+			}
+			out.Table(os.Stdout, []string{"account", "model", "protocol", "reason", "seen"}, table)
+			return nil
+		},
+	}
+	cmd.Flags().Bool("forget", false, "drop every refusal, so the accounts are asked again")
+	return cmd
 }
 
 func newServeAdminCmd() *cobra.Command {

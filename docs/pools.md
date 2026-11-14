@@ -26,6 +26,13 @@ source come next, in order, and members with nothing left come last by when
 they are back. Only smart pools make the gateway call a balance API, and
 `ak doctor` names the members a smart pool cannot read.
 
+**Members may be different models.** A pool is either several accounts of one
+model — the usual case, where affinity keeps a conversation's cache alive — or
+a fallback chain that moves to another model when one is out of quota or down.
+Both are allowed; only `order` means a chain, since `rotate` over different
+models changes the model under every conversation. `GET /v1/models` lists the
+models a name may answer as (see [endpoints.md](endpoints.md)).
+
 **Nesting.** A member may itself be a pool of the same kind, which picks among
 its own members by its own strategy, up to four levels deep and never leading
 back to itself. A `--map` deeper down wins over one above it. Health, cooldown

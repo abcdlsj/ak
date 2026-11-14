@@ -131,24 +131,14 @@ var nearest = map[translate.Protocol][]translate.Protocol{
 }
 
 // upstreamOf picks the endpoint of an account that answers a request in
-// want: the first engine speaking it, else the nearest protocol another
-// engine speaks.
+// want: the one speaking it, else the nearest protocol another speaks.
 func upstreamOf(cfg *config.Config, account string, want translate.Protocol) (config.Provider, translate.Protocol, bool) {
-	v, ok := vendor.Lookup(cfg.Accounts[account].Vendor)
-	if !ok {
+	if _, ok := vendor.Lookup(cfg.Accounts[account].Vendor); !ok {
 		return config.Provider{}, "", false
 	}
-	var eps []config.Provider
-	for _, k := range v.Kinds() {
-		if p, ok := cfg.OnAccount(account, config.Kind(k)); ok {
-			eps = append(eps, p)
-		}
-	}
 	for _, proto := range append([]translate.Protocol{want}, nearest[want]...) {
-		for _, p := range eps {
-			if protocolOf(p) == proto {
-				return p, proto, true
-			}
+		if p, ok := cfg.OnAccountProtocol(account, string(proto)); ok {
+			return p, proto, true
 		}
 	}
 	return config.Provider{}, "", false
@@ -362,100 +352,224 @@ func (s *Server) handleModel(proto translate.Protocol, count bool) http.HandlerF
 }
 
 // serviceLeg is how one member, an account's model, answers a request in
-// proto: untranslated when the account has an upstream of that protocol,
-// else translated for the nearest one. It returns the model asked for.
+// proto: untranslated when the account has an endpoint of that protocol, else
+// translated for the nearest one it does have. An endpoint the account is
+// known to refuse for this model is skipped, so a protocol that does serve it
+// is found instead of asking a vendor what it has already answered.
 func (s *Server) serviceLeg(cfg *config.Config, proto translate.Protocol, count bool, r *http.Request, body []byte, member string) (leg, string, error) {
 	ref, err := cfg.ParseModel(member)
 	if err != nil || ref.Account == "" {
 		return leg{}, "", fmt.Errorf("no account for %q", member)
 	}
-	up, upProto, ok := upstreamOf(cfg, ref.Account, proto)
-	if !ok {
-		return leg{}, "", fmt.Errorf("account %s serves no endpoint", ref.Account)
-	}
-	model := ref.Model
-	if model == "" {
-		model = up.Model
-	}
-	if model == "" {
-		return leg{}, "", fmt.Errorf("account %s has no default model for %s; name one as %s/<model>", ref.Account, upProto, ref.Account)
-	}
-	if count && upProto != translate.Anthropic {
-		return leg{}, model, fmt.Errorf("account %s has no Anthropic endpoint to count tokens", ref.Account)
-	}
-	lg := leg{member: member, p: up, target: endpoint(up, upProto, count), header: func(h http.Header) {
-		h.Del("Cookie")
-		if upProto == translate.Anthropic && h.Get("Anthropic-Version") == "" {
-			h.Set("Anthropic-Version", "2023-06-01")
+	var refused []string
+	sawEndpoint, sawModel := false, false
+	for _, upProto := range append([]translate.Protocol{proto}, nearest[proto]...) {
+		if count && upProto != translate.Anthropic {
+			continue
 		}
-	}}
-	if upProto == proto {
-		lg.body = rewriteModel(body, model)
-		if r.URL.RawQuery != "" {
-			lg.target += "?" + r.URL.RawQuery
+		up, ok := cfg.OnAccountProtocol(ref.Account, string(upProto))
+		if !ok {
+			continue
 		}
+		sawEndpoint = true
+		model := ref.Model
+		if model == "" {
+			model = up.Model
+		}
+		if model == "" {
+			continue
+		}
+		sawModel = true
+		if x, blocked := s.ref.get(ref.Account, model, string(upProto)); blocked {
+			refused = append(refused, fmt.Sprintf("%s on %s (%s)", model, upProto, x.Reason))
+			continue
+		}
+		lg := leg{member: member, p: up, target: endpoint(up, upProto, count), model: model, protocol: string(upProto),
+			header: func(h http.Header) {
+				h.Del("Cookie")
+				if upProto == translate.Anthropic && h.Get("Anthropic-Version") == "" {
+					h.Set("Anthropic-Version", "2023-06-01")
+				}
+			}}
+		if upProto == proto {
+			lg.body = rewriteModel(body, model)
+			if r.URL.RawQuery != "" {
+				lg.target += "?" + r.URL.RawQuery
+			}
+			return lg, model, nil
+		}
+		lg.body, err = translate.Request(proto, upProto, body, model)
+		if err != nil {
+			return leg{}, model, fmt.Errorf("cannot translate %s to %s: %w", proto, upProto, err)
+		}
+		lg.reply = func(w http.ResponseWriter) replyWriter { return newTranslated(w, upProto, proto) }
 		return lg, model, nil
 	}
-	lg.body, err = translate.Request(proto, upProto, body, model)
-	if err != nil {
-		return leg{}, model, fmt.Errorf("cannot translate %s to %s: %w", proto, upProto, err)
+	if len(refused) > 0 {
+		return leg{}, "", &refusedError{account: ref.Account, what: strings.Join(refused, ", ")}
 	}
-	lg.reply = func(w http.ResponseWriter) replyWriter { return newTranslated(w, upProto, proto) }
-	return lg, model, nil
+	switch {
+	case count && !sawEndpoint:
+		return leg{}, "", fmt.Errorf("account %s has no Anthropic endpoint to count tokens", ref.Account)
+	case !sawEndpoint:
+		return leg{}, "", fmt.Errorf("account %s serves no endpoint", ref.Account)
+	case !sawModel:
+		return leg{}, "", fmt.Errorf("account %s has no default model for %s; name one as %s/<model>", ref.Account, proto, ref.Account)
+	}
+	return leg{}, "", fmt.Errorf("account %s serves no endpoint in %s", ref.Account, proto)
+}
+
+// refusedError is an account that will not serve a model, as it already said:
+// the request is answered from that, not by asking the vendor again.
+type refusedError struct {
+	account string
+	what    string // "model on protocol (reason)", one per endpoint refused
+}
+
+func (e *refusedError) Error() string {
+	return fmt.Sprintf("account %s refuses %s", e.account, e.what)
 }
 
 // ModelInfo is one model name a token may use, and how each protocol
-// reaches it: native, translated, mixed (a pool with both) or absent.
+// reaches it: native, translated, mixed (a pool with both), absent (no member
+// serves that protocol) or refused (they said they will not, this account).
 type ModelInfo struct {
 	ID        string            `json:"id"`
 	Protocols map[string]string `json:"protocols"`
+	// Models are the models a pool's members answer with, when they are not
+	// all the same: a name that may answer as more than one model says which.
+	Models []string `json:"models,omitempty"`
+	// Refused is what an account has already answered that it does not serve.
+	Refused []RefusalRow `json:"refused,omitempty"`
 }
 
 // Models lists the model names a token may use: its routes, and for each
-// account the account and its engines' default models.
-func Models(cfg *config.Config, t config.Token) []ModelInfo {
+// account the account and its endpoints' default models.
+func (s *Server) Models(cfg *config.Config, t config.Token) []ModelInfo {
 	var out []ModelInfo
 	for _, n := range cfg.Service.RouteNames() {
 		if allows(t, n) {
-			out = append(out, ModelInfo{ID: n, Protocols: reach(cfg, n)})
+			out = append(out, s.info(cfg, n))
 		}
 	}
 	for _, a := range cfg.AccountNames() {
 		if !allows(t, a) {
 			continue
 		}
-		out = append(out, ModelInfo{ID: a, Protocols: reach(cfg, a)})
+		out = append(out, s.info(cfg, a))
 		seen := map[string]bool{}
 		v, _ := vendor.Lookup(cfg.Accounts[a].Vendor)
-		for _, k := range v.Kinds() {
-			p, ok := cfg.OnAccount(a, config.Kind(k))
+		for _, proto := range v.EndpointProtocols() {
+			p, ok := cfg.OnAccountProtocol(a, proto)
 			if id := a + "/" + p.Model; ok && p.Model != "" && !seen[id] {
 				seen[id] = true
-				out = append(out, ModelInfo{ID: id, Protocols: reach(cfg, id)})
+				out = append(out, s.info(cfg, id))
 			}
 		}
 	}
 	return out
 }
 
+// info is one model name as the service reports it.
+func (s *Server) info(cfg *config.Config, name string) ModelInfo {
+	return ModelInfo{
+		ID:        name,
+		Protocols: s.reach(cfg, name),
+		Models:    s.modelsOf(cfg, name),
+		Refused:   s.refusedFor(cfg, name),
+	}
+}
+
 // reach says how each protocol reaches a model name.
-func reach(cfg *config.Config, name string) map[string]string {
+func (s *Server) reach(cfg *config.Config, name string) map[string]string {
 	out := map[string]string{}
 	for _, proto := range translate.Protocols {
-		var native, translated bool
-		for _, acct := range leafAccounts(cfg, name, 0) {
-			if _, got, ok := upstreamOf(cfg, acct, proto); ok {
-				native = native || got == proto
-				translated = translated || got != proto
+		var native, translated, refused, served bool
+		for _, leaf := range leafRefs(cfg, name, 0) {
+			p, got, ok := upstreamOf(cfg, leaf.Account, proto)
+			if !ok {
+				continue
 			}
+			served = true
+			model := leaf.Model
+			if model == "" {
+				model = p.Model
+			}
+			if _, blocked := s.ref.get(leaf.Account, model, string(got)); blocked {
+				refused = true
+				continue
+			}
+			native = native || got == proto
+			translated = translated || got != proto
 		}
 		switch {
+		case !served:
+			out[string(proto)] = "absent"
 		case native && translated:
 			out[string(proto)] = "mixed"
 		case native:
 			out[string(proto)] = "native"
 		case translated:
 			out[string(proto)] = "translated"
+		case refused:
+			out[string(proto)] = "refused"
+		}
+	}
+	return out
+}
+
+// modelsOf lists the models a pool's members answer with, when they differ:
+// a name may be a fallback chain over models, and a client deserves to know
+// which one it may get.
+func (s *Server) modelsOf(cfg *config.Config, name string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, leaf := range leafRefs(cfg, name, 0) {
+		model := leaf.Model
+		if model == "" {
+			if p, _, ok := upstreamOf(cfg, leaf.Account, translate.Anthropic); ok {
+				model = p.Model
+			}
+		}
+		if model == "" || seen[model] {
+			continue
+		}
+		seen[model] = true
+		out = append(out, model)
+	}
+	slices.Sort(out)
+	if len(out) < 2 {
+		return nil
+	}
+	return out
+}
+
+// refusedFor lists what the accounts behind a name have refused.
+func (s *Server) refusedFor(cfg *config.Config, name string) []RefusalRow {
+	var out []RefusalRow
+	for _, leaf := range leafRefs(cfg, name, 0) {
+		out = append(out, s.ref.of(leaf.Account)...)
+	}
+	slices.SortFunc(out, func(a, b RefusalRow) int {
+		return strings.Compare(a.Model+a.Protocol, b.Model+b.Protocol)
+	})
+	return out
+}
+
+// leafRefs lists the accounts and models a model name ends at.
+func leafRefs(cfg *config.Config, name string, depth int) []config.ModelRef {
+	ref, err := cfg.ParseModel(name)
+	if err != nil || depth > config.MaxPoolDepth+1 {
+		return nil
+	}
+	if ref.Account != "" {
+		return []config.ModelRef{ref}
+	}
+	r := cfg.Service.Routes[ref.Route]
+	var out []config.ModelRef
+	for _, m := range append(slices.Clone(r.Members), r.Model) {
+		if m != "" {
+			out = append(out, leafRefs(cfg, m, depth+1)...)
 		}
 	}
 	return out
@@ -463,19 +577,9 @@ func reach(cfg *config.Config, name string) map[string]string {
 
 // leafAccounts lists the accounts a model name ends at.
 func leafAccounts(cfg *config.Config, name string, depth int) []string {
-	ref, err := cfg.ParseModel(name)
-	if err != nil || depth > config.MaxPoolDepth+1 {
-		return nil
-	}
-	if ref.Account != "" {
-		return []string{ref.Account}
-	}
-	r := cfg.Service.Routes[ref.Route]
 	var out []string
-	for _, m := range append(slices.Clone(r.Members), r.Model) {
-		if m != "" {
-			out = append(out, leafAccounts(cfg, m, depth+1)...)
-		}
+	for _, ref := range leafRefs(cfg, name, depth) {
+		out = append(out, ref.Account)
 	}
 	return out
 }
@@ -493,10 +597,17 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		apiError(w, proto, http.StatusUnauthorized, "ak: no valid token")
 		return
 	}
-	models := Models(cfg, tok)
+	models := s.Models(cfg, tok)
 	data := make([]map[string]any, 0, len(models))
 	for _, m := range models {
-		e := map[string]any{"id": m.ID, "ak": map[string]any{"protocols": m.Protocols}}
+		ak := map[string]any{"protocols": m.Protocols}
+		if len(m.Models) > 0 {
+			ak["models"] = m.Models
+		}
+		if len(m.Refused) > 0 {
+			ak["refused"] = m.Refused
+		}
+		e := map[string]any{"id": m.ID, "ak": ak}
 		if proto == translate.Anthropic {
 			e["type"], e["display_name"], e["created_at"] = "model", m.ID, "1970-01-01T00:00:00Z"
 		} else {

@@ -25,6 +25,9 @@ import (
 type vendorUp struct {
 	server *httptest.Server
 	status int // non-zero: fail with it
+	// statusPath fails only these paths, so one endpoint of one vendor can
+	// refuse while another answers.
+	statusPath map[string]int
 
 	mu   sync.Mutex
 	reqs []seen
@@ -64,6 +67,11 @@ func newVendorUp(t *testing.T) *vendorUp {
 			io.WriteString(w, `{"error":{"message":"upstream is down"}}`)
 			return
 		}
+		if st := u.statusPath[r.URL.Path]; st != 0 {
+			w.WriteHeader(st)
+			io.WriteString(w, `{"type":"error","error":{"type":"permission_error","message":"the plan does not include this model"}}`)
+			return
+		}
 		if r.URL.Path == "/v1/messages/count_tokens" {
 			io.WriteString(w, `{"input_tokens":42}`)
 			return
@@ -99,6 +107,19 @@ func (u *vendorUp) count() int {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return len(u.reqs)
+}
+
+// countPath is how many requests the upstream saw at one path.
+func (u *vendorUp) countPath(path string) int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	n := 0
+	for _, r := range u.reqs {
+		if r.path == path {
+			n++
+		}
+	}
+	return n
 }
 
 // rig is a service over three vendors of its own: both (claude and codex),
@@ -511,5 +532,56 @@ func TestMeterKeepsUsage(t *testing.T) {
 	n.load()
 	if rows := n.since(usageDays, ""); len(rows) != 1 || rows[0].Requests != 2 || rows[0].Input != 7 {
 		t.Errorf("rows = %+v", rows)
+	}
+}
+
+// An account that refuses a model on one protocol is asked on the one it does
+// serve, and the refusal is remembered: the next request skips the refusal
+// instead of asking again.
+func TestServiceSkipsARefusedProtocol(t *testing.T) {
+	r := newRig(t, nil)
+	r.both.statusPath = map[string]int{"/v1/messages": http.StatusForbidden}
+	body := withModel(t, "claude_request.json", "bili", false)
+	if rec := r.do(t, "/v1/messages", body); rec.Code != 200 {
+		t.Fatalf("the response endpoint did not answer: %d %s", rec.Code, rec.Body)
+	}
+	if n := r.both.countPath("/v1/messages"); n != 1 {
+		t.Errorf("the refused endpoint was asked %d times, want 1", n)
+	}
+	if n := r.both.countPath("/v1/responses"); n != 1 {
+		t.Errorf("the response endpoint was asked %d times, want 1", n)
+	}
+	// The refusal is on record, so the model name says so and the next request
+	// goes straight to the protocol that works.
+	info := r.srv.info(r.srv.config(), "bili")
+	if got := info.Protocols["responses"]; got != "native" {
+		t.Errorf("responses = %q, want native", got)
+	}
+	if len(info.Refused) != 1 || info.Refused[0].Protocol != "anthropic" {
+		t.Errorf("refused = %+v, want the anthropic endpoint", info.Refused)
+	}
+	if rec := r.do(t, "/v1/messages", body); rec.Code != 200 {
+		t.Fatalf("the second request: %d %s", rec.Code, rec.Body)
+	}
+	if n := r.both.countPath("/v1/messages"); n != 1 {
+		t.Errorf("the refused endpoint was asked again: %d times", n)
+	}
+}
+
+// A model every protocol refuses is answered with what the vendor said, not
+// with a gateway error that hides it.
+func TestServiceAnswersARefusal(t *testing.T) {
+	r := newRig(t, nil)
+	r.both.statusPath = map[string]int{
+		"/v1/messages":         http.StatusForbidden,
+		"/v1/responses":        http.StatusForbidden,
+		"/v1/chat/completions": http.StatusForbidden,
+	}
+	rec := r.do(t, "/v1/messages", withModel(t, "claude_request.json", "bili/glm-5", false))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a refused model answered %d, want 403: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "refuses") {
+		t.Errorf("the answer does not say what was refused: %s", rec.Body)
 	}
 }

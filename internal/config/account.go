@@ -88,7 +88,11 @@ func (c *Config) Resolve() {
 	}
 }
 
-func (c *Config) resolve(p Provider) Provider {
+func (c *Config) resolve(p Provider) Provider { return c.resolveOn(p, "") }
+
+// resolveOn fills p from its account, taking the endpoint of protocol when one
+// is named and otherwise the one its kind asks the vendor for.
+func (c *Config) resolveOn(p Provider, protocol string) Provider {
 	if p.Account == "" {
 		return p
 	}
@@ -96,7 +100,15 @@ func (c *Config) resolve(p Provider) Provider {
 	p.APIKey, p.APIKeyRef, p.AuthKey, p.Secrets = a.APIKey, a.APIKeyRef, "", a.Secrets
 	v, _ := c.Vendor(p)
 	p.Quota = cmp.Or(p.Quota, v.Quota)
-	e, ok := v.Endpoint(string(p.Kind))
+	var (
+		e  vendor.Endpoint
+		ok bool
+	)
+	if protocol != "" {
+		e, ok = v.EndpointFor(protocol)
+	} else {
+		e, ok = v.Endpoint(string(p.Kind))
+	}
 	if !ok {
 		return p
 	}

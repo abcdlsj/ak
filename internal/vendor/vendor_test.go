@@ -41,3 +41,61 @@ model = "gpt"
 		t.Errorf("errors = %v", errs)
 	}
 }
+
+// A vendor may say what it serves by protocol instead of by engine, and one
+// that serves two protocols serves both engines that ask for them.
+func TestEndpointsByProtocol(t *testing.T) {
+	dir := t.TempDir()
+	body := `id = "relay"
+[[endpoints]]
+protocol = "anthropic"
+base_url = "https://relay.example"
+model = "claude-sonnet-5-5"
+[[endpoints]]
+protocol = "responses"
+base_url = "https://relay.example/v1"
+model = "gpt-6-luna"
+auth = "bearer"
+`
+	if err := os.WriteFile(filepath.Join(dir, "relay.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	LoadDir(dir)
+	t.Cleanup(func() { LoadDir("") })
+
+	v, ok := Lookup("relay")
+	if !ok {
+		t.Fatal("relay was not loaded")
+	}
+	if got := v.EndpointProtocols(); len(got) != 2 || got[0] != ProtocolAnthropic || got[1] != ProtocolResponses {
+		t.Errorf("protocols = %v", got)
+	}
+	// Both engines take the protocol they speak, from the one list.
+	if e, ok := v.Endpoint("claude"); !ok || e.Model != "claude-sonnet-5-5" {
+		t.Errorf("claude = %+v, %v", e, ok)
+	}
+	if e, ok := v.Endpoint("codex"); !ok || e.Model != "gpt-6-luna" || e.AuthStyle() != "bearer" {
+		t.Errorf("codex = %+v, %v", e, ok)
+	}
+	// A vendor with no Chat endpoint serves no pi engine on Chat.
+	if e, ok := v.EndpointFor(ProtocolChat); ok {
+		t.Errorf("chat = %+v, want none", e)
+	}
+	if errs := Errors(); len(errs) != 0 {
+		t.Fatalf("errors = %v", errs)
+	}
+}
+
+// An endpoint entry that names no protocol, or an unknown one, is a file ak
+// cannot read: the vendor is skipped rather than guessed at.
+func TestEndpointsNeedAKnownProtocol(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.toml"), []byte("id = \"x\"\n[[endpoints]]\nbase_url = \"https://x\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	LoadDir(dir)
+	t.Cleanup(func() { LoadDir("") })
+	if errs := Errors(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "no protocol") {
+		t.Errorf("errors = %v, want one naming the missing protocol", errs)
+	}
+}

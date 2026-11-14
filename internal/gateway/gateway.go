@@ -122,6 +122,10 @@ type Server struct {
 
 	// affinityPath is where the conversation table is kept between runs.
 	affinityPath string
+	// ref remembers what each account refused, and refusalPath is where it is
+	// kept between runs.
+	ref         *refusals
+	refusalPath string
 
 	// Logf, when set, logs routing decisions.
 	Logf func(format string, a ...any)
@@ -165,6 +169,7 @@ func New(cfg *config.Config) *Server {
 		sst:        newState(),
 		readings:   readings{m: map[string]reading{}},
 		lat:        newLatencies(),
+		ref:        newRefusals(),
 	}
 	s.cfg.Store(cfg)
 	s.svc.Store(routing(cfg))
@@ -172,6 +177,7 @@ func New(cfg *config.Config) *Server {
 	if err == nil {
 		s.affinityPath = filepath.Join(dir, "affinity.json")
 		s.svcAffinityPath = filepath.Join(dir, "service-affinity.json")
+		s.refusalPath = filepath.Join(dir, "capabilities.json")
 	}
 	s.meter = newMeter(dir)
 	return s
@@ -261,6 +267,7 @@ func (s *Server) Serve(ctx context.Context, addr, service string) error {
 	// early request's entry is not overwritten by the older file.
 	s.st.loadSticks(s.affinityPath)
 	s.sst.loadSticks(s.svcAffinityPath)
+	s.ref.load(s.refusalPath)
 	s.meter.load()
 	errCh := make(chan error, 2)
 	var servers []*http.Server
@@ -298,6 +305,7 @@ func (s *Server) Serve(ctx context.Context, addr, service string) error {
 	save := func() {
 		s.st.saveSticks(s.affinityPath)
 		s.sst.saveSticks(s.svcAffinityPath)
+		s.ref.save(s.refusalPath)
 		s.meter.save()
 		close(stopFlush)
 	}
@@ -329,6 +337,7 @@ func (s *Server) flushSticks(ctx context.Context, stop <-chan struct{}) {
 		case <-t.C:
 			s.st.saveSticks(s.affinityPath)
 			s.sst.saveSticks(s.svcAffinityPath)
+			s.ref.save(s.refusalPath)
 			s.meter.save()
 		case <-ctx.Done():
 			return
@@ -394,7 +403,12 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		if rt.model != "" {
 			out = rewriteModel(body, rt.model)
 		}
-		return leg{member: rt.member, p: mp, target: target, body: out}, nil
+		model := rt.model
+		if model == "" {
+			model = mp.Model
+		}
+		return leg{member: rt.member, p: mp, target: target, body: out,
+			model: model, protocol: string(protocolOf(mp))}, nil
 	}
 	s.relay(w, r, s.st, name, routes, conv, build, func(status int, retryAfter time.Duration, msg string) {
 		if retryAfter > 0 {
@@ -411,6 +425,10 @@ type leg struct {
 	p      config.Provider
 	target string
 	body   []byte
+	// model is what the member is asked for and protocol what it speaks, so a
+	// refusal can be remembered against them.
+	model    string
+	protocol string
 	// reply, when set, stands between the upstream's reply and the client,
 	// as a translation does; finish is called once the reply is written.
 	reply func(http.ResponseWriter) replyWriter
@@ -434,6 +452,7 @@ type replyWriter interface {
 func (s *Server) relay(w http.ResponseWriter, r *http.Request, st *state, name string, routes []route,
 	conv string, build func(route) (leg, error), fail func(status int, retryAfter time.Duration, msg string)) string {
 	var lastErr string
+	var lastBuildErr error
 	var tried []string
 	// lastStatus and lastRetryAfter are the last answer a member gave, so a
 	// rate limit reaches the agent as a rate limit with its Retry-After,
@@ -444,6 +463,7 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request, st *state, name s
 		lg, err := build(rt)
 		if err != nil {
 			unbuilt++
+			lastBuildErr = err
 			lastErr = err.Error()
 			tried = append(tried, rt.member+": "+lastErr)
 			s.logf("%s: member %s cannot serve the request (%s); trying next", name, rt.member, lastErr)
@@ -489,6 +509,29 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request, st *state, name s
 				// and nobody is left to answer.
 				release()
 				return ""
+			}
+			if res.refusal != "" {
+				// Not a fault: the member serves other models well, and asking
+				// it again for this one would get the same answer. Now that the
+				// refusal is on record, building the leg again finds the
+				// protocol the account does serve it on.
+				s.ref.note(lg.p.Account, lg.model, lg.protocol, res.refusal, res.status, "")
+				lastErr = res.err.Error()
+				if len(tried) < 8 {
+					tried = append(tried, m+": "+lastErr)
+				}
+				if again, err := build(rt); err == nil && (again.protocol != lg.protocol || again.model != lg.model) {
+					lg = again
+					continue
+				} else if err != nil {
+					lastBuildErr = err
+					lastErr = err.Error()
+					if len(tried) < 8 {
+						tried = append(tried, m+": "+lastErr)
+					}
+				}
+				s.logf("%s: member %s refuses %s on %s (%s); trying next", name, m, lg.model, lg.protocol, res.refusal)
+				break
 			}
 			if !res.retryable {
 				break
@@ -537,9 +580,18 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request, st *state, name s
 	// Every member failed before any bytes were written. When none could even
 	// be asked, the request itself is what no member can take.
 	status := http.StatusBadGateway
-	if unbuilt == len(routes) {
+	// A model the account already refused is not a malformed request: the
+	// answer says what it said, which an agent can act on.
+	var re *refusedError
+	switch {
+	case errors.As(lastBuildErr, &re):
+		status = http.StatusForbidden
+		if strings.Contains(re.what, RefusalMissing) {
+			status = http.StatusNotFound
+		}
+	case unbuilt == len(routes):
 		status = http.StatusBadRequest
-	} else if passThrough(lastStatus) {
+	case passThrough(lastStatus):
 		status = lastStatus
 	}
 	fail(status, lastRetryAfter, " exhausted its members: "+lastErr+"\n  "+strings.Join(tried, "\n  "))
@@ -598,8 +650,11 @@ type forwardOutcome struct {
 	// handled means a response was written to the client; stop.
 	handled bool
 	// ok means that response was the upstream's success.
-	ok  bool
-	err error
+	ok bool
+	// refusal is why the member will not serve this model at all, when that is
+	// what it said: remembered, so the next request is answered at once.
+	refusal string
+	err     error
 }
 
 // forward sends one leg of a request.
@@ -674,6 +729,18 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, lg leg) forward
 	}
 
 	code := resp.StatusCode
+	// A member that says this model is not for this account is not failing:
+	// the same answer comes to every request, so it is remembered against the
+	// model rather than counted as a fault of the member.
+	if code == http.StatusUnauthorized || code == http.StatusForbidden || code == http.StatusNotFound {
+		buf, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+		if reason := classifyRefusal(code, buf); reason != "" {
+			return forwardOutcome{status: code, retryable: true, refusal: reason,
+				err: fmt.Errorf("upstream %s returned %d: %s", mp.BaseURL, code, snippet(buf))}
+		}
+		return forwardOutcome{status: code, retryable: true,
+			err: fmt.Errorf("upstream %s returned %d", mp.BaseURL, code)}
+	}
 	if isRetryableStatus(code) {
 		drain(resp.Body)
 		return forwardOutcome{status: code, retryAfter: retryAfterOf(resp.Header), retryable: true,
@@ -684,8 +751,12 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, lg leg) forward
 	if code == http.StatusBadRequest || code == http.StatusUnprocessableEntity {
 		buf, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 		if retryableBody(buf) {
-			return forwardOutcome{status: code, retryable: true,
+			out := forwardOutcome{status: code, retryable: true,
 				err: fmt.Errorf("upstream %s returned %d: %s", mp.BaseURL, code, snippet(buf))}
+			if reason := classifyRefusal(code, buf); reason != "" {
+				out.refusal = reason
+			}
+			return out
 		}
 		copyHeaders(w.Header(), resp.Header)
 		w.Header().Del("Content-Length")
