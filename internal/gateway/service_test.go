@@ -336,9 +336,10 @@ func TestServiceNotesTheCacheOfAConversation(t *testing.T) {
 	if e.member != "bili/glm-5" {
 		t.Errorf("member = %q, want bili/glm-5", e.member)
 	}
-	// The fixture reads 30 tokens from the cache and writes none.
-	if e.cache != 30 {
-		t.Errorf("cache = %d, want the reply's 30", e.cache)
+	// The fixture reads 30 tokens from the cache, writes none, and sends 120:
+	// a vendor that reports no write is taken to hold the prompt it was sent.
+	if e.cache != 150 {
+		t.Errorf("cache = %d, want the reply's 30 and its 120 prompt", e.cache)
 	}
 }
 

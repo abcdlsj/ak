@@ -346,9 +346,17 @@ func (s *Server) handleModel(proto translate.Protocol, count bool) http.HandlerF
 		}
 		s.meter.add(row)
 		// What the vendor cached of the conversation decides whether the next
-		// request of it stays here; a pool's own gateway never learns it.
+		// request of it stays here; a pool's own gateway never learns it. A
+		// vendor that keeps a prompt cached without reporting the write says
+		// nothing of what it now holds, and what it holds is the prompt this
+		// turn sent: counting it apart would let one turn's cache be thrown
+		// away by the next.
 		if member != "" && conv != "" {
-			s.sst.noteCache(final, member, conv, u.CacheRead+u.CacheWrite)
+			cache := u.CacheRead + u.CacheWrite
+			if u.CacheWrite == 0 {
+				cache += u.Input
+			}
+			s.sst.noteCache(final, member, conv, cache)
 		}
 	}
 }
