@@ -28,7 +28,7 @@ adding a concept; every new field so far has cost a word elsewhere.
 | --- | --- | --- |
 | **vendor** | what does this upstream speak, and where | `vendors.json`, `vendors.d/*.toml` |
 | **account** | who am I there, and what does my plan serve | `[accounts.<name>]` |
-| **provider** | what command do I run, with what environment | `[providers.<name>]` |
+| **provider** | what command do I run, with what environment, and what model do clients ask it for | `[providers.<name>]` |
 | **name** | what does a client ask for | the provider's `model`, or `[service.routes]` |
 
 Three engines (`claude`, `codex`, `pi`) and three protocols (`anthropic`,
@@ -65,8 +65,9 @@ complaints:
 
 | Word | Example | Meaning |
 | --- | --- | --- |
-| **name** | `main`, `ak-hk-claude`, `command-code` | what you ask for: a route, a provider's command, an account |
+| **name** | `dpsk`, `ak-hk-claude`, `command-code` | what you ask for: a route, a provider's command, an account |
 | **model** | `deepseek/deepseek-v4.1-flash` | what a vendor is asked for; the only thing with a price or a context window |
+| **member** | `command-code`, `opendesign/deepseek-v4-flash` | what a pool routes over: a provider, an account, or an account's model |
 
 A name may stand for one model, several (a pool, a fallback chain), or a name
 another ak service chose. `core.Serves` resolves names to models through

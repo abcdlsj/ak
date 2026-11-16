@@ -14,14 +14,25 @@ ak serve            # optional: launching a pool starts it in the background
 
 | Flag | Meaning |
 | --- | --- |
-| `--member` | a provider or an account, or another pool; repeatable and ordered |
+| `--member` | a provider, an account, `<account>/<model>`, or another pool; repeatable and ordered |
 | `--strategy` | `order` (failover, the default), `rotate` (round-robin), `least-used` or `smart` |
 | `--map` | `member=model`: ask that member for a different model |
 | `--model` | what clients ask the pool for, when that is not each member's own name |
 
+**What the pool itself serves.** A pool may name a `model`, which is the name
+clients ask it for — `deepseek` in `[providers.dpsk] model = 'deepseek'` — and
+what the engine is launched with (`ANTHROPIC_MODEL`, codex's `-c model=`, pi's
+models.json entry). The members are still asked for their own models, so one
+public name stands for whichever member answers. It is required for pi (pi
+picks a model by name) and optional otherwise; without it the engine sends its
+own default and the members' models are used anyway, so a pool that never
+mentions a model still answers correctly — it just has no name of its own to
+report.
+
 **Which model a member is asked for.** In this order: the pool's `--map` entry
-for that member, else the model the member itself was set up with, else the
-model the request asked for. So a pool over members that each have their own
+for that member, else the model the member itself was set up with (including
+one written into the member as `<account>/<model>`), else the model the request
+asked for. So a pool over members that each have their own
 model needs no map, and a pool whose name clients use for one model is mapped
 only where a member calls it something else. Only a member with no model of its
 own passes the request's model through, which is what makes `--model` on the
@@ -35,16 +46,22 @@ source come next, in order, and members with nothing left come last by when
 they are back. Only smart pools make the gateway call a balance API, and
 `ak doctor` names the members a smart pool cannot read.
 
-**A member may be an account.** An account already carries its endpoint, its
-key and the model its plan serves, so a pool over subscriptions needs no
-provider of its own for each:
+**A member may be an account, or an account's model.** An account already
+carries its endpoint, its key and the model its plan serves, so a pool over
+subscriptions needs no provider of its own for each; and a member written
+`<account>/<model>` asks that account for that model, slices and all:
 
 ```toml
 [providers.dpsk]
 kind = 'codex'
-members = ['command-code', 'opendesign']   # accounts
+members = ['command-code', 'opendesign/deepseek-v4-flash']
 strategy = 'order'
 ```
+
+A member like that is a provider of its account as far as everything else is
+concerned — health, quota, `ak check`, the gateway's view — but it is never
+written to `providers.toml`, never gets a command of its own and never appears
+in `ak list`.
 
 **One pool, two front doors.** The same pool can be a name a client asks for,
 so a service route takes it rather than repeating its members:
