@@ -1,5 +1,7 @@
 package config
 
+import "strings"
+
 // A service route and a provider pool were the same idea written twice: one
 // spreads a name over members on the listener, the other over members through
 // the loopback gateway. A route may now name a provider pool instead of
@@ -62,4 +64,61 @@ func (c *Config) collapseRoutes() {
 		routes[name] = r
 	}
 	c.Service.Routes = routes
+}
+
+// MemberRef reads a pool member: a provider name, an account, or an account
+// and the model to ask it for, as <account>/<model>. A provider wins, since a
+// provider is what a member usually is.
+func (c *Config) MemberRef(member string) (ModelRef, bool) {
+	// A provider of its own wins; one ak made for this very member does not
+	// count against it.
+	if p, ok := c.Providers[member]; ok && !p.implicit {
+		return ModelRef{}, false
+	}
+	if _, ok := c.Accounts[member]; ok {
+		return ModelRef{Account: member}, true
+	}
+	account, model, ok := strings.Cut(member, "/")
+	if !ok || model == "" {
+		return ModelRef{}, false
+	}
+	if _, ok := c.Accounts[account]; !ok {
+		return ModelRef{}, false
+	}
+	return ModelRef{Account: account, Model: model}, true
+}
+
+// expandMembers makes a provider for every member that names an account, so
+// health, quota, checks and the gateway all see one kind of thing: a provider
+// on an account, asked for the model the member named.
+func (c *Config) expandMembers() {
+	for name, p := range c.Providers {
+		if p.implicit {
+			delete(c.Providers, name)
+		}
+	}
+	for _, name := range c.Names() {
+		pool := c.Providers[name]
+		if !pool.IsPool() {
+			continue
+		}
+		for _, member := range pool.Members {
+			if _, ok := c.Providers[member]; ok {
+				continue
+			}
+			ref, ok := c.MemberRef(member)
+			if !ok {
+				continue // Validate says what is wrong with it
+			}
+			p, ok := c.OnAccount(ref.Account, pool.Kind)
+			if !ok {
+				continue
+			}
+			if ref.Model != "" {
+				p.Model = ref.Model
+			}
+			p.implicit = true
+			c.Providers[member] = p
+		}
+	}
 }

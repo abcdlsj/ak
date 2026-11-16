@@ -222,10 +222,17 @@ type Provider struct {
 	// there instead of ~/.codex.
 	CodexHome string `toml:"codex_home,omitempty"`
 
-	// Members names, in order, the providers this provider routes over. When
-	// non-empty the provider is a pool: BaseURL and the key fields are unused,
-	// and its command points at the local gateway instead of an upstream.
+	// Members names, in order, what this provider routes over. When non-empty
+	// the provider is a pool: BaseURL and the key fields are unused, and its
+	// command points at the local gateway instead of an upstream. A member is
+	// a provider, an account, or an account and the model to ask it for as
+	// <account>/<model>.
 	Members []string `toml:"members,omitempty"`
+	// implicit marks a provider ak made for a member that named an account: it
+	// carries the account's endpoint and key for the member's model. It is
+	// never written, never gets a command and never appears in a list; delete
+	// it and the next Resolve makes it again.
+	implicit bool
 	// MemberModels maps a member name to the model the gateway asks that
 	// member for, letting one pool map a logical model onto each upstream's
 	// own name. A member with no entry is asked for its own model, and a
@@ -377,7 +384,10 @@ func (p Provider) StrategyOrDefault() string {
 // deterministic.
 func (c *Config) Names() []string {
 	names := make([]string, 0, len(c.Providers))
-	for n := range c.Providers {
+	for n, p := range c.Providers {
+		if p.implicit {
+			continue
+		}
 		names = append(names, n)
 	}
 	sort.Strings(names)
@@ -603,6 +613,9 @@ func Save(cfg *Config) error {
 	stored := *cfg
 	stored.Providers = make(map[string]Provider, len(cfg.Providers))
 	for name, p := range cfg.Providers {
+		if p.implicit {
+			continue // ak made it for a member; the member is what is written
+		}
 		stored.Providers[name] = cfg.Stored(p)
 	}
 	// A route that names a provider keeps naming it: its members are the

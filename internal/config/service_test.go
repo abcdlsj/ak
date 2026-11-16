@@ -4,6 +4,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -181,5 +182,39 @@ func TestRouteOverAProviderThatIsNoPool(t *testing.T) {
 	cfg.Resolve()
 	if err := Validate(cfg); err == nil {
 		t.Error("a route over another engine's pool was accepted")
+	}
+}
+
+// A pool member may name an account and the model to ask it for, and ak makes
+// the provider that stands for it: never written, never listed, always
+// resolvable by everything that reads a pool's members.
+func TestPoolMemberNamesAnAccountModel(t *testing.T) {
+	cfg := serviceCfg(t)
+	cfg.Providers["pool"] = Provider{Kind: KindClaude,
+		Members: []string{"command-code/mine", "opendesign", "kimi"}}
+	cfg.Resolve()
+
+	ref, ok := cfg.MemberRef("command-code/mine")
+	if !ok || ref.Account != "command-code" || ref.Model != "mine" {
+		t.Fatalf("MemberRef = %+v, %v", ref, ok)
+	}
+	if _, ok := cfg.MemberRef("nobody/mine"); ok {
+		t.Error("an unknown account was accepted")
+	}
+	if p, ok := cfg.Providers["command-code/mine"]; !ok || p.Account != "command-code" || p.Model != "mine" {
+		t.Errorf("member provider = %+v, %v", p, ok)
+	}
+	// An account member keeps the model its plan serves.
+	if p := cfg.Providers["opendesign"]; p.Account != "opendesign" {
+		t.Errorf("account member = %+v", p)
+	}
+	if got := cfg.Names(); slices.Contains(got, "command-code/mine") {
+		t.Errorf("an implicit member was listed: %v", got)
+	}
+	if got := cfg.Leaves("pool"); len(got) != 3 {
+		t.Errorf("leaves = %v, want every member", got)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Errorf("valid: %v", err)
 	}
 }

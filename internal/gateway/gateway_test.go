@@ -316,3 +316,39 @@ func TestPoolOverAccounts(t *testing.T) {
 		t.Errorf("body = %s, want the account's own model", rec.Body)
 	}
 }
+
+// A member may name an account and the model to ask it for, as
+// <account>/<model>, which is the finest a pool can be pointed at without
+// another provider to hang the model on.
+func TestPoolMemberNamesAModelOfAnAccount(t *testing.T) {
+	up := newUpstream(t)
+	dir := t.TempDir()
+	spec := "id = \"membervendor\"\nname = \"Test\"\n[[endpoints]]\nprotocol = \"anthropic\"\nbase_url = %q\nmodel = \"vendor-model\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "membervendor.toml"), []byte(fmt.Sprintf(spec, up.server.URL)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vendor.LoadDir(dir)
+	t.Cleanup(func() { vendor.LoadDir("") })
+
+	cfg := &config.Config{
+		Version:  config.Version,
+		Settings: config.Settings{Prefix: "ak-"},
+		Accounts: map[string]config.Account{"acct": {Vendor: "membervendor", APIKey: "sk-account"}},
+		Providers: map[string]config.Provider{
+			"pool": {Kind: config.KindClaude, Members: []string{"acct/member/model"}},
+		},
+	}
+	cfg.Resolve()
+	if err := config.Validate(cfg); err != nil {
+		t.Fatalf("a member naming an account's model: %v", err)
+	}
+	rec := post(New(cfg).Handler(), "/p/pool/v1/messages", `{"model":"asked"}`)
+	if !strings.Contains(rec.Body.String(), `"model":"member/model"`) {
+		t.Fatalf("body = %s, want the model the member named", rec.Body)
+	}
+
+	// The member is not a provider anyone can launch, list, or write.
+	if got := cfg.Names(); len(got) != 1 || got[0] != "pool" {
+		t.Errorf("names = %v, want the pool alone", got)
+	}
+}
