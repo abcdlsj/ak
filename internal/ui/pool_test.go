@@ -65,3 +65,33 @@ func TestDraftBlankMembersClearsPool(t *testing.T) {
 		t.Errorf("endpoint = %q", got.BaseURL)
 	}
 }
+
+// A pool can say what to ask each member for, in the form as on the command
+// line: the chosen model is what the member is asked, not the member's own.
+func TestDraftPoolMemberModels(t *testing.T) {
+	d := NewDraft("p")
+	d.Kind = string(config.KindCodex)
+	d.Members = "a, b"
+	d.Maps = "a=deepseek-v4.1-flash, b=claude-sonnet-5-5"
+	got := d.Provider()
+	if got.MemberModels["a"] != "deepseek-v4.1-flash" || got.MemberModels["b"] != "claude-sonnet-5-5" {
+		t.Fatalf("mappings = %v", got.MemberModels)
+	}
+	// A pair naming a model the member does not have is a typo worth keeping
+	// out of the file; a pair naming a member the pool does not have is
+	// dropped.
+	d.Maps = "a=m1, c=m3"
+	if got := d.Provider(); len(got.MemberModels) != 1 || got.MemberModels["a"] != "m1" {
+		t.Errorf("mappings = %v, want only a=m1", got.MemberModels)
+	}
+}
+
+func TestDraftPoolMappingRoundTrip(t *testing.T) {
+	d := editDraftOf(config.Provider{
+		Kind: config.KindCodex, Members: []string{"a", "b"},
+		MemberModels: map[string]string{"b": "m2", "a": "m1"},
+	})
+	if d.Maps != "a=m1, b=m2" {
+		t.Fatalf("Maps = %q, want the pairs sorted", d.Maps)
+	}
+}

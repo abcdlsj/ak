@@ -162,6 +162,7 @@ ak login kimi-coding work --key -       a second account, named work
 ak add --account command-code --kind claude      named commandcode-claude
 ak add goatx --account command-code --kind codex --model gpt-6-luna
 ak accounts                             accounts, who signed in, their providers
+ak accounts model command-code deepseek/deepseek-v4.1-flash    the plan's model
 ```
 
 A provider given no name is named `<source>-<engine>` after what it runs on:
@@ -175,6 +176,13 @@ endpoint onto an account; its endpoint fields equal to the vendor's and its
 own key are dropped. `ak login` again renews an account's credentials,
 `ak logout` removes one no provider runs on, and `ak accounts rename` renames
 one with its providers.
+
+**A plan that serves one model.** When a subscription lists a single model and
+refuses the rest, say so once on the account rather than in every provider on
+it: `ak accounts model <account> <model>`, or `model = "…"` under
+`[accounts.<name>]`. Every engine on the account then runs on it, an endpoint's
+own default included, and a provider that names a model of its own keeps it;
+`ak accounts model <account> -` clears it.
 
 **Your own vendors.** A TOML file in `~/.config/ak/vendors.d/` adds a vendor,
 or replaces a built-in with the same `id`, so a company gateway or a relay

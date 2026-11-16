@@ -117,8 +117,9 @@ func (c *Config) OnAccountProtocol(account, protocol string) (Provider, bool) {
 	}
 	p := c.resolveOn(Provider{Kind: Kind(kindOf(protocol)), Account: account}, protocol)
 	// The endpoint's own model wins over the one its kind would ask for: a
-	// vendor may serve a different model per protocol.
-	if e.Model != "" {
+	// vendor may serve a different model per protocol. A model the account
+	// names beats both, being what its plan serves.
+	if e.Model != "" && c.Accounts[account].Model == "" {
 		p.Model = e.Model
 	}
 	return p, true

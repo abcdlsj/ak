@@ -167,6 +167,49 @@ func TestModelMapping(t *testing.T) {
 	}
 }
 
+// A member's own model decides what it is asked for; the request's name is
+// only what the pool is called, so a pool of differently-set-up members works
+// without a --map for each of them.
+func TestMemberModel(t *testing.T) {
+	up := newUpstream(t)
+	cfg := poolConfig("pool", config.StrategyOrder, nil, map[string]config.Provider{
+		"a": {Kind: config.KindClaude, BaseURL: up.server.URL, APIKey: "sk-a", Model: "member-model"},
+	}, []string{"a"})
+
+	rec := post(New(cfg).Handler(), "/p/pool/v1/messages", `{"model":"client-model"}`)
+	if !strings.Contains(rec.Body.String(), `"model":"member-model"`) {
+		t.Errorf("the member's model was not used: %s", rec.Body)
+	}
+}
+
+// A mapping beats the member's own model, which is what a pool over members
+// set up for other models needs.
+func TestMapBeatsMemberModel(t *testing.T) {
+	up := newUpstream(t)
+	cfg := poolConfig("pool", config.StrategyOrder, map[string]string{"a": "mapped"}, map[string]config.Provider{
+		"a": {Kind: config.KindClaude, BaseURL: up.server.URL, APIKey: "sk-a", Model: "member-model"},
+	}, []string{"a"})
+
+	rec := post(New(cfg).Handler(), "/p/pool/v1/messages", `{"model":"client-model"}`)
+	if !strings.Contains(rec.Body.String(), `"model":"mapped"`) {
+		t.Errorf("the mapping was not used: %s", rec.Body)
+	}
+}
+
+// A member that names no model gets the request's own, so a pool with one
+// model name to give clients passes it through untouched.
+func TestMemberWithoutModelPassesThrough(t *testing.T) {
+	up := newUpstream(t)
+	cfg := poolConfig("pool", config.StrategyOrder, nil, map[string]config.Provider{
+		"a": {Kind: config.KindClaude, BaseURL: up.server.URL, APIKey: "sk-a"},
+	}, []string{"a"})
+
+	rec := post(New(cfg).Handler(), "/p/pool/v1/messages", `{"model":"client-model"}`)
+	if !strings.Contains(rec.Body.String(), `"model":"client-model"`) {
+		t.Errorf("the request's model was not passed through: %s", rec.Body)
+	}
+}
+
 func TestRotate(t *testing.T) {
 	a, b := newUpstream(t), newUpstream(t)
 	cfg := poolConfig("pool", config.StrategyRotate, nil, map[string]config.Provider{

@@ -40,6 +40,10 @@ type Draft struct {
 	// provider a normal upstream.
 	Members  string
 	Strategy string
+	// Maps is a pool's per-member model as member=model pairs, comma
+	// separated, so the members a pool was made of can each be asked for the
+	// model that pool means by its own name.
+	Maps string
 	// Account is the account the provider runs on; blank for an endpoint of
 	// its own.
 	Account string
@@ -81,6 +85,7 @@ func EditDraft(cfg *config.Config, name string) *Draft {
 		PiProvider:     p.PiProvider, PiAPI: p.PiAPI, PiAuth: p.PiAuthHeader,
 		Quota: p.Quota, QuotaCmd: p.QuotaCmd,
 		Members: strings.Join(p.Members, ", "), Strategy: p.Strategy,
+		Maps:     joinMaps(p.MemberModels),
 		Account:  p.Account,
 		existing: true, orig: name, base: p,
 	}
@@ -159,6 +164,7 @@ func (d *Draft) Provider() config.Provider {
 		p.Members = members
 		p.Strategy = strings.TrimSpace(d.Strategy)
 		p.BaseURL = ""
+		p.MemberModels = pruneToMembers(parseMaps(d.Maps), members)
 		if len(p.MemberModels) > 0 {
 			keep := map[string]bool{}
 			for _, m := range members {
@@ -189,6 +195,63 @@ func splitMembers(s string) []string {
 		}
 	}
 	return out
+}
+
+// parseMaps reads member=model pairs, comma or space separated. A pair
+// without a model removes that member's mapping.
+func parseMaps(s string) map[string]string {
+	out := map[string]string{}
+	for _, pair := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == '\n' }) {
+		member, model, ok := strings.Cut(pair, "=")
+		if !ok {
+			continue
+		}
+		member, model = strings.TrimSpace(member), strings.TrimSpace(model)
+		if member == "" {
+			continue
+		}
+		if model == "" {
+			delete(out, member)
+			continue
+		}
+		out[member] = model
+	}
+	return out
+}
+
+// pruneToMembers keeps only the mappings of members the pool still has.
+func pruneToMembers(m map[string]string, members []string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	keep := make(map[string]bool, len(members))
+	for _, name := range members {
+		keep[name] = true
+	}
+	out := map[string]string{}
+	for member, model := range m {
+		if keep[member] {
+			out[member] = model
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// joinMaps renders a pool's mappings for the form, sorted by member.
+func joinMaps(m map[string]string) string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, name+"="+m[name])
+	}
+	return strings.Join(parts, ", ")
 }
 
 // Orig is the name the draft started from, empty for a new provider.
@@ -357,6 +420,8 @@ func (d *Draft) endpointGroup() *huh.Group {
 	return huh.NewGroup(
 		huh.NewInput().Title("Pool members").Value(&d.Members).
 			Description("Comma-separated provider names; blank for a normal provider"),
+		huh.NewInput().Title("Member models").Value(&d.Maps).
+			Description("Optional, member=model pairs: what to ask each member for. Blank uses the member's own model"),
 		selectOf("Pool strategy", &d.Strategy,
 			huh.NewOption("order", config.StrategyOrder), huh.NewOption("rotate", config.StrategyRotate),
 			huh.NewOption("least-used", config.StrategyLeastUsed), huh.NewOption("smart", config.StrategySmart)),

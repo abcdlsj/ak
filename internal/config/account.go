@@ -18,6 +18,11 @@ type Account struct {
 	Display string `toml:"display,omitempty"`
 	// User is who signed in, as the vendor names them, for display.
 	User string `toml:"user,omitempty"`
+	// Model is the model this account's plan serves, when the vendor's own
+	// default is not what the plan has: a plan that lists one model and
+	// refuses the rest is stated once here rather than in every provider on
+	// the account. A provider naming a model of its own keeps it.
+	Model string `toml:"model,omitempty"`
 	// APIKey is the plaintext key, kept in auth.json like a provider's.
 	APIKey    string `toml:"-"`
 	APIKeyRef string `toml:"api_key_ref,omitempty"`
@@ -63,8 +68,9 @@ func (c *Config) Vendor(p Provider) (vendor.Vendor, bool) {
 
 // inherited pairs each provider field an endpoint can set with the
 // endpoint's value. Resolve and Stored walk it in opposite directions, so
-// the two always agree on what an account provides.
-func inherited(p *Provider, e vendor.Endpoint) []struct {
+// the two always agree on what an account provides. A model the account
+// names is what its plan serves, and it wins over the endpoint's default.
+func inherited(p *Provider, e vendor.Endpoint, accountModel string) []struct {
 	field *string
 	value string
 } {
@@ -72,7 +78,7 @@ func inherited(p *Provider, e vendor.Endpoint) []struct {
 		field *string
 		value string
 	}{
-		{&p.BaseURL, e.BaseURL}, {&p.Model, e.Model},
+		{&p.BaseURL, e.BaseURL}, {&p.Model, cmp.Or(accountModel, e.Model)},
 		{&p.Haiku, e.Haiku}, {&p.Sonnet, e.Sonnet}, {&p.Opus, e.Opus}, {&p.KeyField, e.KeyField},
 		{&p.WireAPI, e.WireAPI}, {&p.PiAPI, e.PiAPI},
 	}
@@ -112,7 +118,7 @@ func (c *Config) resolveOn(p Provider, protocol string) Provider {
 	if !ok {
 		return p
 	}
-	for _, f := range inherited(&p, e) {
+	for _, f := range inherited(&p, e, a.Model) {
 		if *f.field == "" {
 			*f.field = f.value
 		}
@@ -184,7 +190,7 @@ func (c *Config) Stored(p Provider) Provider {
 	if !ok {
 		return p
 	}
-	for _, f := range inherited(&p, e) {
+	for _, f := range inherited(&p, e, c.Accounts[p.Account].Model) {
 		if *f.field == f.value {
 			*f.field = ""
 		}

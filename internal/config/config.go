@@ -226,7 +226,8 @@ type Provider struct {
 	Members []string `toml:"members,omitempty"`
 	// MemberModels maps a member name to the model the gateway asks that
 	// member for, letting one pool map a logical model onto each upstream's
-	// own name. A member with no entry gets the requested model unchanged.
+	// own name. A member with no entry is asked for its own model, and a
+	// member that names none gets the requested model unchanged.
 	MemberModels map[string]string `toml:"member_models,omitempty"`
 	// Strategy is how a request picks a member: order, rotate, least-used or
 	// smart. A member may itself be a pool, which picks among its own.

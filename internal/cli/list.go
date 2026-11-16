@@ -44,7 +44,9 @@ type listRow struct {
 	PiProvider string   `json:"pi_provider,omitempty"`
 	Members    []string `json:"members,omitempty"`
 	Strategy   string   `json:"strategy,omitempty"`
-	Default    bool     `json:"default,omitempty"`
+	// MemberModels is a pool's per-member model, by member name.
+	MemberModels map[string]string `json:"member_models,omitempty"`
+	Default      bool              `json:"default,omitempty"`
 }
 
 func listRows(cfg *config.Config) []listRow {
@@ -52,17 +54,18 @@ func listRows(cfg *config.Config) []listRow {
 	for _, name := range cfg.Names() {
 		p := cfg.Providers[name]
 		rows = append(rows, listRow{
-			Name:       name,
-			Command:    cfg.Settings.Prefix + name,
-			Kind:       string(p.Kind),
-			Display:    p.Display,
-			Account:    p.Account,
-			BaseURL:    p.BaseURL,
-			Model:      p.Model,
-			PiProvider: p.PiProvider,
-			Members:    p.Members,
-			Strategy:   p.Strategy,
-			Default:    cfg.Settings.Default == name,
+			Name:         name,
+			Command:      cfg.Settings.Prefix + name,
+			Kind:         string(p.Kind),
+			Display:      p.Display,
+			Account:      p.Account,
+			BaseURL:      p.BaseURL,
+			Model:        p.Model,
+			PiProvider:   p.PiProvider,
+			Members:      p.Members,
+			Strategy:     p.Strategy,
+			MemberModels: p.MemberModels,
+			Default:      cfg.Settings.Default == name,
 		})
 	}
 	return rows
@@ -125,6 +128,19 @@ func runsOn(r listRow) string {
 	return endpoint(r)
 }
 
+// membersOf lists a pool's members, each with the model the pool asks it for
+// when that differs from the member's own.
+func membersOf(r listRow) []string {
+	out := make([]string, len(r.Members))
+	for i, m := range r.Members {
+		out[i] = m
+		if model := r.MemberModels[m]; model != "" {
+			out[i] = m + "=" + model
+		}
+	}
+	return out
+}
+
 // endpoint is what the command talks to: the upstream URL, or the members of a
 // pool.
 func endpoint(r listRow) string {
@@ -133,7 +149,7 @@ func endpoint(r listRow) string {
 		if strat == "" {
 			strat = config.StrategyOrder
 		}
-		return "pool(" + strat + ": " + strings.Join(r.Members, ", ") + ")"
+		return "pool(" + strat + ": " + strings.Join(membersOf(r), ", ") + ")"
 	}
 	if r.BaseURL == "" && r.PiProvider != "" {
 		return "pi:" + r.PiProvider

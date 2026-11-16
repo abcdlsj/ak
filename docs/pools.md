@@ -17,6 +17,15 @@ ak serve            # optional: launching a pool starts it in the background
 | `--member` | a provider in the pool, or another pool; repeatable and ordered |
 | `--strategy` | `order` (failover, the default), `rotate` (round-robin), `least-used` or `smart` |
 | `--map` | `member=model`: ask that member for a different model |
+| `--model` | what clients ask the pool for, when that is not each member's own name |
+
+**Which model a member is asked for.** In this order: the pool's `--map` entry
+for that member, else the model the member itself was set up with, else the
+model the request asked for. So a pool over members that each have their own
+model needs no map, and a pool whose name clients use for one model is mapped
+only where a member calls it something else. Only a member with no model of its
+own passes the request's model through, which is what makes `--model` on the
+pool the name clients see.
 
 **Smart** reads each member's quota (the same sources as `ak quota`) when the
 gateway starts, every five minutes and on reload, and puts first the member

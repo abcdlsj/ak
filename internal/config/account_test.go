@@ -101,3 +101,48 @@ base_url = "https://relay.example"
 		t.Errorf("stored codex = %+v", p)
 	}
 }
+
+// A plan that serves one model is stated once on the account: every engine
+// takes it, an endpoint's own default included, and a provider naming a model
+// of its own keeps it.
+func TestAccountModelWins(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "plan.toml"), []byte(`id = "plan"
+[[endpoints]]
+protocol = "anthropic"
+base_url = "https://plan.example"
+model = "vendor-default"
+[[endpoints]]
+protocol = "chat"
+base_url = "https://plan.example/v1"
+model = "vendor-chat-default"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vendor.LoadDir(dir)
+	t.Cleanup(func() { vendor.LoadDir("") })
+
+	cfg := Default()
+	cfg.Accounts["a"] = Account{Vendor: "plan", Model: "only-model"}
+	cfg.Providers["claude"] = Provider{Kind: KindClaude, Account: "a"}
+	cfg.Providers["codex"] = Provider{Kind: KindCodex, Account: "a"}
+	cfg.Providers["own"] = Provider{Kind: KindClaude, Account: "a", Model: "mine"}
+
+	if p, ok := cfg.OnAccountProtocol("a", "chat"); !ok || p.Model != "only-model" {
+		t.Errorf("chat on the account = %+v, %v; want the account's model", p, ok)
+	}
+	cfg.Resolve()
+	if p := cfg.Providers["claude"]; p.Model != "only-model" {
+		t.Errorf("claude = %q, want the account's model over the endpoint's", p.Model)
+	}
+	if p := cfg.Providers["codex"]; p.Model != "only-model" {
+		t.Errorf("codex = %q, want the account's model", p.Model)
+	}
+	if p := cfg.Providers["own"]; p.Model != "mine" {
+		t.Errorf("own = %q; a provider's own model must win", p.Model)
+	}
+	// What the account gives is not written back as a provider's own.
+	if st := cfg.Stored(cfg.Providers["claude"]); st.Model != "" {
+		t.Errorf("stored model = %q, want it left to the account", st.Model)
+	}
+}

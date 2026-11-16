@@ -193,12 +193,49 @@ func newAccountsCmd() *cobra.Command {
 			rows := make([][]string, 0, len(cfg.Accounts))
 			for _, n := range cfg.AccountNames() {
 				a := cfg.Accounts[n]
-				rows = append(rows, []string{n, a.Vendor, out.Or(a.User), accountKey(a), out.Or(strings.Join(cfg.UsersOf(n), ", "))})
+				rows = append(rows, []string{n, a.Vendor, out.Or(a.User), accountKey(a),
+					out.Or(a.Model), out.Or(strings.Join(cfg.UsersOf(n), ", "))})
 			}
-			out.Table(os.Stdout, []string{"account", "vendor", "user", "key", "providers"}, rows)
+			out.Table(os.Stdout, []string{"account", "vendor", "user", "key", "model", "providers"}, rows)
 			return nil
 		},
 	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "model <account> <model|->",
+		Short: "Set the model an account's plan serves, or - to clear it",
+		Long: `Say which model an account's plan serves, when the vendor's own default
+is not one it has. Every provider on the account runs on it unless it names a
+model of its own, and so does every endpoint, whatever protocol it speaks.
+
+  ak accounts model command-code deepseek/deepseek-v4.1-flash
+  ak accounts model opendesign -`,
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeAccounts,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			a, ok := cfg.Accounts[args[0]]
+			if !ok {
+				return fmt.Errorf("account %q does not exist", args[0])
+			}
+			model := strings.TrimSpace(args[1])
+			if model == "-" {
+				model = ""
+			}
+			if a.Model == model {
+				out.Hint(os.Stdout, "%s already runs on %s", args[0], out.Or(model))
+				return nil
+			}
+			a.Model = model
+			if err := core.SetAccount(cfg, args[0], a); err != nil {
+				return err
+			}
+			out.Done(os.Stdout, "%s runs on %s", args[0], out.Or(model))
+			return nil
+		},
+	})
 	cmd.AddCommand(&cobra.Command{
 		Use:               "rename <account> <new-name>",
 		ValidArgsFunction: completeAccounts,

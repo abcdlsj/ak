@@ -600,3 +600,21 @@ func TestServiceRefusedForOneModel(t *testing.T) {
 		t.Errorf("a name for another model carried a refusal: %+v", got)
 	}
 }
+
+// An account whose plan serves one model answers with that model on every
+// protocol, so a route over such accounts reports the models it will really
+// use rather than the vendor's defaults.
+func TestServiceAccountModel(t *testing.T) {
+	r := newRig(t, func(c *config.Config) {
+		c.Accounts["bili"] = config.Account{Vendor: "both", APIKey: "key-bili", Model: "plan-model"}
+		c.Service.Routes = map[string]config.Route{"main": {Members: []string{"bili", "dsk"}}}
+	})
+	rec := r.do(t, "/v1/chat/completions", withModel(t, "chat_request.json", "main", false))
+	if rec.Code != 200 || r.both.last(t).body["model"] != "plan-model" {
+		t.Errorf("model sent upstream = %v (%d)", r.both.last(t).body["model"], rec.Code)
+	}
+	// The route reports the model the plan serves, not the vendor's default.
+	if m := r.srv.modelsOf(r.srv.config(), "main"); len(m) != 2 || m[0] != "deepseek-v4" || m[1] != "plan-model" {
+		t.Errorf("models of main = %v, want the account's model and the other's", m)
+	}
+}

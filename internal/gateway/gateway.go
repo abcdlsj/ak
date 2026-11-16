@@ -399,13 +399,17 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RawQuery != "" {
 			target += "?" + r.URL.RawQuery
 		}
-		out := body
-		if rt.model != "" {
-			out = rewriteModel(body, rt.model)
-		}
+		// What the member is asked for: the pool's mapping of it, else the
+		// model the member was set up with. Only a member that names neither
+		// gets the request's own model, so choosing a model for a pool or a
+		// member is what decides it.
 		model := rt.model
 		if model == "" {
 			model = mp.Model
+		}
+		out := body
+		if model != "" {
+			out = rewriteModel(body, model)
 		}
 		return leg{member: rt.member, p: mp, target: target, body: out,
 			model: model, protocol: string(protocolOf(mp))}, nil
