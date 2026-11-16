@@ -585,6 +585,14 @@ func doctorAntigravity(d *doctor, cfg *config.Config) {
 			d.hint("Sign in again with `ak agy login %s`", name)
 		}
 	}
+	// A directory in the shared arguments would replace every provider's own:
+	// the flag ak passes comes first, so a later one wins.
+	if flag := antigravityDirFlag(cfg.Settings.AntigravityArgs); flag != "" {
+		allFine = false
+		d.bad("settings antigravity_args sets %s, so every provider would share one directory", flag)
+		d.hint("Remove it; a provider states its own gemini_dir")
+	}
+
 	shared := false
 	for dir, sharing := range byDir {
 		if len(sharing) > 1 {
@@ -616,4 +624,22 @@ func doctorAntigravity(d *doctor, cfg *config.Config) {
 		d.note("account this Mac is signed in to, instead of its own.")
 		d.hint("Check `agy --help` and the ak release notes before using agy again")
 	}
+}
+
+// antigravityDirFlag names the directory flag in a settings argument list, or
+// "" when there is none. It reads both "--flag value" and "--flag=value".
+func antigravityDirFlag(args []string) string {
+	for i, a := range args {
+		name, _, eq := strings.Cut(a, "=")
+		if name != "--gemini_dir" && name != "--app_data_dir" {
+			continue
+		}
+		if eq {
+			return name
+		}
+		if i+1 < len(args) {
+			return name
+		}
+	}
+	return ""
 }

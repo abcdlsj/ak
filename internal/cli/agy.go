@@ -86,7 +86,7 @@ func newAgyAddCmd() *cobra.Command {
 				return err
 			}
 			if login {
-				return execProvider(cfg, name, "", nil)
+				return execProviderToSignIn(cfg, name, "", nil)
 			}
 			if !keychain {
 				out.Hint(os.Stdout, "Sign in with `ak agy login %s`, or copy this Mac's account in with `ak agy import %s --keychain`", name, name)
@@ -128,7 +128,7 @@ func newAgyLoginCmd() *cobra.Command {
 				return err
 			}
 			out.Hint(os.Stdout, "agy opens a sign-in page and asks you to paste the code back; the account stays in %s", config.ExpandHome(p.GeminiDir))
-			return execProvider(cfg, name, "", nil)
+			return execProviderToSignIn(cfg, name, "", nil)
 		},
 	}
 }

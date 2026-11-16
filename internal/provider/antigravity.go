@@ -60,7 +60,9 @@ func (agyEngine) Launch(name string, p config.Provider, _ Secret, ctx Context) (
 }
 
 // AntigravityArgs renders the flags that select the provider's directory and
-// model. --gemini_dir comes first so a user argument cannot shadow it.
+// model. --gemini_dir comes first, so it is the launch's own value that later
+// ones — a settings argument, the user's own — replace; ak doctor reports those,
+// since a directory stated there would give every provider one account.
 func AntigravityArgs(p config.Provider) []string {
 	args := []string{"--gemini_dir", config.ExpandHome(p.GeminiDir)}
 	if p.Model != "" {

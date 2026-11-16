@@ -67,16 +67,11 @@ func withoutOverride(environ []string) []string {
 	return out
 }
 
-// execProvider replaces ak with the provider's engine. What it cannot launch
-// is caught here, with the fix, rather than surfacing later as the engine's
-// own error (a 401 for a missing key).
-func execProvider(cfg *config.Config, name, variant string, args []string) error {
-	p, ok := cfg.Providers[name]
-	if !ok {
-		return fmt.Errorf("provider %q does not exist; see `ak list`", name)
-	}
-	st := core.QuickStatus(cfg, name)
-	if st.NeedsLogin {
+// launchRefusal says why this provider cannot be launched, or nil. A sign-in
+// launch is exempt from a missing credential, but from nothing else: an engine
+// that takes a key still needs one during the launch that would add it.
+func launchRefusal(name string, p config.Provider, st core.Status, signIn bool) error {
+	if st.NeedsLogin && !signIn {
 		return fmt.Errorf("%s is not signed in; run `ak agy login %s` and finish the sign-in it opens", name, name)
 	}
 	if st.NoKey {
@@ -84,6 +79,31 @@ func execProvider(cfg *config.Config, name, variant string, args []string) error
 			return fmt.Errorf("a member of pool %s has no API key; see `ak list`", name)
 		}
 		return fmt.Errorf("%s has no API key; set one with `ak edit %s --key -`", name, name)
+	}
+	return nil
+}
+
+// execProvider replaces ak with the provider's engine. What it cannot launch
+// is caught here, with the fix, rather than surfacing later as the engine's
+// own error (a 401 for a missing key).
+func execProvider(cfg *config.Config, name, variant string, args []string) error {
+	return execProviderWith(cfg, name, variant, args, false)
+}
+
+// execProviderToSignIn launches an engine that signs in itself even though no
+// credential is there yet: the launch is what writes one, so the check every
+// other launch makes would refuse the very command that fixes it.
+func execProviderToSignIn(cfg *config.Config, name, variant string, args []string) error {
+	return execProviderWith(cfg, name, variant, args, true)
+}
+
+func execProviderWith(cfg *config.Config, name, variant string, args []string, signIn bool) error {
+	p, ok := cfg.Providers[name]
+	if !ok {
+		return fmt.Errorf("provider %q does not exist; see `ak list`", name)
+	}
+	if err := launchRefusal(name, p, core.QuickStatus(cfg, name), signIn); err != nil {
+		return err
 	}
 	key, err := secrets.Default().Resolve(p)
 	if err != nil {

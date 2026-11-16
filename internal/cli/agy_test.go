@@ -180,3 +180,43 @@ func TestAgyPathsForHooks(t *testing.T) {
 		t.Error("a provider without a credential has a token file")
 	}
 }
+
+// The command that adds the credential must not be the one the missing
+// credential refuses: `ak agy login` on a fresh provider is a launch, and a
+// launch is what writes the token.
+func TestAgySignInLaunchIsNotRefused(t *testing.T) {
+	p, _ := antigravityProvider(t)
+	st := core.Status{NeedsLogin: true}
+
+	if err := launchRefusal("work", p, st, false); err == nil {
+		t.Fatal("a launch with no credential was allowed")
+	}
+	if err := launchRefusal("work", p, st, true); err != nil {
+		t.Errorf("signing in was refused: %v", err)
+	}
+
+	// A keyed engine has nothing to sign in, so the exemption does not cover it.
+	claude := config.Provider{Kind: config.KindClaude, BaseURL: "https://a"}
+	if err := launchRefusal("work", claude, core.Status{NoKey: true}, true); err == nil {
+		t.Error("a keyed engine was launched to sign in")
+	}
+}
+
+// A directory in the shared agy arguments replaces every provider's own, since
+// ak's --gemini_dir comes first and the later flag wins. Doctor names it.
+func TestAgyDirFlagInSharedArgs(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--dangerously-skip-permissions"}, ""},
+		{[]string{"--gemini_dir", "/tmp/g"}, "--gemini_dir"},
+		{[]string{"--app_data_dir=/tmp/a"}, "--app_data_dir"},
+		{[]string{"--gemini_dir"}, ""},
+	}
+	for _, c := range cases {
+		if got := antigravityDirFlag(c.args); got != c.want {
+			t.Errorf("antigravityDirFlag(%v) = %q, want %q", c.args, got, c.want)
+		}
+	}
+}
