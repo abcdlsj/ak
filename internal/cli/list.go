@@ -7,29 +7,50 @@ import (
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/out"
 	"github.com/spf13/cobra"
 )
 
 func newListCmd() *cobra.Command {
-	var asJSON bool
+	var (
+		asJSON  bool
+		refresh bool
+	)
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
-		Short:   "List all providers",
+		Short:   "List all providers, and the models each really answers with",
+		Long: `List every provider with what it runs on and the models it answers with.
+
+A pool answers with its members' models, and a provider on a remote account
+asks a name the service chose — possibly a route over several models. What
+such a name answers with is what the service last said, kept between runs;
+--refresh asks the services again.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
 				return err
 			}
-			if asJSON {
-				return json.NewEncoder(os.Stdout).Encode(listRows(cfg))
+			routes := core.RemoteRoutes(cfg)
+			// What a remote said before is worth showing; a service that does
+			// not answer leaves it in place rather than failing the list.
+			if refresh || routes.Stale() {
+				if fresh, err := core.FetchRemoteRoutes(cmd.Context(), cfg); err == nil {
+					routes = fresh
+				} else {
+					warnf("ak: %v; remote models are as last seen", err)
+				}
 			}
-			printList(cfg)
+			if asJSON {
+				return json.NewEncoder(os.Stdout).Encode(listRows(cfg, routes))
+			}
+			printList(cfg, routes)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&refresh, "refresh", false, "Ask remote services again what their names answer with")
 	return cmd
 }
 
@@ -46,10 +67,13 @@ type listRow struct {
 	Strategy   string   `json:"strategy,omitempty"`
 	// MemberModels is a pool's per-member model, by member name.
 	MemberModels map[string]string `json:"member_models,omitempty"`
-	Default      bool              `json:"default,omitempty"`
+	// Serves is what the provider really answers with: a pool's members'
+	// models, and the models behind a name that only stands for them.
+	Serves  []string `json:"serves,omitempty"`
+	Default bool     `json:"default,omitempty"`
 }
 
-func listRows(cfg *config.Config) []listRow {
+func listRows(cfg *config.Config, routes core.RemoteModels) []listRow {
 	rows := make([]listRow, 0, len(cfg.Providers))
 	for _, name := range cfg.Names() {
 		p := cfg.Providers[name]
@@ -65,14 +89,15 @@ func listRows(cfg *config.Config) []listRow {
 			Members:      p.Members,
 			Strategy:     p.Strategy,
 			MemberModels: p.MemberModels,
+			Serves:       core.ModelNames(cfg, name, routes.Models),
 			Default:      cfg.Settings.Default == name,
 		})
 	}
 	return rows
 }
 
-func printList(cfg *config.Config) {
-	rows := listRows(cfg)
+func printList(cfg *config.Config, routes core.RemoteModels) {
+	rows := listRows(cfg, routes)
 	if len(rows) == 0 {
 		out.Empty(os.Stdout, "No providers yet.", "Add one with `ak add`, sign in with `ak login <vendor>`, or `ak import --from cc-switch`.")
 		return
@@ -99,7 +124,7 @@ func printList(cfg *config.Config) {
 		if r.Default {
 			cmd += " " + out.Warn("★")
 		}
-		row := []string{cmd, r.Kind, out.Or(r.Model), out.Or(runsOn(r))}
+		row := []string{cmd, r.Kind, modelCell(r), out.Or(runsOn(r))}
 		if withDisplay {
 			row = append(row, out.Or(display(r)))
 		}
@@ -117,6 +142,14 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// modelCell is what a provider answers with. A name that is not a model — a
+// pool's, or a route a remote service chose — says the models behind it,
+// because that is what the user is served by; the name itself stays when it
+// is all ak can say.
+func modelCell(r listRow) string {
+	return out.Models(r.Model, r.Serves)
 }
 
 // runsOn is what the command talks to: its account, the members of a pool,

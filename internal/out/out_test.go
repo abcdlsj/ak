@@ -32,3 +32,25 @@ func TestTable(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
 	}
 }
+
+// A model cell says what a provider answers with, and explains a name that is
+// not itself the answer.
+func TestModels(t *testing.T) {
+	for _, c := range []struct {
+		asked  string
+		serves []string
+		want   string
+	}{
+		{"", nil, "-"},
+		{"m", nil, "m"},
+		{"m", []string{"m"}, "m"},
+		{"m", []string{"m", "n"}, "m +1"},
+		{"main", []string{"a"}, "main → a"},
+		{"main", []string{"a", "b"}, "main → a +1"},
+		{"", []string{"a", "b"}, "a +1"},
+	} {
+		if got := Models(c.asked, c.serves); got != c.want {
+			t.Errorf("Models(%q, %v) = %q, want %q", c.asked, c.serves, got, c.want)
+		}
+	}
+}

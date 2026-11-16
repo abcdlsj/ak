@@ -95,3 +95,18 @@ func TestDraftPoolMappingRoundTrip(t *testing.T) {
 		t.Fatalf("Maps = %q, want the pairs sorted", d.Maps)
 	}
 }
+
+// The model column says what a pool answers with, not the name it is called.
+func TestPoolListShowsTheModelsItServes(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["a"] = config.Provider{Kind: config.KindCodex, BaseURL: "https://a.example", Model: "m-a"}
+	cfg.Providers["b"] = config.Provider{Kind: config.KindCodex, BaseURL: "https://b.example", Model: "m-b"}
+	cfg.Providers["pool"] = config.Provider{Kind: config.KindCodex, Members: []string{"a", "b"}, Model: "main"}
+	a := newApp(cfg)
+	if got := modelCell(a, "pool"); got != "main → m-a +1" {
+		t.Errorf("pool cell = %q, want the members' models", got)
+	}
+	if got := modelCell(a, "a"); got != "m-a" {
+		t.Errorf("plain cell = %q", got)
+	}
+}

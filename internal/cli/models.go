@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/probe"
 	"github.com/abcdlsj/ak/internal/secrets"
@@ -33,6 +34,25 @@ on its root. The first that answers with a list wins.`,
 			p, ok := cfg.Providers[name]
 			if !ok {
 				return fmt.Errorf("provider %q does not exist", name)
+			}
+			// A pool answers with its members' models, and a name a remote
+			// service chose with the models it said it stands for; asking the
+			// pool's own endpoint, which is ak's gateway, says nothing.
+			if p.IsPool() || (p.Account != "" && core.RemoteRoutes(cfg).Models(p.Model) != nil) {
+				routes := core.RemoteRoutes(cfg)
+				if fresh, err := core.FetchRemoteRoutes(cmd.Context(), cfg); err == nil {
+					routes = fresh
+				}
+				served := core.Serves(cfg, name, routes.Models)
+				ids := make([]string, 0, len(served))
+				for _, s := range served {
+					ids = append(ids, s.Model)
+				}
+				if asJSON {
+					return json.NewEncoder(os.Stdout).Encode(served)
+				}
+				printModels(ids)
+				return nil
 			}
 			key, err := secrets.Default().Resolve(p)
 			if err != nil {

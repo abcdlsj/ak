@@ -271,7 +271,7 @@ func (p *providersPage) list(a *app, names []string, width, height int) string {
 		r.add(st, mark)
 		r.add(rowStyle, " "+pad(n, nameW)+"  "+pad(string(pr.Kind), kindW)+"  ")
 		r.add(dimStyle, pad(truncate(runsOn(cfg, n), onW), onW)+"  ")
-		model := truncate(pr.Model, modelW)
+		model := truncate(modelCell(a, n), modelW)
 		if model == "" {
 			r.add(dimStyle, "-")
 		} else {
@@ -286,6 +286,31 @@ func (p *providersPage) list(a *app, names []string, width, height int) string {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more", len(names)-start-rows)))
 	}
 	return b.String()
+}
+
+// modelCell is what a provider answers with, in a list's width: the name a
+// client asks when that is the model, else the model behind it and how many
+// others would answer.
+func modelCell(a *app, name string) string {
+	p := a.cfg.Providers[name]
+	models := core.ModelNames(a.cfg, name, a.routes.Models)
+	if len(models) == 0 {
+		return ""
+	}
+	rest := ""
+	if len(models) > 1 {
+		rest = fmt.Sprintf(" +%d", len(models)-1)
+	}
+	if p.Model == "" || p.Model == models[0] {
+		return models[0] + rest
+	}
+	return p.Model + " → " + models[0] + rest
+}
+
+// saysMore reports whether the models a provider answers with say something
+// its own model field does not.
+func saysMore(models []string, model string) bool {
+	return len(models) > 1 || (len(models) == 1 && models[0] != model)
 }
 
 // runsOn names what a provider talks to, short: its account, a pool's
@@ -401,6 +426,9 @@ func detailPanel(a *app, name string, width int) string {
 	flush()
 
 	field("model", p.Model)
+	if models := core.ModelNames(cfg, name, a.routes.Models); saysMore(models, p.Model) {
+		field("serves", strings.Join(models, ", "))
+	}
 	switch p.Kind {
 	case config.KindClaude:
 		if p.Opus != p.Model || p.Sonnet != p.Model || p.Haiku != p.Model {

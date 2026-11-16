@@ -4,6 +4,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -85,10 +86,13 @@ type app struct {
 	active   int
 	overlay  overlay
 	statuses map[string]core.Status
-	usage    usageState
-	quotas   quotaStore
-	spinner  spinner.Model
-	flash    flash
+	// routes is what each remote service said its names answer with, so a
+	// provider asking a route shows the models behind it.
+	routes  core.RemoteModels
+	usage   usageState
+	quotas  quotaStore
+	spinner spinner.Model
+	flash   flash
 
 	// poolStats is the local gateway's flow view, refreshed while the home
 	// page shows a pool.
@@ -112,7 +116,11 @@ type (
 		rows []usage.Row
 		err  error
 	}
-	statusesMsg  map[string]core.Status
+	statusesMsg map[string]core.Status
+	routesMsg   struct {
+		routes core.RemoteModels
+		err    error
+	}
 	flashMsg     flash
 	flashTickMsg struct{}
 	poolStatsMsg struct {
@@ -133,6 +141,7 @@ func newApp(cfg *config.Config) *app {
 	home.focus(cfg, cfg.Settings.Default)
 	return &app{
 		cfg:     cfg,
+		routes:  core.RemoteRoutes(cfg),
 		pages:   []page{home, newAccountsPage(), newUsagePage()},
 		spinner: sp,
 	}
@@ -142,7 +151,7 @@ func newApp(cfg *config.Config) *app {
 func (a *app) home() *providersPage { return a.pages[pageHome].(*providersPage) }
 
 func (a *app) Init() tea.Cmd {
-	cmds := []tea.Cmd{a.loadUsage(), a.loadStatuses(), a.spinner.Tick, a.poolStatsTick()}
+	cmds := []tea.Cmd{a.loadUsage(), a.loadStatuses(), a.spinner.Tick, a.poolStatsTick(), a.refreshRoutes()}
 	// With nothing configured, start by adding a provider: preset, key, done.
 	if len(a.cfg.Providers) == 0 {
 		cmds = append(cmds, a.open(newFormOverlay(NewDraft(""))))
@@ -191,6 +200,19 @@ func (a *app) loadPoolStats() tea.Cmd {
 	}
 }
 
+// refreshRoutes asks the remote services what their names answer with, when
+// what is known is old enough to be worth asking again.
+func (a *app) refreshRoutes() tea.Cmd {
+	cfg, known := a.cfg, a.routes
+	if !known.Stale() {
+		return nil
+	}
+	return func() tea.Msg {
+		routes, err := core.FetchRemoteRoutes(context.Background(), cfg)
+		return routesMsg{routes: routes, err: err}
+	}
+}
+
 func (a *app) loadStatuses() tea.Cmd {
 	cfg := a.cfg
 	return func() tea.Msg { return statusesMsg(core.Statuses(cfg)) }
@@ -226,6 +248,11 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case statusesMsg:
 		a.statuses = msg
+		return a, nil
+	case routesMsg:
+		if msg.err == nil {
+			a.routes = msg.routes
+		}
 		return a, nil
 	case quotaReadMsg:
 		a.quotas.got(msg)

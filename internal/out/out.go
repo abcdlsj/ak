@@ -60,6 +60,24 @@ func Or(s string) string {
 	return s
 }
 
+// Models is what a provider answers with, one cell wide: the name a client
+// asks for, and the models behind it when that name is not itself the answer —
+// a pool's members' models, or a route a remote service chose.
+func Models(asked string, serves []string) string {
+	rest := ""
+	if len(serves) > 1 {
+		rest = fmt.Sprintf(" +%d", len(serves)-1)
+	}
+	switch {
+	case len(serves) == 0:
+		return Or(asked)
+	case asked == "" || asked == serves[0]:
+		// Nothing to explain: the name is the model, or there is no name.
+		return serves[0] + rest
+	}
+	return asked + " → " + serves[0] + rest
+}
+
 // Level is a row's state.
 type Level int
 

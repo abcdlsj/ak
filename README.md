@@ -88,6 +88,9 @@ ak-<name> [args...]             the same as ak <name>, for scripts
 
 ## More
 
+- [Architecture](docs/architecture.md): the four layers — vendor, account,
+  provider, name — how a request resolves to a leg, which model a member is
+  asked for, and where the design still strains.
 - [Guide](docs/guide.md): typing `claude` and `codex` directly, variants, the
   launcher, environment, accounts and vendors, sharing or isolating config, pi, how usage
   is attributed.
