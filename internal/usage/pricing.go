@@ -1,23 +1,11 @@
 package usage
 
 import (
-	"encoding/json"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
 	"sync"
-	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/modelmeta"
 )
-
-// modelsDevURL is the official model pricing source, also used by cc-switch.
-const modelsDevURL = "https://models.dev/api.json"
-
-// priceTTL is how long the cached table is trusted before a refetch.
-const priceTTL = 24 * time.Hour
 
 // modelPrice is the price per million tokens, in USD.
 type modelPrice struct {
@@ -46,21 +34,18 @@ var (
 	prices    priceBook
 )
 
-// defaultPrices loads the table once: fresh cache, else models.dev, else a
-// stale cache — an old price beats reporting everything as unpriced offline.
+// defaultPrices loads the table once, from the catalog ak keeps for both prices
+// and model numbers: a fresh cache answers at once, a stale one is refetched,
+// and a failed fetch leaves the old prices in place — an old price beats
+// reporting every row as unpriced offline.
 func defaultPrices() priceBook {
 	priceOnce.Do(func() {
-		cached, age, ok := readPriceCache()
-		if ok && age < priceTTL {
-			prices = cached
-			return
+		_ = modelmeta.Refresh()
+		book := priceBook{}
+		for id, p := range modelmeta.Prices() {
+			book[id] = modelPrice{Input: p.Input, Output: p.Output, CacheRead: p.CacheRead, CacheWrite: p.CacheWrite}
 		}
-		if fresh, err := fetchPrices(); err == nil {
-			prices = fresh
-			writePriceCache(fresh)
-			return
-		}
-		prices = cached
+		prices = book
 	})
 	return prices
 }
@@ -90,7 +75,7 @@ func costOf(r Row, cfg *config.Config) (float64, bool) {
 }
 
 // priceFor resolves a row's price: an explicit per-provider price wins, then a
-// discount on the models.dev price, then the models.dev price itself.
+// discount on the catalog price, then the catalog price itself.
 func priceFor(r Row, cfg *config.Config, book priceBook) (modelPrice, bool) {
 	if p, ok := cfg.Providers[r.Provider]; ok && p.Pricing != nil {
 		pr := *p.Pricing
@@ -103,122 +88,4 @@ func priceFor(r Row, cfg *config.Config, book priceBook) (modelPrice, bool) {
 		}
 	}
 	return book.lookup(r.Model)
-}
-
-func priceCachePath() string {
-	dir, err := config.DataDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(dir, "model-prices.json")
-}
-
-func readPriceCache() (priceBook, time.Duration, bool) {
-	p := priceCachePath()
-	fi, err := os.Stat(p)
-	if err != nil {
-		return nil, 0, false
-	}
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return nil, 0, false
-	}
-	var m priceBook
-	if json.Unmarshal(data, &m) != nil {
-		return nil, 0, false
-	}
-	return m, time.Since(fi.ModTime()), true
-}
-
-func writePriceCache(m priceBook) {
-	p := priceCachePath()
-	if p == "" {
-		return
-	}
-	data, err := json.Marshal(m)
-	if err != nil {
-		return
-	}
-	_ = os.MkdirAll(filepath.Dir(p), 0o700)
-	_ = config.AtomicWrite(p, data, 0o600)
-	// The earlier table resolved duplicate ids in random map order.
-	_ = os.Remove(filepath.Join(filepath.Dir(p), "model-pricing.json"))
-}
-
-// modelsDevCost mirrors models.dev's cost structure, in USD per million tokens.
-type modelsDevCost struct {
-	Input      *float64 `json:"input"`
-	Output     *float64 `json:"output"`
-	CacheRead  *float64 `json:"cache_read"`
-	CacheWrite *float64 `json:"cache_write"`
-}
-
-type modelsDevProvider struct {
-	Models map[string]struct {
-		Cost *modelsDevCost `json:"cost"`
-	} `json:"models"`
-}
-
-// firstParty are the vendors whose own listing wins when several providers on
-// models.dev list the same model id at different prices.
-var firstParty = []string{"anthropic", "openai", "google", "deepseek", "moonshotai", "zhipuai", "xai", "mistral"}
-
-func fetchPrices() (priceBook, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(modelsDevURL)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var doc map[string]modelsDevProvider
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-		return nil, err
-	}
-	return buildPriceBook(doc), nil
-}
-
-// buildPriceBook flattens models.dev into one table. Providers are visited in
-// a fixed order — first-party vendors, then the rest alphabetically — and the
-// first price for an id wins, so the result does not depend on map order.
-func buildPriceBook(doc map[string]modelsDevProvider) priceBook {
-	rank := map[string]int{}
-	for i, v := range firstParty {
-		rank[v] = i + 1
-	}
-	names := make([]string, 0, len(doc))
-	for n := range doc {
-		names = append(names, n)
-	}
-	sort.Slice(names, func(i, j int) bool {
-		ri, rj := rank[names[i]], rank[names[j]]
-		switch {
-		case ri > 0 && rj > 0:
-			return ri < rj
-		case ri > 0 || rj > 0:
-			return ri > 0
-		}
-		return names[i] < names[j]
-	})
-
-	out := priceBook{}
-	for _, n := range names {
-		for id, m := range doc[n].Models {
-			if m.Cost == nil {
-				continue
-			}
-			if _, ok := out[id]; ok {
-				continue
-			}
-			out[id] = modelPrice{deref(m.Cost.Input), deref(m.Cost.Output),
-				deref(m.Cost.CacheRead), deref(m.Cost.CacheWrite)}
-		}
-	}
-	return out
-}
-
-func deref(f *float64) float64 {
-	if f == nil {
-		return 0
-	}
-	return *f
 }

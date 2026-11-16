@@ -150,7 +150,8 @@ ak usage --ak-only       leave out engine logins and other tools
 ```
 
 Cost comes from models.dev prices, fetched once a day into
-`~/.config/ak/model-prices.json`. A provider's own `[providers.x.pricing]`
+`~/.config/ak/model-meta.json` — the same file that holds the model numbers a
+launch hands its engine. A provider's own `[providers.x.pricing]`
 overrides them: either explicit per-million prices, or a `discount` multiplier
 on the models.dev figure. A model with no price anywhere is counted in tokens
 and named in one line under the total, never added to the cost as zero.

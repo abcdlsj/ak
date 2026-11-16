@@ -1,15 +1,18 @@
-// Package modelmeta knows a model's context window and reply limit.
+// Package modelmeta knows a model: its context window, the longest reply it may
+// write, and what a million of its tokens cost.
 //
-// Every engine keeps those two numbers in a file or a variable of its own, and
+// Every engine keeps the two numbers in a file or a variable of its own, and
 // each guesses in its own way when it has neither: pi takes a model for a 128K
 // one and caps every reply at 16384 tokens, Claude Code guesses a window and
-// asks for 32000 at most, and codex takes 272K. The numbers come from
-// models.dev, the table ak already reads for prices, and a provider may state
-// its own.
+// asks for 32000 at most, and codex takes 272K. Both sets of numbers come from
+// models.dev in one document and live in one cache, so one download answers a
+// sync and a usage report, and a model ak knows a window for is a model it can
+// price.
 package modelmeta
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,13 +24,25 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 )
 
-// url is models.dev's catalog. ak keeps its own slice of it, apart from the
-// prices usage reads: a launch must answer from disk, and neither table should
-// make the other wait for a fetch.
+// url is models.dev's catalog: every provider's models with their limits and
+// their prices.
 const url = "https://models.dev/api.json"
 
-// ttl is how long the cached table is trusted before a refetch.
+// ttl is how long the cached catalog is trusted before a refetch.
 const ttl = 24 * time.Hour
+
+// fetchTimeout is long enough for the catalog over a slow link, short enough
+// that a sync does not hang on a network that is not there.
+const fetchTimeout = 10 * time.Second
+
+// cacheName is the catalog beside the config. It holds both tables, so a model
+// priced by one is a model with numbers in the other.
+const cacheName = "model-meta.json"
+
+// legacyPriceCache is the price table ak kept in a file of its own, with its own
+// fetch, before the two shared one document. It is reclaimed when a write
+// happens, so nothing reads a table the catalog has replaced.
+const legacyPriceCache = "model-prices.json"
 
 // leastWindow is the smallest context window taken at its word. Less cannot
 // hold a system prompt, let alone a turn, and an engine told it compacts at
@@ -40,41 +55,70 @@ type Facts struct {
 	MaxOutput int `json:"max_output,omitempty"`
 }
 
+// Price is what a million tokens cost, in USD.
+type Price struct {
+	Input      float64 `json:"input"`
+	Output     float64 `json:"output"`
+	CacheRead  float64 `json:"cache_read"`
+	CacheWrite float64 `json:"cache_write"`
+}
+
+// catalog is what the cache holds: the two tables read from one document.
+type catalog struct {
+	Models map[string]Facts `json:"models"`
+	Prices map[string]Price `json:"prices"`
+}
+
 // For is what ak knows about one of p's models: the provider's own numbers win
-// over the table's.
+// over the catalog's.
 func For(p config.Provider, model string) Facts {
 	f := Facts{Context: p.ContextWindow, MaxOutput: p.MaxTokens}
-	known, ok := Lookup(model)
-	if !ok {
-		return f
+	if known, ok := Lookup(model); ok {
+		if f.Context == 0 {
+			f.Context = known.Context
+		}
+		if f.MaxOutput == 0 {
+			f.MaxOutput = known.MaxOutput
+		}
 	}
-	if f.Context == 0 {
-		f.Context = known.Context
-	}
-	if f.MaxOutput == 0 {
-		f.MaxOutput = known.MaxOutput
+	return fit(f)
+}
+
+// fit drops a reply limit that cannot fit its window: a provider states the
+// window while the catalog states the reply, and one of them would be wrong.
+// Left out, the engine keeps its own.
+func fit(f Facts) Facts {
+	if f.Context > 0 && f.MaxOutput >= f.Context {
+		f.MaxOutput = 0
 	}
 	return f
 }
 
-// Lookup returns what the cached table says about model, trying the spellings
+// Lookup returns what the cached catalog says about model, trying the spellings
 // a relay commonly uses. It never reaches the network: a launch and a sync must
 // not wait on one, so a cold cache answers nothing and the engine keeps its own
 // default. Refresh fills the cache.
 func Lookup(model string) (Facts, bool) {
-	table := cached()
+	models := cached().Models
 	for _, cand := range Candidates(model) {
-		if f, ok := table[cand]; ok && f != (Facts{}) {
+		if f, ok := models[cand]; ok && f != (Facts{}) {
 			return f, true
 		}
 	}
 	return Facts{}, false
 }
 
+// Prices is what the cached catalog says a million tokens cost, keyed by model
+// id. Like Lookup it never reaches the network, and an empty table means no
+// price is known rather than a price of zero.
+func Prices() map[string]Price {
+	return cached().Prices
+}
+
 // Candidates lists the ids to try for a model, most specific first: as given,
-// lowercased, without a vendor/ prefix, then without a relay suffix. It is the
-// same list ak prices a row by, so a model one resolves is a model the other
-// resolves too.
+// lowercased, without a vendor/ prefix, then without a relay suffix. One list
+// serves both tables, so a model one resolves is a model the other resolves
+// too.
 func Candidates(model string) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -98,9 +142,9 @@ func Candidates(model string) []string {
 	return out
 }
 
-// Refresh brings the table up to date, fetching it when the cache is older than
-// a day. A failure is not fatal, and the caller says so: an old table answers
-// better than none, and every engine still has its own default.
+// Refresh brings the catalog up to date, fetching it when the cache is older
+// than a day. A failure is not fatal, and the caller says so: an old catalog
+// answers better than none, and every engine still has its own default.
 func Refresh() error {
 	path, err := cachePath()
 	if err != nil {
@@ -121,56 +165,71 @@ func Refresh() error {
 	return nil
 }
 
-// cachePath is where the table is kept, beside the config and the price cache.
+// cachePath is where the catalog is kept, beside the config.
 func cachePath() (string, error) {
 	dir, err := config.DataDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "model-meta.json"), nil
+	return filepath.Join(dir, cacheName), nil
 }
 
-// readFresh reads the cached table when it is younger than the TTL.
-func readFresh(path string) (map[string]Facts, bool) {
+// readFresh reads the cached catalog when it is younger than the TTL.
+func readFresh(path string) (catalog, bool) {
 	fi, err := os.Stat(path)
 	if err != nil || time.Since(fi.ModTime()) >= ttl {
-		return nil, false
+		return catalog{}, false
 	}
-	t := readTable(path)
-	return t, len(t) > 0
+	c := readTable(path)
+	return c, !c.empty()
+}
+
+// empty reports whether the catalog says nothing at all.
+func (c catalog) empty() bool {
+	return len(c.Models) == 0 && len(c.Prices) == 0
 }
 
 // readTable reads whatever the cache holds, however old: an old window beats
 // none, and Refresh replaces it as soon as models.dev answers.
-func readTable(path string) map[string]Facts {
+func readTable(path string) catalog {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		return catalog{}
 	}
-	var t map[string]Facts
-	if json.Unmarshal(data, &t) != nil {
-		return nil
+	var c catalog
+	if json.Unmarshal(data, &c) != nil {
+		return catalog{}
 	}
-	return t
+	return c
 }
 
-func writeTable(path string, t map[string]Facts) error {
-	data, err := json.Marshal(t)
+func writeTable(path string, c catalog) error {
+	data, err := json.Marshal(c)
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return config.AtomicWrite(path, data, 0o600)
+	if err := config.AtomicWrite(path, data, 0o600); err != nil {
+		return err
+	}
+	// The prices ak used to keep on their own are in this file now.
+	_ = os.Remove(filepath.Join(filepath.Dir(path), legacyPriceCache))
+	return nil
 }
 
 // doc is the part of models.dev's api.json ak reads: every provider's models
-// with their limits.
+// with their limits and their prices.
 type doc map[string]struct {
-	Models map[string]struct {
-		Limit *limit `json:"limit"`
-	} `json:"models"`
+	Models map[string]row `json:"models"`
+}
+
+// row is one model as models.dev lists it, with whatever it says about its
+// limits and its price.
+type row struct {
+	Limit *limit `json:"limit"`
+	Cost  *cost  `json:"cost"`
 }
 
 // limit is models.dev's limit block: the whole window, the most a prompt may
@@ -181,45 +240,98 @@ type limit struct {
 	Output  int `json:"output"`
 }
 
-func fetch() (map[string]Facts, error) {
-	// Short on purpose: a sync must not hang on a slow network, and a missed
-	// table only means the engines keep their own defaults until the next one.
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var d doc
-	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
-		return nil, err
-	}
-	return buildTable(d), nil
+// cost is models.dev's price block, in USD per million tokens.
+type cost struct {
+	Input      float64 `json:"input"`
+	Output     float64 `json:"output"`
+	CacheRead  float64 `json:"cache_read"`
+	CacheWrite float64 `json:"cache_write"`
 }
 
-// buildTable flattens the document into one table. Providers are visited in
-// name order and the first row for an id wins, so the result does not depend on
-// map order: a model several hosts list takes the first host's numbers, which
-// differ only where a relay states caps of its own.
-func buildTable(d doc) map[string]Facts {
+func fetch() (catalog, error) {
+	client := &http.Client{Timeout: fetchTimeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return catalog{}, err
+	}
+	defer resp.Body.Close()
+	return readDoc(resp)
+}
+
+// readDoc turns one answer into the tables, and refuses anything that is not a
+// full catalog: a relay in front of models.dev answers an error as JSON of its
+// own, and a table of no rows written over a good cache would leave every
+// engine its own default until the next sync.
+func readDoc(resp *http.Response) (catalog, error) {
+	if resp.StatusCode != http.StatusOK {
+		return catalog{}, fmt.Errorf("models.dev answered %s", resp.Status)
+	}
+	var d doc
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+		return catalog{}, err
+	}
+	c := buildTable(d)
+	if c.empty() {
+		return catalog{}, fmt.Errorf("models.dev listed no model")
+	}
+	return c, nil
+}
+
+// buildTable flattens the document into the two tables. Providers are visited
+// in a fixed order — first-party vendors, then the rest by name — and the first
+// row for an id wins, so the result does not depend on map order and a model
+// takes its vendor's numbers rather than a relay's rounded ones.
+//
+// The two tables fall to the next host on their own: a host that lists a model
+// but states nothing about its limits does not keep the row unpriced, and one
+// that states no price does not keep the row without numbers.
+func buildTable(d doc) catalog {
 	names := make([]string, 0, len(d))
 	for n := range d {
 		names = append(names, n)
 	}
-	sort.Strings(names)
+	orderHosts(names)
 
-	out := map[string]Facts{}
+	out := catalog{Models: map[string]Facts{}, Prices: map[string]Price{}}
 	for _, n := range names {
 		for id, m := range d[n].Models {
-			if _, ok := out[id]; ok {
-				continue
+			if _, ok := out.Models[id]; !ok {
+				if f := factsOf(m.Limit); f != (Facts{}) {
+					out.Models[id] = f
+				}
 			}
-			if f := factsOf(m.Limit); f != (Facts{}) {
-				out[id] = f
+			if _, ok := out.Prices[id]; !ok {
+				if m.Cost != nil && *m.Cost != (cost{}) {
+					out.Prices[id] = Price(*m.Cost)
+				}
 			}
 		}
 	}
 	return out
+}
+
+// firstParty are the vendors whose own listing wins when several providers on
+// models.dev list the same model id. Anything else may state a relay's
+// numbers: 1M for a 131072 one, or a reply limit as long as the window.
+var firstParty = []string{"anthropic", "openai", "google", "deepseek", "moonshotai", "zhipuai", "xai", "mistral"}
+
+// orderHosts sorts provider names in the order rows are taken from them:
+// first-party vendors first, then the rest alphabetically.
+func orderHosts(names []string) {
+	rank := make(map[string]int, len(firstParty))
+	for i, v := range firstParty {
+		rank[v] = i + 1
+	}
+	sort.Slice(names, func(i, j int) bool {
+		ri, rj := rank[names[i]], rank[names[j]]
+		switch {
+		case ri > 0 && rj > 0:
+			return ri < rj
+		case ri > 0 || rj > 0:
+			return ri > 0
+		}
+		return names[i] < names[j]
+	})
 }
 
 // factsOf reads one limit block, 0 where it says nothing.
@@ -227,7 +339,7 @@ func factsOf(l *limit) Facts {
 	if l == nil {
 		return Facts{}
 	}
-	return Facts{Context: window(*l), MaxOutput: clamp(l.Output)}
+	return fit(Facts{Context: window(*l), MaxOutput: clamp(l.Output)})
 }
 
 // window is the tokens a prompt may hold: the input limit where models.dev
@@ -251,7 +363,7 @@ func clamp(n int) int {
 	return n
 }
 
-// memo is the table last read, kept for the process: a launch asks for a few
+// memo is the catalog last read, kept for the process: a launch asks for a few
 // models, and re-reading a table of a few thousand rows for each would cost
 // more than the answer is worth. It is keyed by the file's path, size and
 // mtime, so a cache Refresh wrote, or a test's own temporary cache, is read
@@ -261,38 +373,38 @@ var memo struct {
 	path  string
 	mod   time.Time
 	size  int64
-	table map[string]Facts
+	table catalog
 }
 
-// cached is the table on disk, or nil when there is none. A table is never
-// edited in place: a reader may keep the map it was handed.
-func cached() map[string]Facts {
+// cached is the catalog on disk, or an empty one when there is none. A table is
+// never edited in place: a reader may keep the maps it was handed.
+func cached() catalog {
 	path, err := cachePath()
 	if err != nil {
-		return nil
+		return catalog{}
 	}
 	fi, err := os.Stat(path)
 	if err != nil {
-		return nil
+		return catalog{}
 	}
 	memo.mu.Lock()
 	defer memo.mu.Unlock()
-	if memo.table != nil && memo.path == path && memo.size == fi.Size() && memo.mod.Equal(fi.ModTime()) {
+	if memo.path == path && memo.size == fi.Size() && memo.mod.Equal(fi.ModTime()) {
 		return memo.table
 	}
-	t := readTable(path)
-	memo.path, memo.mod, memo.size, memo.table = path, fi.ModTime(), fi.Size(), t
-	return t
+	c := readTable(path)
+	memo.path, memo.mod, memo.size, memo.table = path, fi.ModTime(), fi.Size(), c
+	return c
 }
 
 // setTable replaces the memo after a write, so this process reads what it just
 // fetched without looking at the file again.
-func setTable(path string, t map[string]Facts) {
+func setTable(path string, c catalog) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return
 	}
 	memo.mu.Lock()
 	defer memo.mu.Unlock()
-	memo.path, memo.mod, memo.size, memo.table = path, fi.ModTime(), fi.Size(), t
+	memo.path, memo.mod, memo.size, memo.table = path, fi.ModTime(), fi.Size(), c
 }

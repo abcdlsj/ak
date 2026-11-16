@@ -1,26 +1,24 @@
 package modelmeta
 
 import (
-	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
 )
 
-// cacheFrom writes a table where ak keeps its cache and points the package
+// cacheFrom writes a catalog where ak keeps its cache and points the package
 // there, so each test answers from its own.
-func cacheFrom(t *testing.T, facts map[string]Facts) {
+func cacheFrom(t *testing.T, c catalog) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv(config.DirEnv, dir)
-	data, err := json.Marshal(facts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "model-meta.json"), data, 0o600); err != nil {
+	if err := writeTable(filepath.Join(dir, cacheName), c); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -61,30 +59,107 @@ func TestFactsOfOutput(t *testing.T) {
 
 func TestBuildTable(t *testing.T) {
 	d := doc{
-		"openai": {Models: map[string]struct {
-			Limit *limit `json:"limit"`
-		}{
+		"openai": {Models: map[string]row{
 			"gpt-5": {Limit: &limit{Context: 400000, Input: 272000, Output: 128000}},
 			"big":   {Limit: &limit{Context: 1000000}},
 		}},
-		"a-relay": {Models: map[string]struct {
-			Limit *limit `json:"limit"`
-		}{
-			// The same id, listed first by name, wins.
+		"a-relay": {Models: map[string]row{
+			// The same id, listed by a relay, does not beat the vendor's.
 			"gpt-5": {Limit: &limit{Context: 200000}},
 			// Nothing said, so no row: the engine keeps its own default.
 			"quiet": {Limit: nil},
 		}},
 	}
-	table := buildTable(d)
-	if got := table["gpt-5"]; got != (Facts{Context: 200000}) {
-		t.Errorf("gpt-5 = %+v, want the first provider by name", got)
+	c := buildTable(d)
+	if got := c.Models["gpt-5"]; got != (Facts{Context: 272000, MaxOutput: 128000}) {
+		t.Errorf("gpt-5 = %+v, want the vendor's", got)
 	}
-	if got := table["big"]; got != (Facts{Context: 1000000}) {
+	if got := c.Models["big"]; got != (Facts{Context: 1000000}) {
 		t.Errorf("big = %+v", got)
 	}
-	if _, ok := table["quiet"]; ok {
+	if _, ok := c.Models["quiet"]; ok {
 		t.Error("a model with no limits got a row")
+	}
+}
+
+// A relay's numbers must never beat the vendor's: it rounds a window up to 1M,
+// or states a reply limit as long as the window, and the engine that believes it
+// fails on the first long request.
+func TestBuildTablePrefersFirstParty(t *testing.T) {
+	one, two := 1.0, 2.0
+	d := doc{
+		"aaa-relay": {Models: map[string]row{
+			"gemini-x": {Limit: &limit{Context: 1048576, Output: 393216}, Cost: &cost{Input: two}},
+		}},
+		"google": {Models: map[string]row{
+			"gemini-x": {Limit: &limit{Context: 131072}, Cost: &cost{Input: one}},
+		}},
+	}
+	c := buildTable(d)
+	if got := c.Models["gemini-x"]; got != (Facts{Context: 131072}) {
+		t.Errorf("limits = %+v, want the vendor's", got)
+	}
+	if got := c.Prices["gemini-x"].Input; got != 1 {
+		t.Errorf("price = %v, want the vendor's", got)
+	}
+}
+
+// The two tables fall to the next host on their own: a vendor that lists a
+// model with limits but no price must not leave the row unpriced.
+func TestBuildTableFillsTheTablesApart(t *testing.T) {
+	d := doc{
+		"openai": {Models: map[string]row{
+			"m": {Limit: &limit{Context: 200000}},
+		}},
+		"zzz-relay": {Models: map[string]row{
+			"m": {Cost: &cost{Input: 3}},
+		}},
+	}
+	c := buildTable(d)
+	if got := c.Models["m"]; got != (Facts{Context: 200000}) {
+		t.Errorf("limits = %+v", got)
+	}
+	if got := c.Prices["m"].Input; got != 3 {
+		t.Errorf("price = %v", got)
+	}
+}
+
+// A reply limit as long as the window is no reply limit: it is left out, so the
+// engine keeps its own default rather than being told to write a whole window.
+func TestFactsOfDropsAReplyAsLongAsTheWindow(t *testing.T) {
+	if got := factsOf(&limit{Context: 262144, Output: 262144}); got.MaxOutput != 0 {
+		t.Errorf("a reply as long as the window was kept: %+v", got)
+	}
+	// The provider's own window and the catalog's reply are compared too.
+	p := config.Provider{ContextWindow: 100000, MaxTokens: 32000}
+	cacheFrom(t, catalog{Models: map[string]Facts{"m": {Context: 1000000, MaxOutput: 128000}}})
+	if got := For(config.Provider{ContextWindow: 100000}, "m"); got.MaxOutput != 0 {
+		t.Errorf("a reply longer than the provider's window was kept: %+v", got)
+	}
+	if got := For(p, "m"); got != (Facts{Context: 100000, MaxOutput: 32000}) {
+		t.Errorf("the provider's own numbers = %+v", got)
+	}
+}
+
+// A relay's error answer must not replace the catalog: an empty table would
+// leave every engine its own default until the next sync.
+func TestReadDocRefusesANonAnswer(t *testing.T) {
+	answer := func(status int, body string) *http.Response {
+		return &http.Response{StatusCode: status, Status: http.StatusText(status), Body: io.NopCloser(strings.NewReader(body))}
+	}
+	good := `{"openai":{"models":{"m":{"limit":{"context":200000}}}}} `
+
+	if _, err := readDoc(answer(http.StatusTooManyRequests, `{"error":{"code":429}}`)); err == nil {
+		t.Error("a 429 with a JSON body was taken for a catalog")
+	}
+	if _, err := readDoc(answer(http.StatusOK, `{}`)); err == nil {
+		t.Error("a catalog of no model was accepted")
+	}
+	if _, err := readDoc(answer(http.StatusOK, `{"openai":{"models":{}}}`)); err == nil {
+		t.Error("a catalog of no model was accepted")
+	}
+	if _, err := readDoc(answer(http.StatusOK, good)); err != nil {
+		t.Errorf("a good catalog was refused: %v", err)
 	}
 }
 
@@ -109,10 +184,10 @@ func TestCandidates(t *testing.T) {
 }
 
 func TestForPrefersTheProvider(t *testing.T) {
-	cacheFrom(t, map[string]Facts{
+	cacheFrom(t, catalog{Models: map[string]Facts{
 		"m":      {Context: 200000, MaxOutput: 64000},
 		"vendor": {Context: 1000000},
-	})
+	}})
 	p := config.Provider{Model: "m"}
 
 	if got := For(p, "m"); got != (Facts{Context: 200000, MaxOutput: 64000}) {
@@ -152,8 +227,8 @@ func TestForColdCache(t *testing.T) {
 func TestRefreshKeepsAFreshCache(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(config.DirEnv, dir)
-	path := filepath.Join(dir, "model-meta.json")
-	if err := writeTable(path, map[string]Facts{"a": {Context: 1000000}}); err != nil {
+	path := filepath.Join(dir, cacheName)
+	if err := writeTable(path, catalog{Models: map[string]Facts{"a": {Context: 1000000}}}); err != nil {
 		t.Fatal(err)
 	}
 	// A cache younger than the TTL is taken as it is: Refresh must not fetch,
@@ -168,8 +243,8 @@ func TestRefreshKeepsAFreshCache(t *testing.T) {
 
 func TestReadFreshHonoursTheTTL(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "model-meta.json")
-	if err := writeTable(path, map[string]Facts{"a": {Context: 1000000}}); err != nil {
+	path := filepath.Join(dir, cacheName)
+	if err := writeTable(path, catalog{Models: map[string]Facts{"a": {Context: 1000000}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := readFresh(path); !ok {
@@ -180,10 +255,10 @@ func TestReadFreshHonoursTheTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	if t2, ok := readFresh(path); ok {
-		t.Errorf("a cache two days old was taken for fresh: %v", t2)
+		t.Errorf("a cache two days old was taken for fresh: %+v", t2)
 	}
 	// However old, it still answers: an old window beats none.
-	if got := readTable(path); len(got) != 1 {
-		t.Errorf("a stale cache was not readable: %v", got)
+	if got := readTable(path); len(got.Models) != 1 {
+		t.Errorf("a stale cache was not readable: %+v", got)
 	}
 }

@@ -312,32 +312,15 @@ func TestCodexProviderIDSharedByTwoProvidersStaysRaw(t *testing.T) {
 	}
 }
 
-func TestPriceBookPrefersFirstParty(t *testing.T) {
-	one, two := 1.0, 2.0
-	doc := map[string]modelsDevProvider{}
-	add := func(prov, id string, in *float64) {
-		p := doc[prov]
-		if p.Models == nil {
-			p.Models = map[string]struct {
-				Cost *modelsDevCost `json:"cost"`
-			}{}
-		}
-		p.Models[id] = struct {
-			Cost *modelsDevCost `json:"cost"`
-		}{&modelsDevCost{Input: in}}
-		doc[prov] = p
-	}
-	add("aaa-relay", "gpt-a", &two)
-	add("openai", "gpt-a", &one)
-	add("zzz", "z-ai/glm", &two)
-
-	b := buildPriceBook(doc)
-	if p, _ := b.lookup("gpt-a"); p.Input != 1 {
-		t.Fatalf("gpt-a input = %v, want the first-party price", p.Input)
-	}
-	b["glm-5"] = modelPrice{Input: 3}
+// The catalog resolves a model id the way a relay spells it, so a row logged
+// under a vendor prefix still finds its price.
+func TestPriceBookLookup(t *testing.T) {
+	b := priceBook{"glm-5": modelPrice{Input: 3}}
 	if p, ok := b.lookup("z-ai/GLM-5-preview"); !ok || p.Input != 3 {
 		t.Fatalf("vendor-prefixed lookup = %+v, %v", p, ok)
+	}
+	if _, ok := b.lookup("unknown"); ok {
+		t.Fatal("an unknown model was priced")
 	}
 }
 
