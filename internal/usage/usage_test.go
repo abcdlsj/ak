@@ -379,3 +379,22 @@ func TestInPlaceRewriteIsRescanned(t *testing.T) {
 		t.Fatalf("after in-place rewrite = %d requests, input %d; want 1 and 20", n, toks.Input)
 	}
 }
+
+// A route renamed since the logs were written: the old name is relabelled,
+// and only rows carrying exactly that name.
+func TestRename(t *testing.T) {
+	rows := []Row{
+		{Model: "main", Tokens: Tokens{Input: 5}},
+		{Model: "main/v2", Tokens: Tokens{Input: 7}},
+		{Model: "deepseek-v4.1-flash", Tokens: Tokens{Input: 9}},
+	}
+	if n := Rename(rows, "main", "dpsk"); n != 1 {
+		t.Fatalf("renamed %d rows, want 1", n)
+	}
+	if rows[0].Model != "dpsk" || rows[1].Model != "main/v2" || rows[2].Model != "deepseek-v4.1-flash" {
+		t.Errorf("rows = %+v", rows)
+	}
+	if rows[0].Tokens.Input != 5 {
+		t.Error("renaming lost tokens")
+	}
+}

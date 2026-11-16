@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -19,6 +20,7 @@ func newUsageCmd() *cobra.Command {
 		since    string
 		akOnly   bool
 		noRemote bool
+		renames  []string
 	)
 	cmd := &cobra.Command{
 		Use:   "usage [name]",
@@ -30,6 +32,7 @@ func newUsageCmd() *cobra.Command {
   ak usage --since 2026-10-01
   ak usage bilicodex       one provider
   ak usage --ak-only       only providers in providers.toml
+  ak usage --rename main=dpsk   relabel what a route used to be called
 
 The first scan parses the whole history and takes a few seconds; later runs
 are incremental and near-instant. Cost is estimated from models.dev pricing;
@@ -53,6 +56,13 @@ model; --no-remote keeps ak offline and reports the route name as logged.`,
 			rows, err := usage.Load(cfg)
 			if err != nil {
 				return err
+			}
+			for _, r := range renames {
+				from, to, ok := strings.Cut(r, "=")
+				if !ok || from == "" || to == "" {
+					return fmt.Errorf("--rename wants old=new, got %q", r)
+				}
+				usage.Rename(rows, from, to)
 			}
 			if !noRemote {
 				rows = refineRemote(cmd, cfg, rows, days)
@@ -81,6 +91,7 @@ model; --no-remote keeps ak offline and reports the route name as logged.`,
 	cmd.Flags().StringVar(&since, "since", "", "Only from this date on, YYYY-MM-DD")
 	cmd.Flags().BoolVar(&akOnly, "ak-only", false, "Only providers in providers.toml, not engine logins or other tools' ids")
 	cmd.Flags().BoolVar(&noRemote, "no-remote", false, "Do not ask remote services what they served; report their route names as logged")
+	cmd.Flags().StringArrayVar(&renames, "rename", nil, "Relabel history logged under an old name: old=new (repeatable)")
 	cmd.MarkFlagsMutuallyExclusive("days", "since")
 	return cmd
 }

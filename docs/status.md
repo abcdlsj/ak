@@ -166,3 +166,8 @@ changed, only its attribution, so the figure stays the same and its price
 becomes exact. `--no-remote` keeps ak offline and reports the route name as
 logged; a service that cannot be reached is named on stderr and its tokens
 stay under the route name.
+
+A name a route has since been renamed from is in no service's report, so the
+tokens logged under it stay under the old name. `--rename old=new` relabels
+them (`ak usage --rename main=dpsk`), and repeats: the engines' own logs are
+never touched, only what the report is made of.

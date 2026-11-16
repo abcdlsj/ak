@@ -147,6 +147,21 @@ func Load(cfg *config.Config) ([]Row, error) {
 	}), nil
 }
 
+// Rename relabels the rows whose model is from as to. A name a route was
+// renamed from is not in any service's report any more, so without this the
+// tokens logged under the old name stay attributed to a name nothing prices.
+// Names are matched exactly, so a model id and a route name never collide.
+func Rename(rows []Row, from, to string) int {
+	n := 0
+	for i := range rows {
+		if rows[i].Model == from {
+			rows[i].Model = to
+			n++
+		}
+	}
+	return n
+}
+
 // Aggregate loads and summarizes everything.
 func Aggregate(cfg *config.Config) (Summary, error) {
 	rows, err := Load(cfg)
