@@ -334,12 +334,12 @@ func kindProtocol(kind string, e Endpoint) string {
 			return e.Protocol
 		}
 		switch e.PiAPI {
-		case "openai-completions":
-			return ProtocolChat
+		case "anthropic-messages":
+			return ProtocolAnthropic
 		case "openai-responses":
 			return ProtocolResponses
 		}
-		return ProtocolAnthropic
+		return ProtocolChat
 	}
 }
 
@@ -362,6 +362,11 @@ func enginePreference(kind string) []string {
 		return []string{ProtocolAnthropic, ProtocolChat, ProtocolResponses}
 	case "codex":
 		return []string{ProtocolResponses, ProtocolChat, ProtocolAnthropic}
+	case "pi":
+		// pi's own shape is the OpenAI one; Anthropic's Messages is what it can
+		// be translated to, not what it asks for first. An endpoint that serves
+		// only Anthropic is still taken, just last.
+		return []string{ProtocolChat, ProtocolResponses, ProtocolAnthropic}
 	}
 	return []string{ProtocolAnthropic, ProtocolResponses, ProtocolChat}
 }

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -170,6 +171,14 @@ func (b *envBuilder) set(k, v string) { b.vals[k] = v }
 func (b *envBuilder) setIf(k, v string) {
 	if v != "" {
 		b.vals[k] = v
+	}
+}
+
+// setCount sets a token count, leaving the variable out when it is unknown, so
+// the engine keeps its own default rather than being told zero.
+func (b *envBuilder) setCount(k string, n int) {
+	if n > 0 {
+		b.vals[k] = strconv.Itoa(n)
 	}
 }
 

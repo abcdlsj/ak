@@ -13,6 +13,7 @@
     <span class="when">{{if .Act.Requests}}{{num .Act.Requests}} in 30 days · {{.Act.Last}}{{else}}unused in 30 days{{end}}</span>
   </div>
   <p class="sub">{{.Vendor}}{{with .User}} · {{.}}{{end}}{{with .Users}} · {{join . ", "}}{{end}}</p>
+  {{with .Model}}<p class="sub">runs on <span class="mono">{{.}}</span></p>{{end}}
   {{with .Err}}<p class="bad">✗ {{.}}</p>{{end}}
   {{if .Pending}}<p class="note">reading…</p>{{end}}
   {{range .Meters}}{{template "meter" .}}{{end}}

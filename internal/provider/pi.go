@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/modelmeta"
 )
 
 // PiProviderPrefix namespaces the providers ak registers in pi's models.json,
@@ -52,6 +53,12 @@ func (piEngine) Launch(name string, p config.Provider, key Secret, ctx Context) 
 		env.setSecret(EnvKey(name), key)
 	}
 	env.set("AK_PROVIDER", name)
+	// A config of ak's own keeps its models.json inside it, so pi is told
+	// where to look; the user's own PI_CODING_AGENT_DIR is already in the
+	// environment and wins.
+	if home, err := config.PiHome(); err == nil && config.PiHomeSandboxed() {
+		env.set(config.PiHomeEnv, home)
+	}
 	// Extra env vars merge last, as for claude.
 	for k, v := range p.Env {
 		env.set(k, v)
@@ -210,9 +217,25 @@ func piProviderEntry(name string, p config.Provider, gateway string) map[string]
 	if ids := piModelIDs(p); len(ids) > 0 {
 		models := make([]map[string]any, 0, len(ids))
 		for _, id := range ids {
-			models = append(models, map[string]any{"id": id})
+			models = append(models, piModel(id, p))
 		}
 		e["models"] = models
+	}
+	return e
+}
+
+// piModel is one models.json model entry: the id alone when ak knows nothing
+// more, and the numbers when it does. Without them pi takes every model for a
+// 128K one and caps every reply at 16384 tokens, a model that takes a 1M window
+// and writes 128K included.
+func piModel(id string, p config.Provider) map[string]any {
+	e := map[string]any{"id": id}
+	f := modelmeta.For(p, id)
+	if f.Context > 0 {
+		e["contextWindow"] = f.Context
+	}
+	if f.MaxOutput > 0 {
+		e["maxTokens"] = f.MaxOutput
 	}
 	return e
 }

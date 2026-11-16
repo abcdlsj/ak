@@ -19,26 +19,30 @@ type piModelsFile struct {
 }
 
 type piModelProvider struct {
-	Name       string `json:"name"`
-	BaseURL    string `json:"baseUrl"`
-	APIKey     string `json:"apiKey"`
-	API        string `json:"api"`
-	AuthHeader bool   `json:"authHeader"`
-	Models     []struct {
-		ID string `json:"id"`
-	} `json:"models"`
+	Name       string    `json:"name"`
+	BaseURL    string    `json:"baseUrl"`
+	APIKey     string    `json:"apiKey"`
+	API        string    `json:"api"`
+	AuthHeader bool      `json:"authHeader"`
+	Models     []piModel `json:"models"`
+}
+
+// piModel is one model entry pi lists for a provider. The numbers are pi's
+// own spelling of what ak keeps as the provider's context window and reply
+// limit; pi fills in 128K and 16384 for an entry that names neither.
+type piModel struct {
+	ID            string `json:"id"`
+	ContextWindow int    `json:"contextWindow"`
+	MaxTokens     int    `json:"maxTokens"`
 }
 
 // piAgentDir is where pi keeps its configuration.
 func piAgentDir() string {
-	if d := os.Getenv(provider.EnvPiHome); d != "" {
-		return config.ExpandHome(d)
-	}
-	home, err := os.UserHomeDir()
+	dir, err := config.PiHome()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".pi", "agent")
+	return dir
 }
 
 // importPi copies the providers from pi's models.json into ak. Providers ak
@@ -102,6 +106,8 @@ func piProviderFrom(id string, src piModelProvider) (config.Provider, bool) {
 	p := config.Provider{Kind: config.KindPi, PiAPI: src.API, PiAuthHeader: src.AuthHeader, Display: src.Name}
 	if len(src.Models) > 0 {
 		p.Model = src.Models[0].ID
+		p.ContextWindow = src.Models[0].ContextWindow
+		p.MaxTokens = src.Models[0].MaxTokens
 	}
 	if src.BaseURL == "" && p.Model == "" {
 		return config.Provider{}, false

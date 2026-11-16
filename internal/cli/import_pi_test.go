@@ -30,13 +30,16 @@ func TestPiProviderFrom(t *testing.T) {
 	}
 
 	// No base URL: it customizes a provider pi already has, kept by id.
-	builtin := piModelProvider{Models: []struct {
-		ID string `json:"id"`
-	}{{ID: "m"}}}
+	builtin := piModelProvider{Models: []piModel{{ID: "m", ContextWindow: 1000000, MaxTokens: 128000}}}
 	builtin.Name = "builtin"
 	p, ok = piProviderFrom("builtin", builtin)
 	if !ok || p.PiProvider != "builtin" || p.Model != "m" {
 		t.Fatalf("provider = %+v ok=%v", p, ok)
+	}
+	// The numbers pi lists are the ones ak keeps, so a later sync keeps telling
+	// every engine, not just pi.
+	if p.ContextWindow != 1000000 || p.MaxTokens != 128000 {
+		t.Errorf("numbers = %d/%d, want 1000000/128000", p.ContextWindow, p.MaxTokens)
 	}
 
 	if _, ok := piProviderFrom("x", piModelProvider{}); ok {

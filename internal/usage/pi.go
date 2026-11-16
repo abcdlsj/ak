@@ -20,8 +20,8 @@ type piSource struct{}
 func (piSource) Engine() string { return "pi" }
 
 func (piSource) Roots(cfg *config.Config, home string) []string {
-	if d := os.Getenv(provider.EnvPiHome); d != "" {
-		home = config.ExpandHome(d)
+	if dir, err := config.PiHome(); err == nil {
+		home = dir
 	} else {
 		home = filepath.Join(home, ".pi", "agent")
 	}

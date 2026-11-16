@@ -138,6 +138,43 @@ config dir, endpoint or key never leaks into the next. A pool's upstream
 requests are made by `ak serve`, so its proxy goes in the environment of
 `ak serve`. `ak env kimi:high` prints what a launch would inject, keys masked.
 
+### Model numbers
+
+Every engine carries a model's context window and reply limit in a file or a
+variable of its own, and guesses badly without them: pi takes every model for a
+128K one and caps every reply at 16384 tokens, Claude Code assumes a model it
+has no metadata for is 1M with 32000 tokens of reply, and codex takes 272K.
+ak fills them from models.dev, the table it already prices usage from, and hands
+them to the engine at launch:
+
+```toml
+[providers.relay]
+context_window = 1000000   # tokens a prompt may hold
+max_tokens     = 128000    # the longest reply
+```
+
+A value here wins over models.dev's; left out (or 0), models.dev's answers, and a
+model it does not list gets the engine's own default. ak reads the table when it
+regenerates the commands (`ak add`, `ak edit`, `ak import`, `ak sync`), never at
+launch: a cold cache means the engine keeps its default rather than the launch
+waiting on the network. What each engine gets:
+
+- **pi**: each model ak registers in `models.json` carries `contextWindow` and
+  `maxTokens`, so pi compacts at the right point and asks for a full reply.
+- **claude**: `CLAUDE_CODE_MAX_CONTEXT_TOKENS` and
+  `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, which Claude Code reads for a model it has no
+  metadata for. A claude id it knows keeps its own numbers, and it caps a reply
+  at 128000 whatever ak says. One value serves every such model, tiers included,
+  so it is the smallest of the provider's. Both are in `ak env <provider>`, and
+  `ak doctor` flags them left in `settings.json`, where they win over a launch.
+- **codex**: `-c model_context_window`, unless the provider brings a
+  `model_catalog` of its own. Codex clamps it to the catalog's
+  `max_context_window`, 272K for a model it does not know, so a wider window
+  needs that catalog; and codex asks for no reply limit at all, so `max_tokens`
+  reaches pi and claude only.
+
+`ak import --from claude-settings` and `--from pi` carry the numbers over.
+
 ### Generated commands
 
 `ak` keeps one source of truth in `~/.config/ak/providers.toml` (mode `0600`)
@@ -294,6 +331,8 @@ providers from `~/.pi/agent/models.json`, and `ak usage` counts pi's sessions.
 
 ak writes only `ak-*` entries in `models.json`. Everything else is preserved,
 and when ak's own entries have not changed the file is not rewritten at all.
+Each entry carries the model's `contextWindow` and `maxTokens` when ak knows
+them (see [Model numbers](#model-numbers)).
 
 ## Details worth knowing
 
@@ -315,7 +354,8 @@ reads the key from the process environment: no per-provider `auth.json`, no
 isolated `CODEX_HOME`. A provider whose model codex has no metadata for can set
 `model_catalog` to a JSON catalog, passed as `-c model_catalog_json`. Codex
 replaces its whole built-in catalog with that file, so set it only on the
-provider whose model needs it.
+provider whose model needs it. Without one, ak passes what it knows as
+`-c model_context_window` (see [Model numbers](#model-numbers)).
 
 **Keys live in their own file.** `providers.toml` holds no key: a provider
 names its entry with `auth_key` (its own name by default), and the key is in

@@ -185,6 +185,14 @@ type Provider struct {
 	// never written.
 	Secrets map[string]string `toml:"-"`
 	Model   string            `toml:"model,omitempty"`
+	// ContextWindow and MaxTokens are the model's context window and the
+	// longest reply it may write, in tokens. Every engine keeps these two
+	// numbers in a file or a variable of its own and guesses badly without
+	// them, so ak hands over what it knows: these win over what models.dev
+	// lists for the model, and 0 means take models.dev's, else leave the
+	// engine its own default.
+	ContextWindow int `toml:"context_window,omitempty"`
+	MaxTokens     int `toml:"max_tokens,omitempty"`
 	// DefaultVariant is applied when the provider launches without an explicit
 	// variant, so the launcher does not ask each time: a pi thinking level, a
 	// codex reasoning effort or a claude model tier. Empty keeps asking.
@@ -431,6 +439,38 @@ func Dir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "ak"), nil
+}
+
+// PiHomeEnv is the variable pi reads to relocate its agent directory.
+const PiHomeEnv = "PI_CODING_AGENT_DIR"
+
+// PiHome is pi's agent directory, where ak keeps its models.json entries:
+// $PI_CODING_AGENT_DIR when that is set, else ~/.pi/agent — or, when the config
+// directory is relocated (AK_CONFIG_DIR), a directory inside it. A run against
+// a config of its own writes nothing outside that config, so a sandbox is a
+// sandbox and a test cannot reach into the real home.
+func PiHome() (string, error) {
+	if v := os.Getenv(PiHomeEnv); v != "" {
+		return ExpandHome(v), nil
+	}
+	if os.Getenv(DirEnv) != "" {
+		dir, err := Dir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(dir, "pi"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".pi", "agent"), nil
+}
+
+// PiHomeSandboxed reports whether PiHome is ak's own rather than the user's,
+// which pi has to be told at launch to read it.
+func PiHomeSandboxed() bool {
+	return os.Getenv(PiHomeEnv) == "" && os.Getenv(DirEnv) != ""
 }
 
 // Path returns the absolute path of providers.toml.

@@ -99,3 +99,30 @@ func TestEndpointsNeedAKnownProtocol(t *testing.T) {
 		t.Errorf("errors = %v, want one naming the missing protocol", errs)
 	}
 }
+
+// Each engine asks for what it speaks natively: Claude Code Anthropic's
+// Messages, Codex Responses, pi the OpenAI chat API. A vendor serving all
+// three hands pi its chat endpoint, so a request through it needs no
+// translation — and one serving only Anthropic still gets taken, last.
+func TestEnginePreference(t *testing.T) {
+	three := Vendor{Endpoints: []Endpoint{
+		{Protocol: ProtocolAnthropic, BaseURL: "https://relay.example"},
+		{Protocol: ProtocolResponses, BaseURL: "https://relay.example/v1"},
+		{Protocol: ProtocolChat, BaseURL: "https://relay.example/v1"},
+	}}
+	for kind, want := range map[string]string{
+		"claude": ProtocolAnthropic,
+		"codex":  ProtocolResponses,
+		"pi":     ProtocolChat,
+	} {
+		e, ok := three.endpointForKind(kind)
+		if !ok || e.Protocol != want {
+			t.Errorf("%s takes %q, want %q", kind, e.Protocol, want)
+		}
+	}
+
+	anthOnly := Vendor{Endpoints: []Endpoint{{Protocol: ProtocolAnthropic, BaseURL: "https://a.example"}}}
+	if e, ok := anthOnly.endpointForKind("pi"); !ok || e.Protocol != ProtocolAnthropic {
+		t.Errorf("pi on an Anthropic-only vendor takes %q, %v", e.Protocol, ok)
+	}
+}

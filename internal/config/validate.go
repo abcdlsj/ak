@@ -137,6 +137,16 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 	if p.MaxConcurrency < 0 {
 		return fmt.Errorf("provider %q has negative max_concurrency", name)
 	}
+	if p.ContextWindow < 0 {
+		return fmt.Errorf("provider %q has negative context_window", name)
+	}
+	if p.MaxTokens < 0 {
+		return fmt.Errorf("provider %q has negative max_tokens", name)
+	}
+	if p.ContextWindow > 0 && p.MaxTokens > p.ContextWindow {
+		return fmt.Errorf("provider %q has max_tokens %d above its context_window %d, so no reply could fit",
+			name, p.MaxTokens, p.ContextWindow)
+	}
 	switch p.Kind {
 	case KindClaude, KindCodex, KindPi, KindAntigravity:
 	case "":
@@ -322,6 +332,10 @@ var ClaudeRoutingKeys = []string{
 	"ANTHROPIC_DEFAULT_OPUS_MODEL",
 	"ANTHROPIC_DEFAULT_FABLE_MODEL",
 	"ANTHROPIC_SMALL_FAST_MODEL",
+	// The two numbers ak hands over for a model claude has no metadata for
+	// (the provider's context_window and max_tokens).
+	"CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+	"CLAUDE_CODE_MAX_OUTPUT_TOKENS",
 }
 
 // validateIsolation checks each engine's isolation fields are its own, and

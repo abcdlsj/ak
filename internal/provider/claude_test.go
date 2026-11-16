@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -289,5 +291,97 @@ func TestCodexArgsModelCatalog(t *testing.T) {
 		if contains(a, "model_catalog_json") {
 			t.Errorf("a provider without model_catalog must not set it: %q", a)
 		}
+	}
+}
+
+// TestClaudeEnvNumbers guards the two numbers claude cannot know: a model it has
+// no metadata for gets a 1M window and 32000 tokens of reply otherwise. One
+// value serves every such model, the tiers included, so the smallest of the
+// provider's wins.
+func TestClaudeEnvNumbers(t *testing.T) {
+	// The cache lives where the test puts it, so the table is the test's.
+	t.Setenv(config.DirEnv, t.TempDir())
+
+	p := config.Provider{BaseURL: "https://x", Model: "m", ContextWindow: 400000, MaxTokens: 64000}
+	env := envMap(ClaudeEnv("x", p, "", Literal("k")))
+	if env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "400000" || env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] != "64000" {
+		t.Errorf("numbers = %q/%q", env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"])
+	}
+
+	// Nothing known: left out, so claude keeps its own defaults.
+	env = envMap(ClaudeEnv("x", config.Provider{BaseURL: "https://x", Model: "m"}, "", Literal("k")))
+	if _, ok := env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]; ok {
+		t.Error("a window was passed for a model ak knows nothing about")
+	}
+	if _, ok := env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"]; ok {
+		t.Error("a reply limit was passed for a model ak knows nothing about")
+	}
+
+	// An extra env var still wins, as for every other derived key.
+	p = config.Provider{
+		BaseURL: "https://x", Model: "m", ContextWindow: 400000,
+		Env: map[string]string{"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1000000"},
+	}
+	if got := envMap(ClaudeEnv("x", p, "", Literal("k")))["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]; got != "1000000" {
+		t.Errorf("env did not override the derived window: %q", got)
+	}
+}
+
+// TestClaudeNumbersSmallestTier checks the one value claude gets for every model
+// it does not know: the smallest of the provider's, so a tier that takes less is
+// never told it has more.
+func TestClaudeNumbersSmallestTier(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(config.DirEnv, dir)
+	table := `{"big":{"context":1000000,"max_output":128000},"small":{"context":131072,"max_output":32000}}`
+	if err := os.WriteFile(filepath.Join(dir, "model-meta.json"), []byte(table), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := config.Provider{Model: "big", Haiku: "small"}
+	window, output := claudeNumbers(p)
+	if window != 131072 || output != 32000 {
+		t.Errorf("numbers = %d/%d, want the tier's 131072/32000", window, output)
+	}
+}
+
+// TestCodexArgsContextWindow guards the window ak hands codex: without it codex
+// takes a model it does not know for a 272K one, which is too much for a small
+// endpoint and too little for a large one.
+func TestCodexArgsContextWindow(t *testing.T) {
+	t.Setenv(config.DirEnv, t.TempDir())
+	args := func(p config.Provider) string {
+		joined := ""
+		for _, a := range CodexArgs("x", p) {
+			joined += a + " "
+		}
+		return joined
+	}
+
+	p := config.Provider{Kind: config.KindCodex, BaseURL: "https://x/v1", Model: "m", ContextWindow: 131072}
+	if got := args(p); !contains(got, "model_context_window=131072") {
+		t.Errorf("the window is missing:\n%s", got)
+	}
+
+	// A provider that brings its own catalog says what the window is; codex
+	// clamps this to the catalog's max_context_window anyway.
+	p.ModelCatalog = "~/.codex/catalogs/deepseek.json"
+	if got := args(p); contains(got, "model_context_window") {
+		t.Errorf("the window was passed beside a model_catalog:\n%s", got)
+	}
+	p.ModelCatalog = ""
+
+	// Nothing known: left out, so codex keeps its own numbers.
+	if got := args(config.Provider{Kind: config.KindCodex, BaseURL: "https://x/v1", Model: "m"}); contains(got, "model_context_window") {
+		t.Errorf("a window was passed for a model ak knows nothing about:\n%s", got)
+	}
+
+	// The table answers when the provider does not.
+	dir := t.TempDir()
+	t.Setenv(config.DirEnv, dir)
+	if err := os.WriteFile(filepath.Join(dir, "model-meta.json"), []byte(`{"m":{"context":200000}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := args(config.Provider{Kind: config.KindCodex, BaseURL: "https://x/v1", Model: "m"}); !contains(got, "model_context_window=200000") {
+		t.Errorf("the table's window was not used:\n%s", got)
 	}
 }

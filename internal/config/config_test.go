@@ -64,3 +64,35 @@ func TestValidateDefaultVariant(t *testing.T) {
 		}
 	}
 }
+
+// pi's models.json lives where pi reads it: PI_CODING_AGENT_DIR when set,
+// else ~/.pi/agent — and inside the config directory when that is relocated,
+// so a run against a config of its own writes nothing outside it.
+func TestPiHome(t *testing.T) {
+	t.Setenv(PiHomeEnv, "")
+	t.Setenv(DirEnv, "")
+	home, _ := os.UserHomeDir()
+	if got, err := PiHome(); err != nil || got != filepath.Join(home, ".pi", "agent") {
+		t.Errorf("PiHome = %q, %v; want the user's", got, err)
+	}
+	if PiHomeSandboxed() {
+		t.Error("the user's home reported as sandboxed")
+	}
+
+	t.Setenv(DirEnv, t.TempDir())
+	if got, _ := PiHome(); got != filepath.Join(os.Getenv(DirEnv), "pi") {
+		t.Errorf("PiHome = %q, want a directory inside the config", got)
+	}
+	if !PiHomeSandboxed() {
+		t.Error("a relocated config is sandboxed, so pi must be told where to look")
+	}
+
+	// An explicit pi home is the user's own choice and wins over the sandbox.
+	t.Setenv(PiHomeEnv, "~/pi-of-mine")
+	if got, _ := PiHome(); got != filepath.Join(home, "pi-of-mine") {
+		t.Errorf("PiHome = %q, want the explicit one", got)
+	}
+	if PiHomeSandboxed() {
+		t.Error("an explicit pi home needs no export")
+	}
+}
