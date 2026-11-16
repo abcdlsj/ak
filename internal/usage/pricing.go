@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/modelmeta"
 )
 
 // modelsDevURL is the official model pricing source, also used by cc-switch.
@@ -65,40 +65,16 @@ func defaultPrices() priceBook {
 	return prices
 }
 
-// lookup finds a model's price, trying the forms relays commonly use.
+// lookup finds a model's price, trying the forms relays commonly use. The
+// spellings are modelmeta's, so a model ak knows a window for is a model it can
+// price, and the other way round.
 func (b priceBook) lookup(model string) (modelPrice, bool) {
-	for _, cand := range priceCandidates(model) {
+	for _, cand := range modelmeta.Candidates(model) {
 		if p, ok := b[cand]; ok {
 			return p, true
 		}
 	}
 	return modelPrice{}, false
-}
-
-// priceCandidates lists the ids to try, most specific first: as given,
-// lowercased, without a vendor/ prefix, then without a relay suffix.
-func priceCandidates(model string) []string {
-	var out []string
-	seen := map[string]bool{}
-	push := func(s string) {
-		if s != "" && !seen[s] {
-			seen[s] = true
-			out = append(out, s)
-		}
-	}
-	base := []string{model, strings.ToLower(model)}
-	for _, m := range base {
-		push(m)
-		if i := strings.LastIndex(m, "/"); i >= 0 {
-			push(m[i+1:])
-		}
-	}
-	for _, m := range append([]string(nil), out...) {
-		for _, suffix := range []string{"-latest", "-preview", "-thinking", "-code"} {
-			push(strings.TrimSuffix(m, suffix))
-		}
-	}
-	return out
 }
 
 // costOf computes the cost of one row.

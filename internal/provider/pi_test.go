@@ -71,6 +71,36 @@ func TestPiPoolPointsAtGateway(t *testing.T) {
 	}
 }
 
+// TestPiModelNumbers guards what ak tells pi about a model. Without the numbers
+// pi takes every model for a 128K one and caps every reply at 16384 tokens.
+func TestPiModelNumbers(t *testing.T) {
+	t.Setenv(config.DirEnv, t.TempDir())
+
+	if got := piModel("m", config.Provider{}); len(got) != 1 || got["id"] != "m" {
+		t.Errorf("a model ak knows nothing about got %v, want the id alone", got)
+	}
+
+	got := piModel("m", config.Provider{ContextWindow: 1000000, MaxTokens: 128000})
+	if got["contextWindow"] != 1000000 || got["maxTokens"] != 128000 {
+		t.Errorf("numbers = %v", got)
+	}
+
+	dir := t.TempDir()
+	t.Setenv(config.DirEnv, dir)
+	if err := os.WriteFile(filepath.Join(dir, "model-meta.json"), []byte(`{"m":{"context":200000,"max_output":64000}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got = piModel("m", config.Provider{})
+	if got["contextWindow"] != 200000 || got["maxTokens"] != 64000 {
+		t.Errorf("the table's numbers = %v", got)
+	}
+	// A provider's own number wins, and fills only what it leaves blank.
+	got = piModel("m", config.Provider{MaxTokens: 32000})
+	if got["contextWindow"] != 200000 || got["maxTokens"] != 32000 {
+		t.Errorf("numbers = %v", got)
+	}
+}
+
 func TestPiModelsJSONMerge(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "models.json")

@@ -2,9 +2,11 @@ package provider
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/modelmeta"
 )
 
 // EnvKey derives the provider-specific secret environment variable name.
@@ -99,6 +101,13 @@ func CodexArgs(name string, p config.Provider) []string {
 	}
 	if p.ModelCatalog != "" {
 		args = append(args, codexRaw("model_catalog_json", tomlString(config.ExpandHome(p.ModelCatalog)))...)
+	} else if window := modelmeta.For(p, p.Model).Context; window > 0 {
+		// Without this codex takes a model it does not know for a 272K one,
+		// too much for a small endpoint and too little for a large one. A
+		// provider that brings its own catalog is left alone: that catalog
+		// says what the window is, and codex clamps this value to the entry's
+		// max_context_window anyway.
+		args = append(args, codexRaw("model_context_window", strconv.Itoa(window))...)
 	}
 	return append(args, codexRaw("model_providers", table)...)
 }

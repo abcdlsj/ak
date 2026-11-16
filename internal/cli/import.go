@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/out"
@@ -93,15 +95,17 @@ func importClaudeSettings(cfg *config.Config) error {
 	p.Env = map[string]string{}
 	for _, k := range []string{
 		"CLAUDE_CODE_SUBAGENT_MODEL",
-		"CLAUDE_CODE_MAX_CONTEXT_TOKENS",
 		"CLAUDE_CODE_AUTO_COMPACT_WINDOW",
 		"API_TIMEOUT_MS",
-		"CLAUDE_CODE_MAX_OUTPUT_TOKENS",
 	} {
 		if v := env[k]; v != "" {
 			p.Env[k] = v
 		}
 	}
+	// The two numbers ak hands the engines as fields of their own, so a later
+	// `ak sync` keeps telling every engine the same window and reply limit.
+	p.ContextWindow = atoiOrZero(env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"])
+	p.MaxTokens = atoiOrZero(env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"])
 	if len(p.Env) == 0 {
 		p.Env = nil
 	}
@@ -130,6 +134,16 @@ func importClaudeSettings(cfg *config.Config) error {
 	out.Hint(os.Stdout, "Keep the global preference keys there (NODE_EXTRA_CA_CERTS, CLAUDE_AUTOCOMPACT_PCT_OVERRIDE and friends).")
 	out.Hint(os.Stdout, "Then verify with `ak-%s -p 'reply OK'`.", name)
 	return nil
+}
+
+// atoiOrZero reads a token count out of an environment block, where it is a
+// string that may be blank or, in a hand-edited file, not a number at all.
+func atoiOrZero(v string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // claudeProviderFromEnv maps a claude env block onto a provider. The returned

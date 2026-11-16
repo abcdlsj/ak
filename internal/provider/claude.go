@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/modelmeta"
 )
 
 // claudeAuthKeys are the two mutually exclusive auth variables. Only one is
@@ -112,6 +113,13 @@ func ClaudeEnv(name string, p config.Provider, variant string, key Secret) EnvPl
 	env.setIf("ANTHROPIC_DEFAULT_SONNET_MODEL", sonnet)
 	env.setIf("ANTHROPIC_DEFAULT_OPUS_MODEL", opus)
 
+	// The two numbers claude cannot know: a model it has no metadata for gets a
+	// 1M window and 32000 tokens of reply, whatever the endpoint serves. They
+	// are read for such a model only, so a claude id it knows keeps its own.
+	window, output := claudeNumbers(p)
+	env.setCount("CLAUDE_CODE_MAX_CONTEXT_TOKENS", window)
+	env.setCount("CLAUDE_CODE_MAX_OUTPUT_TOKENS", output)
+
 	// Extra env vars merge last and can override the derived keys above.
 	for k, v := range p.Env {
 		env.set(k, v)
@@ -142,6 +150,34 @@ func ClaudeEnv(name string, p config.Provider, variant string, key Secret) EnvPl
 
 	// small_fast is deprecated: it only feeds normalizeModels and is always unset.
 	return EnvPlan{Set: env.sorted(envSmallFast), Unset: unsetList(claudeProviderKeys, env)}
+}
+
+// claudeNumbers are the window and the reply limit to tell claude for a model
+// it has no metadata for. One value serves every such model, the tiers
+// included, so each is the smallest of the provider's models': a tier that
+// takes less is never told it has more.
+func claudeNumbers(p config.Provider) (window, output int) {
+	seen := map[string]bool{}
+	for _, m := range []string{p.Model, p.Haiku, p.Sonnet, p.Opus} {
+		if m == "" || seen[m] {
+			continue
+		}
+		seen[m] = true
+		f := modelmeta.For(p, m)
+		window, output = least(window, f.Context), least(output, f.MaxOutput)
+	}
+	return window, output
+}
+
+// least keeps the smaller of a running minimum and n, ignoring the unknown 0.
+func least(cur, n int) int {
+	switch {
+	case n <= 0:
+		return cur
+	case cur <= 0 || n < cur:
+		return n
+	}
+	return cur
 }
 
 // normalizeModels implements cc-switch's small_fast migration semantics

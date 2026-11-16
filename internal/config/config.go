@@ -175,6 +175,14 @@ type Provider struct {
 	// never written.
 	Secrets map[string]string `toml:"-"`
 	Model   string            `toml:"model,omitempty"`
+	// ContextWindow and MaxTokens are the model's context window and the
+	// longest reply it may write, in tokens. Every engine keeps these two
+	// numbers in a file or a variable of its own and guesses badly without
+	// them, so ak hands over what it knows: these win over what models.dev
+	// lists for the model, and 0 means take models.dev's, else leave the
+	// engine its own default.
+	ContextWindow int `toml:"context_window,omitempty"`
+	MaxTokens     int `toml:"max_tokens,omitempty"`
 	// DefaultVariant is applied when the provider launches without an explicit
 	// variant, so the launcher does not ask each time: a pi thinking level, a
 	// codex reasoning effort or a claude model tier. Empty keeps asking.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/abcdlsj/ak/internal/bind"
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/modelmeta"
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/shim"
 	"github.com/abcdlsj/ak/internal/usage"
@@ -286,6 +287,13 @@ func NewSyncer(cfg *config.Config) *shim.Syncer {
 
 // Sync regenerates every provider's commands.
 func Sync(cfg *config.Config, dryRun bool) (shim.Report, error) {
+	// The engines are told their model's window and reply limit out of the
+	// cached models.dev table, and a launch never waits on the network for it,
+	// so fill the cache here, where a fetch is expected. Failing to reach
+	// models.dev is not this command's failure: an old table still answers.
+	if !dryRun {
+		_ = modelmeta.Refresh()
+	}
 	s := NewSyncer(cfg)
 	s.DryRun = dryRun
 	return s.Sync()
