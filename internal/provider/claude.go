@@ -139,6 +139,7 @@ func ClaudeEnv(name string, p config.Provider, variant string, key Secret) EnvPl
 	if p.ConfigDir != "" {
 		env.set("CLAUDE_CONFIG_DIR", config.ExpandHome(p.ConfigDir))
 	}
+	setAgentHome(env, p.ConfigDir)
 
 	// small_fast is deprecated: it only feeds normalizeModels and is always unset.
 	return EnvPlan{Set: env.sorted(envSmallFast), Unset: unsetList(claudeProviderKeys, env)}

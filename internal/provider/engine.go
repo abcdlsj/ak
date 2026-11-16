@@ -52,6 +52,25 @@ type SharedWriter interface {
 // written into a pool command.
 const poolKey = "ak-pool"
 
+// EnvAgentHome tells a runtime that watches agent sessions where this one keeps
+// the engine's state: a claude config_dir, a codex_home, an agy gemini_dir.
+// Every engine states it the same way, so a watcher reads one variable instead
+// of knowing which engine hides its directory in which variable or flag, and
+// learns it before the engine's own files exist.
+//
+// It is exported only when ak relocates the engine's home. A provider on the
+// shared home leaves it unset, and the watcher's own default applies.
+const EnvAgentHome = "WARREN_AGENT_HOME"
+
+// setAgentHome exports EnvAgentHome for a relocated home, and nothing when the
+// provider keeps the shared one.
+func setAgentHome(env *envBuilder, home string) {
+	if home == "" {
+		return
+	}
+	env.set(EnvAgentHome, config.ExpandHome(home))
+}
+
 // poolTarget rewrites a pool provider into the shape an engine expects: the
 // gateway as its base URL, so the engine renders a command that talks to ak
 // rather than to an upstream. The original provider is left untouched.

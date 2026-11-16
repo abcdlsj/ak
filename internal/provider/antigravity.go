@@ -37,6 +37,9 @@ func (agyEngine) Launch(name string, p config.Provider, _ Secret, ctx Context) (
 	env := newEnv()
 	env.set(EnvSSHConnection, AntigravitySSHConnection)
 	env.set("AK_PROVIDER", name)
+	// gemini_dir is required, so this is always the provider's own home: agy
+	// states it as a flag, which no watcher can read off the environment.
+	setAgentHome(env, p.GeminiDir)
 	// Extra env vars merge last, as for the other engines. One that names
 	// SSH_CONNECTION is the user taking the switch over.
 	for k, v := range p.Env {

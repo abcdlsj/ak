@@ -128,6 +128,7 @@ func CodexEnv(name string, p config.Provider, key Secret) EnvPlan {
 	if p.CodexHome != "" {
 		env.set("CODEX_HOME", config.ExpandHome(p.CodexHome))
 	}
+	setAgentHome(env, p.CodexHome)
 	// Extra env vars merge last, as for claude.
 	for k, v := range p.Env {
 		env.set(k, v)
