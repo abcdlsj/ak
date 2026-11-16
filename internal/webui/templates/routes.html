@@ -14,7 +14,7 @@
     <span class="chip">{{.Kind}}</span>
     {{with .Strategy}}<span class="chip">{{.}}</span>{{end}}
   </div>
-  <p class="sub">{{if .Members}}a pool, asked in turn{{else}}an alias{{end}}</p>
+  <p class="sub">{{if .Provider}}a pool, from <span class="mono">{{.Provider}}</span>{{else if .Members}}a pool, asked in turn{{else}}an alias{{end}}</p>
   <div class="targets">
     {{if .Members}}{{template "chips" .Members}}{{else}}<span class="mono go">{{.Model}}</span>{{end}}
   </div>
@@ -42,7 +42,12 @@
     </select></label>
   </div>
   <label>Alias of <input name="model" value="{{.Form.Model}}" placeholder="command-code/deepseek/deepseek-v4.1-flash"></label>
-  <label>Pool members, one per line <textarea name="members" rows="4" placeholder="bili/glm-5&#10;command-code">{{.Form.Members}}</textarea></label>
+  <label>Pool provider <select name="provider">
+    <option value=""{{if not .Form.Provider}} selected{{end}}>— none, list the members below —</option>
+    {{$p := .Form.Provider}}{{range .PoolProviders}}<option value="{{.}}"{{if eq . $p}} selected{{end}}>{{.}}</option>{{end}}
+  </select></label>
+  <label>Pool members, one per line <textarea name="members" rows="4" placeholder="bili/glm-5&#10;command-code&#10;opendesign/deepseek-v4-flash">{{.Form.Members}}</textarea>
+    <span class="note">A member is a provider, an account, or <span class="mono">&lt;account&gt;/&lt;model&gt;</span>. Naming a pool provider above takes the pool's own members.</span></label>
   <label>Strategy <select name="strategy">{{range .Strategies}}<option{{if eq . $.Form.Strategy}} selected{{end}}>{{.}}</option>{{end}}</select></label>
   <button>Save</button>
   {{if .Form.Editing}}<p class="note">A route's name is fixed; remove it and add another to rename.</p>{{end}}
@@ -59,6 +64,7 @@
   <tr><td class="mono">&lt;account&gt;/&lt;model&gt;</td><td>any model at that account; the model goes upstream as is</td></tr>
   <tr><td class="mono">&lt;alias&gt;</td><td>another model name, from a route</td></tr>
   <tr><td class="mono">&lt;pool&gt;</td><td>several model names with failover or rotation</td></tr>
+  <tr><td class="mono">provider = "&lt;pool&gt;"</td><td>a route over a provider pool, whose members are then the pool's</td></tr>
   </tbody>
 </table>
 {{end}}

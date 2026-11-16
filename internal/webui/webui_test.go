@@ -436,3 +436,36 @@ func TestTokenShowsRemoteLine(t *testing.T) {
 		t.Error("the note was shown with a public URL set")
 	}
 }
+
+// A route over a provider pool shows the pool it names and, under it, what
+// really answers: each member's account and the model it is asked for. Saving
+// it keeps the provider rather than freezing the pool's members into the route.
+func TestRouteOverAProvider(t *testing.T) {
+	s := newSite(t, true)
+	s.login(password)
+	cfg := *s.srv.Config()
+	cfg.Accounts = map[string]config.Account{
+		"command-code": {Vendor: "command-code", APIKey: "k1", Model: "deepseek/deepseek-v4.1-flash"},
+		"opendesign":   {Vendor: "opendesign", APIKey: "k2"},
+	}
+	cfg.Providers = map[string]config.Provider{
+		"pool": {Kind: config.KindCodex, Members: []string{"command-code", "opendesign/deepseek-v4-flash"}},
+	}
+	cfg.Service.Routes = map[string]config.Route{"frompool": {Provider: "pool"}}
+	cfg.Resolve()
+	s.srv.Reload(&cfg)
+
+	page := s.do("GET", "/ui/routes", nil).Body.String()
+	for _, want := range []string{"a pool, from", `<span class="mono">pool</span>`,
+		"command-code → deepseek/deepseek-v4.1-flash", "opendesign → deepseek-v4-flash"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("routes page lacks %q:\n%s", want, page)
+		}
+	}
+
+	// Saving the card keeps the provider: the members stay the pool's.
+	s.post("/ui/routes", "/ui/routes/save", url.Values{"name": {"frompool"}, "type": {"pool"}, "provider": {"pool"}})
+	if r := s.srv.Config().Service.Routes["frompool"]; r.Provider != "pool" {
+		t.Errorf("saved route = %+v, want the provider kept", r)
+	}
+}

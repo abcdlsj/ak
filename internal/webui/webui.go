@@ -287,15 +287,17 @@ func (c *call) change(do func(cfg *config.Config) error) error {
 // as markup.
 type accountView struct {
 	Name, Vendor, User string
-	Users              []string
-	Hue                int
-	Act                activity
-	Meters             []meterView
-	Balance            *amountView
-	Err                string
-	NoSource           bool
-	NoQuota            bool
-	Pending            bool // the first reading of this account is under way
+	// Model is the model this account's plan serves, when it names one.
+	Model    string
+	Users    []string
+	Hue      int
+	Act      activity
+	Meters   []meterView
+	Balance  *amountView
+	Err      string
+	NoSource bool
+	NoQuota  bool
+	Pending  bool // the first reading of this account is under way
 }
 
 func (c *call) accounts() {
@@ -311,7 +313,7 @@ func (c *call) accounts() {
 		a := cfg.Accounts[n]
 		v, _ := vendor.Lookup(a.Vendor)
 		q := qs[i]
-		views[i] = accountView{Name: n, Vendor: v.Name, User: a.User, Users: cfg.UsersOf(n),
+		views[i] = accountView{Name: n, Vendor: v.Name, User: a.User, Model: a.Model, Users: cfg.UsersOf(n),
 			Hue: hueOf(v.ID), Meters: meters(q), Err: q.Error, NoSource: q.NoSource, Act: act[n]}
 		if q.Balance != nil {
 			amount := money(*q.Balance)
@@ -379,16 +381,22 @@ func (c *call) removeAccount() {
 // routeView is a route as the Routes page shows it.
 type routeView struct {
 	Name, Model, Strategy, Kind string
-	Members                     []string
-	Hue                         int
-	Act                         activity
+	// Provider is the provider pool the route names, when it names one: the
+	// members are then that pool's and the route shows them anyway, since
+	// they are what answers.
+	Provider string
+	// Members is what the route answers with, one entry per member: the
+	// account and the model it is asked for.
+	Members []string
+	Hue     int
+	Act     activity
 }
 
 // routeForm is the add form's values, filled from a route when ?edit names
 // one.
 type routeForm struct {
-	Name, Model, Members, Kind, Strategy string
-	Editing                              bool
+	Name, Model, Members, Kind, Strategy, Provider string
+	Editing                                        bool
 }
 
 func (c *call) routes() {
@@ -397,7 +405,8 @@ func (c *call) routes() {
 	var views []routeView
 	for _, n := range cfg.Service.RouteNames() {
 		r := cfg.Service.Routes[n]
-		v := routeView{Name: n, Model: r.Model, Members: r.Members, Strategy: r.Strategy, Kind: "alias", Hue: hueOf(n)}
+		v := routeView{Name: n, Model: r.Model, Members: routeMembers(cfg, r.Members), Provider: r.Provider,
+			Strategy: r.Strategy, Kind: "alias", Hue: hueOf(n)}
 		if r.IsPool() {
 			v.Kind = "pool"
 			if v.Strategy == "" {
@@ -412,7 +421,7 @@ func (c *call) routes() {
 	form := routeForm{Kind: "alias", Strategy: config.StrategyOrder}
 	if e := c.r.URL.Query().Get("edit"); e != "" {
 		if r, ok := cfg.Service.Routes[e]; ok {
-			form = routeForm{Name: e, Model: r.Model, Members: strings.Join(r.Members, "\n"),
+			form = routeForm{Name: e, Model: r.Model, Members: strings.Join(r.Members, "\n"), Provider: r.Provider,
 				Kind: "alias", Strategy: config.StrategyOrder, Editing: true}
 			if r.IsPool() {
 				form.Kind = "pool"
@@ -421,13 +430,57 @@ func (c *call) routes() {
 		}
 	}
 	c.u.render(c.w, "routes", map[string]any{"Routes": views, "Accounts": cfg.AccountNames(), "Form": form,
-		"Strategies": []string{config.StrategyOrder, config.StrategyRotate, config.StrategyLeastUsed, config.StrategySmart}}, c)
+		"PoolProviders": poolProviders(cfg),
+		"Strategies":    []string{config.StrategyOrder, config.StrategyRotate, config.StrategyLeastUsed, config.StrategySmart}}, c)
+}
+
+// routeMembers reads a route's members the way the page shows them: the
+// account and the model it is asked for, so a route over accounts says which
+// models answer rather than only which accounts.
+func routeMembers(cfg *config.Config, members []string) []string {
+	out := make([]string, 0, len(members))
+	for _, m := range members {
+		ref, err := cfg.ParseModel(m)
+		if err != nil || ref.Account == "" {
+			out = append(out, m)
+			continue
+		}
+		model := ref.Model
+		if model == "" {
+			model = cfg.Accounts[ref.Account].Model
+		}
+		if model == "" {
+			out = append(out, ref.Account)
+			continue
+		}
+		out = append(out, ref.Account+" → "+model)
+	}
+	return out
+}
+
+// poolProviders lists the providers a route may name instead of repeating
+// their members.
+func poolProviders(cfg *config.Config) []string {
+	var out []string
+	for _, n := range cfg.Names() {
+		if cfg.Providers[n].IsPool() {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func (c *call) saveRoute() {
 	name := field(c.r, "name")
 	var r config.Route
-	if c.r.PostFormValue("type") == "pool" {
+	if p := field(c.r, "provider"); p != "" {
+		// A route over a provider pool takes the pool's members; the form's
+		// members are what the pool already answers with.
+		r.Provider = p
+		if s := field(c.r, "strategy"); s != config.StrategyOrder {
+			r.Strategy = s
+		}
+	} else if c.r.PostFormValue("type") == "pool" {
 		r.Members = strings.FieldsFunc(c.r.PostFormValue("members"), func(c rune) bool {
 			return c == ',' || c == '\n' || c == '\r' || c == ' '
 		})
