@@ -58,6 +58,11 @@ ak usage. No model request is sent: ak check does that.`,
 			if rows, err := usage.Load(cfg); err != nil {
 				warnf("ak: usage: %v", err)
 			} else {
+				// A remote's own report names the models behind a route, so
+				// its tokens carry a price rather than a name nothing matches.
+				if served, errs := usage.FetchRemoteUsage(cmd.Context(), cfg, statusDays); len(errs) == 0 {
+					rows = usage.Refine(rows, served, cfg)
+				}
 				sum := usage.Summarize(rows, cfg, usage.Filter{Since: usage.SinceDays(statusDays)})
 				for _, r := range sum.ByProvider {
 					used[r.Name] = r

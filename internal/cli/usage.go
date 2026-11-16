@@ -14,10 +14,11 @@ import (
 
 func newUsageCmd() *cobra.Command {
 	var (
-		asJSON bool
-		days   int
-		since  string
-		akOnly bool
+		asJSON   bool
+		days     int
+		since    string
+		akOnly   bool
+		noRemote bool
 	)
 	cmd := &cobra.Command{
 		Use:   "usage [name]",
@@ -32,7 +33,12 @@ func newUsageCmd() *cobra.Command {
 
 The first scan parses the whole history and takes a few seconds; later runs
 are incremental and near-instant. Cost is estimated from models.dev pricing;
-models with no pricing contribute tokens only, never a dollar figure.`,
+models with no pricing contribute tokens only, never a dollar figure.
+
+A provider on a remote account asks a service for a name the service chose,
+which may be a route over several models rather than a model. The service is
+asked what it actually served, so those tokens are priced and attributed by
+model; --no-remote keeps ak offline and reports the route name as logged.`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeProviders,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -47,6 +53,9 @@ models with no pricing contribute tokens only, never a dollar figure.`,
 			rows, err := usage.Load(cfg)
 			if err != nil {
 				return err
+			}
+			if !noRemote {
+				rows = refineRemote(cmd, cfg, rows, days)
 			}
 			if akOnly {
 				kept := rows[:0]
@@ -71,6 +80,7 @@ models with no pricing contribute tokens only, never a dollar figure.`,
 	cmd.Flags().IntVar(&days, "days", 0, "Only the last N days, today included")
 	cmd.Flags().StringVar(&since, "since", "", "Only from this date on, YYYY-MM-DD")
 	cmd.Flags().BoolVar(&akOnly, "ak-only", false, "Only providers in providers.toml, not engine logins or other tools' ids")
+	cmd.Flags().BoolVar(&noRemote, "no-remote", false, "Do not ask remote services what they served; report their route names as logged")
 	cmd.MarkFlagsMutuallyExclusive("days", "since")
 	return cmd
 }
@@ -96,6 +106,21 @@ func usageFilter(days int, since string, args []string) (usage.Filter, error) {
 
 // usageModelsShown is how many models the model table shows.
 const usageModelsShown = 10
+
+// refineRemote asks each remote service what it served and replaces the route
+// name the logs recorded with the models behind it. A service that cannot be
+// asked is said so: its tokens stay attributed to a name no price matches.
+func refineRemote(cmd *cobra.Command, cfg *config.Config, rows []usage.Row, days int) []usage.Row {
+	if days <= 0 {
+		// The whole history: ask for as much as a service keeps.
+		days = 0
+	}
+	served, errs := usage.FetchRemoteUsage(cmd.Context(), cfg, days)
+	for _, err := range errs {
+		warnf("ak: usage of %v; its tokens are reported under the route name", err)
+	}
+	return usage.Refine(rows, served, cfg)
+}
 
 // printUsage prints a summary: the total, by provider, by model, and the span
 // of the history it covers.

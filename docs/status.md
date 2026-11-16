@@ -132,3 +132,37 @@ window resets.
 Queries are opt-in per run: ak never calls a balance API on its own. A pool is
 asked through its members, and providers sharing one key on one host are asked
 once. A provider no source serves shows `-`, with one hint under the table.
+
+## Usage
+
+`ak usage [name]` counts tokens from the session logs the engines write:
+`~/.claude/projects`, `~/.codex/sessions` and `~/.pi/agent/sessions`, plus any
+`config_dir`/`codex_home` a provider sets. Rows are attributed to an ak
+provider, so a provider's tokens and dollars are its own; usage that never went
+through ak — an engine's own login, another tool's provider id — is listed
+apart, under *Outside ak*.
+
+```sh
+ak usage                 all history
+ak usage --days 7        the last seven days, today included
+ak usage kimi --json     one provider, machine-readable
+ak usage --ak-only       leave out engine logins and other tools
+```
+
+Cost comes from models.dev prices, fetched once a day into
+`~/.config/ak/model-prices.json`. A provider's own `[providers.x.pricing]`
+overrides them: either explicit per-million prices, or a `discount` multiplier
+on the models.dev figure. A model with no price anywhere is counted in tokens
+and named in one line under the total, never added to the cost as zero.
+
+**Routes and remotes.** A provider on a remote account asks a service for a
+model name the service chose, and that name may be a route — a fallback chain
+over several models, `main` for instance — rather than a model. No price
+matches a route, so the service is asked what it actually served
+(`GET /ak/v1/usage`), and each row is renamed to the model behind it: a route
+that served one model takes that name, one that served several splits the
+row's tokens in the proportions the service counted. The token total is never
+changed, only its attribution, so the figure stays the same and its price
+becomes exact. `--no-remote` keeps ak offline and reports the route name as
+logged; a service that cannot be reached is named on stderr and its tokens
+stay under the route name.
