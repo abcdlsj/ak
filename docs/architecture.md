@@ -137,8 +137,8 @@ model, protocol, endpoint, in fallback order — and `ak list --refresh` is what
 the TUI reads. One screen answers "what will actually be asked", so the four
 precedence rules never need to be remembered.
 
-**3. Isolation as data.** *(Not done.)* Replace `config_dir`/`codex_home`/a future
-`antigravity_home` with `[providers.x.env]` plus one `home` field per engine,
+**3. Isolation as data.** *(Not done.)* Replace `config_dir`/`codex_home`/
+`gemini_dir` with `[providers.x.env]` plus one `home` field per engine,
 declared by the engine rather than the config (the same move `Endpoint.Protocol`
 made for protocols).
 

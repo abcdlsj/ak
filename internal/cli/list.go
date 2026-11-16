@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/out"
+	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -71,12 +73,19 @@ type listRow struct {
 	// models, and the models behind a name that only stands for them.
 	Serves  []string `json:"serves,omitempty"`
 	Default bool     `json:"default,omitempty"`
+	// GeminiDir is an antigravity provider's own environment; AgyAccount is who
+	// it is signed in as, both empty for the other engines.
+	GeminiDir  string `json:"gemini_dir,omitempty"`
+	AgyAccount string `json:"agy_account,omitempty"`
+	// AgyState is ok, expiring, expired or missing, for the same providers.
+	AgyState string `json:"agy_state,omitempty"`
 }
 
 func listRows(cfg *config.Config, routes core.RemoteModels) []listRow {
 	rows := make([]listRow, 0, len(cfg.Providers))
 	for _, name := range cfg.Names() {
 		p := cfg.Providers[name]
+		account, state := agyCredential(p)
 		rows = append(rows, listRow{
 			Name:         name,
 			Command:      cfg.Settings.Prefix + name,
@@ -91,6 +100,9 @@ func listRows(cfg *config.Config, routes core.RemoteModels) []listRow {
 			MemberModels: p.MemberModels,
 			Serves:       core.ModelNames(cfg, name, routes.Models),
 			Default:      cfg.Settings.Default == name,
+			GeminiDir:    p.GeminiDir,
+			AgyAccount:   account,
+			AgyState:     state,
 		})
 	}
 	return rows
@@ -158,7 +170,22 @@ func runsOn(r listRow) string {
 	if r.Account != "" {
 		return "account " + r.Account
 	}
+	if r.GeminiDir != "" {
+		return agyRunsOn(r)
+	}
 	return endpoint(r)
+}
+
+// agyRunsOn says which Google account a provider signs in as; without one the
+// directory is the only thing there is to name.
+func agyRunsOn(r listRow) string {
+	switch {
+	case r.AgyAccount != "":
+		return "agy " + r.AgyAccount
+	case r.AgyState == "missing" || r.AgyState == "":
+		return "agy " + out.Warn("not signed in")
+	}
+	return "agy"
 }
 
 // membersOf lists a pool's members, each with the model the pool asks it for
@@ -188,4 +215,31 @@ func endpoint(r listRow) string {
 		return "pi:" + r.PiProvider
 	}
 	return r.BaseURL
+}
+
+// agyCredential is who an antigravity provider signs in as and what its
+// credential's state is, from one read of its own environment. Both are empty
+// for the other engines; a provider without a credential shows only that.
+func agyCredential(p config.Provider) (account, state string) {
+	if p.Kind != config.KindAntigravity || p.GeminiDir == "" {
+		return "", ""
+	}
+	t, err := provider.ReadAntigravityToken(config.ExpandHome(p.GeminiDir))
+	if err != nil {
+		return "", "missing"
+	}
+	return t.Email, t.State(time.Now())
+}
+
+// agyAccount is who the provider signs in as, when the credential names it.
+func agyAccount(p config.Provider) string {
+	account, _ := agyCredential(p)
+	return account
+}
+
+// agyState is what a listing shows about an antigravity credential without
+// asking anyone: ok, expiring within a week, expired, or missing.
+func agyState(p config.Provider) string {
+	_, state := agyCredential(p)
+	return state
 }

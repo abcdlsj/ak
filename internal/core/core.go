@@ -304,10 +304,14 @@ type Status struct {
 	NoKey bool
 	// NoEngine means the engine binary cannot be found.
 	NoEngine bool
+	// NeedsLogin means the engine signs in itself and its credential is
+	// missing. Only antigravity providers get it: an agy provider holds no key,
+	// so NoKey would be the wrong word for the same problem.
+	NeedsLogin bool
 }
 
 // OK reports whether nothing is wrong.
-func (s Status) OK() bool { return !s.Drift && !s.NoKey && !s.NoEngine }
+func (s Status) OK() bool { return !s.Drift && !s.NoKey && !s.NoEngine && !s.NeedsLogin }
 
 // Problems describes what is wrong, most urgent first.
 func (s Status) Problems() []string {
@@ -317,6 +321,9 @@ func (s Status) Problems() []string {
 	}
 	if s.NoKey {
 		out = append(out, "no API key")
+	}
+	if s.NeedsLogin {
+		out = append(out, "not signed in")
 	}
 	if s.Drift {
 		out = append(out, "out of sync, run ak sync")
@@ -343,9 +350,10 @@ func Statuses(cfg *config.Config) map[string]Status {
 	for _, name := range cfg.Names() {
 		p := cfg.Providers[name]
 		out[name] = Status{
-			Drift:    drift[CommandPath(cfg, name)],
-			NoKey:    noKey(cfg, p),
-			NoEngine: !engineFound[p.Kind],
+			Drift:      drift[CommandPath(cfg, name)],
+			NoKey:      noKey(cfg, p),
+			NoEngine:   !engineFound[p.Kind],
+			NeedsLogin: needsLogin(p),
 		}
 	}
 	return out
@@ -355,7 +363,7 @@ func Statuses(cfg *config.Config) map[string]Status {
 // never reports drift; cheap enough for shell completion.
 func QuickStatus(cfg *config.Config, name string) Status {
 	p := cfg.Providers[name]
-	st := Status{NoKey: noKey(cfg, p)}
+	st := Status{NoKey: noKey(cfg, p), NeedsLogin: needsLogin(p)}
 	if eng := provider.EngineFor(p.Kind); eng == nil || findEngine(cfg, eng) == "" {
 		st.NoEngine = true
 	}
@@ -384,6 +392,17 @@ func noKey(cfg *config.Config, p config.Provider) bool {
 		return false
 	}
 	return p.APIKey == "" && p.APIKeyRef == ""
+}
+
+// needsLogin reports whether an engine that signs in itself has nothing to
+// sign in with yet. An antigravity provider keeps its credential in its own
+// gemini_dir, so its presence is the whole test.
+func needsLogin(p config.Provider) bool {
+	if p.Kind != config.KindAntigravity || p.GeminiDir == "" {
+		return false
+	}
+	_, err := provider.ReadAntigravityToken(config.ExpandHome(p.GeminiDir))
+	return err != nil
 }
 
 // findEngine returns the engine binary the commands would run, or "".

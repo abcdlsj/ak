@@ -75,7 +75,11 @@ func execProvider(cfg *config.Config, name, variant string, args []string) error
 	if !ok {
 		return fmt.Errorf("provider %q does not exist; see `ak list`", name)
 	}
-	if core.QuickStatus(cfg, name).NoKey {
+	st := core.QuickStatus(cfg, name)
+	if st.NeedsLogin {
+		return fmt.Errorf("%s is not signed in; run `ak agy login %s` and finish the sign-in it opens", name, name)
+	}
+	if st.NoKey {
 		if p.IsPool() {
 			return fmt.Errorf("a member of pool %s has no API key; see `ak list`", name)
 		}

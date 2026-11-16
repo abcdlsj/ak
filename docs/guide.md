@@ -222,6 +222,7 @@ of separation are available when that is too much sharing:
 | `settings` | claude | a settings layer passed as `--settings`; its values replace the shared `settings.json`'s, the rest stays shared |
 | `config_dir` | claude | everything: exports `CLAUDE_CONFIG_DIR` |
 | `codex_home` | codex | everything: exports `CODEX_HOME` |
+| `gemini_dir` | antigravity | everything, the account included: passed as `--gemini_dir` |
 
 ```toml
 [providers.stepfunclaude.settings]
@@ -239,6 +240,35 @@ its `env`: those come from the provider. A separate directory starts empty,
 so sign in, MCP servers and plugins are set up there again; `ak usage`
 reads its sessions, and `ak hook install` and `ak doctor` cover its
 `settings.json` too.
+
+## Antigravity
+
+A `kind = "antigravity"` provider runs `agy`, Google's Antigravity CLI. It
+takes no endpoint and no key: agy signs in through Google itself and keeps the
+credential in a file inside the provider's own `gemini_dir`. So **one provider
+is one account**, and providers run at the same time:
+
+```sh
+ak agy add work                  # ~/.local/share/ak/agy/work
+ak agy login work                # sign in; the token lands in that directory
+ak agy add personal --keychain   # or copy the account this Mac already has
+ak agy models work --set gemini-3.8-flash-high
+ak agy path work --json          # gemini_dir, config_dir, app_data_dir, token
+```
+
+`gemini_dir` is required, and one directory cannot serve two providers: they
+would be one account. `ak doctor` checks both.
+
+Two details are worth knowing. agy normally keeps its credential in the OS
+keyring, which holds one account per user; the launch exports `SSH_CONNECTION`,
+which makes agy read and write the file in `gemini_dir` instead, so the
+machine's own `~/.gemini` sign-in is never touched. And because agy believes it
+is on a remote session, an interactive sign-in asks for the browser's code to be
+pasted back rather than calling back into the terminal.
+
+`--gemini_dir` is not in `agy --help`; `ak doctor` asks agy whether it still
+takes it, since a release that dropped it would send every provider to
+`~/.gemini`.
 
 ## Pi
 

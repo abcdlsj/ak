@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -225,6 +226,13 @@ func runDoctor(cfg *config.Config) error {
 				d.hint("Run `ak unbind %s` there", b.Engine)
 			}
 		}
+	}
+
+	// 14. An antigravity provider's whole environment and account live in its
+	// own directory, so a missing one, a shared one, or a directory agy no
+	// longer accepts are all silent until the first turn.
+	if hasKind(cfg, config.KindAntigravity) {
+		doctorAntigravity(d, cfg)
 	}
 
 	if len(cfg.Providers) == 0 {
@@ -544,4 +552,68 @@ func driftReport(cfg *config.Config) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// doctorAntigravity checks what an antigravity provider needs: a directory of
+// its own, a credential agy can read, and an agy that still takes the flag ak
+// passes it. The last one is the check that matters most: --gemini_dir is not
+// in agy's --help, so a release is free to drop it, and every provider would
+// quietly fall back to ~/.gemini and the machine's own account.
+func doctorAntigravity(d *doctor, cfg *config.Config) {
+	names := antigravityNames(cfg)
+	byDir := map[string][]string{}
+	allFine := true
+	for _, name := range names {
+		p := cfg.Providers[name]
+		dir := config.ExpandHome(p.GeminiDir)
+		byDir[dir] = append(byDir[dir], name)
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+			allFine = false
+			d.bad("%s: %s does not exist", name, dir)
+			d.hint("Create it and sign in with `ak agy login %s`", name)
+			continue
+		}
+		if t, err := provider.ReadAntigravityToken(dir); err != nil {
+			allFine = false
+			d.notice("%s is not signed in (%s)", name, provider.AntigravityTokenPath(dir))
+			d.hint("Run `ak agy login %s`, or `ak agy import %s --keychain`", name, name)
+		} else if t.Expired(time.Now()) && t.RefreshToken == "" {
+			allFine = false
+			// With a refresh token agy renews by itself; without one the
+			// access token is all there is, and it is gone.
+			d.bad("%s: the credential has expired and has no refresh token", name)
+			d.hint("Sign in again with `ak agy login %s`", name)
+		}
+	}
+	shared := false
+	for dir, sharing := range byDir {
+		if len(sharing) > 1 {
+			shared = true
+			d.bad("%s share %s, so they share one account", strings.Join(sharing, ", "), dir)
+			d.hint("Give each its own directory: `ak edit <provider> --gemini-dir <dir>`")
+		}
+	}
+	if allFine && !shared {
+		d.fine("every antigravity provider has its own environment and account")
+	}
+
+	// agy's flag acceptance, asked without spending anything: an unknown flag
+	// fails before agy does any work.
+	bin := lookPathOr(cfg.Settings.AntigravityBin, "agy")
+	if bin == "" {
+		return
+	}
+	dir, err := os.MkdirTemp("", "ak-agy-probe-")
+	if err != nil {
+		return
+	}
+	defer os.RemoveAll(dir)
+	cmd := exec.Command(bin, "--gemini_dir="+dir, "help")
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	if err := cmd.Run(); err != nil {
+		d.bad("%s does not accept --gemini_dir any more", bin)
+		d.note("Every antigravity provider would launch against ~/.gemini and the")
+		d.note("account this Mac is signed in to, instead of its own.")
+		d.hint("Check `agy --help` and the ak release notes before using agy again")
+	}
 }

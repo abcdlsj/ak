@@ -104,6 +104,9 @@ func acpProviderEnv(cfg *config.Config, k config.Kind, target string, environ []
 	if !ok {
 		return nil, fmt.Errorf("provider %q does not exist; see `ak list`", name)
 	}
+	if core.QuickStatus(cfg, name).NeedsLogin {
+		return nil, fmt.Errorf("%s is not signed in; run `ak agy login %s` and finish the sign-in it opens", name, name)
+	}
 	if core.QuickStatus(cfg, name).NoKey {
 		if p.IsPool() {
 			return nil, fmt.Errorf("a member of pool %s has no API key; see `ak list`", name)
