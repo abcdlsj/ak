@@ -47,6 +47,13 @@ as engines, a vendor that lists `endpoints` still answers Claude Code and Codex
 from them, each taking the protocol it speaks. Writing a vendor with
 `[[endpoints]]` is the way to say "this one serves chat too".
 
+Each engine takes the protocol it speaks over the ones it would be translated
+to: Claude Code `anthropic`, Codex `responses`, pi `chat` (its OpenAI shape),
+then the rest in that order. So a vendor serving all three hands pi its chat
+endpoint, and a request through it is never translated; a vendor serving only
+Anthropic still answers pi, by translation, because it is the last that is
+taken rather than not taken at all.
+
 ## What a model name reaches
 
 `GET /v1/models` reports, for each name, how each protocol reaches it:
