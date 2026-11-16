@@ -124,8 +124,8 @@ the protocol pair and stream or not:
 
 ```go
 translate.Request(from, to, body, model) ([]byte, error)
-translate.Response(from, to, body) ([]byte, error)
-translate.NewStream(from, to) *Stream  // .Event(data) ([]byte, error), .Close() []byte
+translate.Response(from, to, body, model) ([]byte, error)
+translate.NewStream(from, to, model) *Stream  // .Event(data) ([]byte, error), .Close() []byte
 translate.Error(to, status, message) []byte
 ```
 
@@ -147,6 +147,9 @@ Two gaps are filled in ak's package: bifrost leaves an Anthropic stream's
 usage to its own accumulator, so ak carries `message_start` and
 `message_delta` usage onto the completed event; and a chat upstream reports
 usage in a chunk after its finish, so the completed event is held until it.
+A third is the model name: bifrost leaves it out of the lifecycle events it
+synthesizes, so every event ak writes states the model the member was asked
+for — a client records its usage against that name, and an empty one loses it.
 bifrost's `extra_fields` are dropped from what clients see.
 
 The matrix, each pair tested on hand-written Claude Code, Codex and chat

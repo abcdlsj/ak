@@ -32,8 +32,9 @@ const (
 	RefusalMissing = "model_not_found"
 	// RefusalKey is a key the vendor will not take.
 	RefusalKey = "invalid_key"
-	// RefusalProtocol is a protocol the account has no endpoint for, as the
-	// configuration reads: a member that could only be translated.
+	// RefusalProtocol is a protocol the account cannot serve this model on,
+	// by the configuration (a member that could only be translated) or by the
+	// vendor's own words ("not supported on this endpoint").
 	RefusalProtocol = "unsupported_protocol"
 )
 
@@ -217,7 +218,11 @@ func (r *refusals) save(path string) {
 var (
 	permissionWords = regexp.MustCompile(`(?i)permission_error|unapproved|not allowed|no access|forbidden|permission`)
 	missingWords    = regexp.MustCompile(`(?i)model_not_found|no such model|model .* does not exist|unknown model|invalid model|does not have access to model`)
-	keyWords        = regexp.MustCompile(`(?i)invalid_api_key|invalid api key|incorrect api key|api key is invalid|authentication_error`)
+	// unsupportedWords is a vendor saying this endpoint does not speak this
+	// model: the account has it, but on another protocol, so the answer is
+	// worth remembering as a protocol capability rather than retried.
+	unsupportedWords = regexp.MustCompile(`(?i)not supported on this endpoint|does not support this (model|endpoint)|unsupported (model|on this endpoint)|use /\S*chat/completions`)
+	keyWords         = regexp.MustCompile(`(?i)invalid_api_key|invalid api key|incorrect api key|api key is invalid|authentication_error`)
 )
 
 // classifyRefusal says why a member refused, or "" when the answer says
@@ -233,6 +238,8 @@ func classifyRefusal(status int, body []byte) string {
 		return RefusalMissing
 	}
 	switch {
+	case unsupportedWords.Match(body):
+		return RefusalProtocol
 	case missingWords.Match(body):
 		return RefusalMissing
 	case keyWords.Match(body):

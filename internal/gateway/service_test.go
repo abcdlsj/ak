@@ -28,6 +28,9 @@ type vendorUp struct {
 	// statusPath fails only these paths, so one endpoint of one vendor can
 	// refuse while another answers.
 	statusPath map[string]int
+	// refusePath fails a path with a status and a body of the vendor's own
+	// words, so what it says can be classified as a real answer would be.
+	refusePath map[string]pathRefusal
 
 	mu   sync.Mutex
 	reqs []seen
@@ -36,6 +39,12 @@ type vendorUp struct {
 type seen struct {
 	path, auth, key, token, cookie string
 	body                           map[string]any
+}
+
+// pathRefusal is one path's failure: the status and what the vendor says.
+type pathRefusal struct {
+	status int
+	body   string
 }
 
 func fixture(t *testing.T, name string) []byte {
@@ -70,6 +79,11 @@ func newVendorUp(t *testing.T) *vendorUp {
 		if st := u.statusPath[r.URL.Path]; st != 0 {
 			w.WriteHeader(st)
 			io.WriteString(w, `{"type":"error","error":{"type":"permission_error","message":"the plan does not include this model"}}`)
+			return
+		}
+		if ref, ok := u.refusePath[r.URL.Path]; ok {
+			w.WriteHeader(ref.status)
+			io.WriteString(w, ref.body)
 			return
 		}
 		if r.URL.Path == "/v1/messages/count_tokens" {
@@ -559,6 +573,34 @@ func TestServiceSkipsARefusedProtocol(t *testing.T) {
 	}
 	if len(info.Refused) != 1 || info.Refused[0].Protocol != "anthropic" {
 		t.Errorf("refused = %+v, want the anthropic endpoint", info.Refused)
+	}
+	if rec := r.do(t, "/v1/messages", body); rec.Code != 200 {
+		t.Fatalf("the second request: %d %s", rec.Code, rec.Body)
+	}
+	if n := r.both.countPath("/v1/messages"); n != 1 {
+		t.Errorf("the refused endpoint was asked again: %d times", n)
+	}
+}
+
+// A vendor that says this endpoint does not speak this model has the model on
+// another protocol; that is a capability, so it is remembered and the next
+// request skips the round trip that would say it again.
+func TestServiceRemembersAnEndpointThatCannotSpeakTheModel(t *testing.T) {
+	r := newRig(t, nil)
+	r.both.refusePath = map[string]pathRefusal{
+		"/v1/messages": {status: http.StatusBadRequest,
+			body: `{"type":"error","error":{"type":"invalid_request_error","message":"Model \"deepseek/deepseek-v4.1-flash\" is not supported on this endpoint. Use /provider/v1/chat/completions for OpenAI and OSS models"}}`},
+	}
+	body := withModel(t, "claude_request.json", "bili", false)
+	if rec := r.do(t, "/v1/messages", body); rec.Code != 200 {
+		t.Fatalf("the endpoint that speaks it did not answer: %d %s", rec.Code, rec.Body)
+	}
+	if n := r.both.countPath("/v1/messages"); n != 1 {
+		t.Errorf("the endpoint was asked %d times, want 1", n)
+	}
+	info := r.srv.info(r.srv.config(), "bili")
+	if len(info.Refused) != 1 || info.Refused[0].Protocol != "anthropic" || info.Refused[0].Reason != RefusalProtocol {
+		t.Fatalf("refused = %+v, want the anthropic endpoint as a protocol refusal", info.Refused)
 	}
 	if rec := r.do(t, "/v1/messages", body); rec.Code != 200 {
 		t.Fatalf("the second request: %d %s", rec.Code, rec.Body)
