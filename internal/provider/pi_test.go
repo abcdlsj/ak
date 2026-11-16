@@ -263,3 +263,24 @@ func TestProviderEnvForPiAndCodex(t *testing.T) {
 		t.Error("codex pool dropped its codex_home")
 	}
 }
+
+// pi reads models.json from its own home, so a config ak keeps to itself has
+// to say where that is; the user's own home needs no word.
+func TestPiLaunchTellsPiWhereASandboxWrites(t *testing.T) {
+	p := config.Provider{Kind: config.KindPi, BaseURL: "https://relay.example", Model: "m1"}
+	t.Setenv(config.PiHomeEnv, "")
+	t.Setenv(config.DirEnv, "")
+	if l, _ := (piEngine{}).Launch("relay", p, Literal("k"), Context{}); envMap(l.Env)[config.PiHomeEnv] != "" {
+		t.Error("the user's own pi home was overridden")
+	}
+
+	dir := t.TempDir()
+	t.Setenv(config.DirEnv, dir)
+	l, err := piEngine{}.Launch("relay", p, Literal("k"), Context{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := envMap(l.Env)[config.PiHomeEnv]; got != filepath.Join(dir, "pi") {
+		t.Errorf("PI_CODING_AGENT_DIR = %q, want the config's own", got)
+	}
+}

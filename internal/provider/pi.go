@@ -52,6 +52,12 @@ func (piEngine) Launch(name string, p config.Provider, key Secret, ctx Context) 
 		env.setSecret(EnvKey(name), key)
 	}
 	env.set("AK_PROVIDER", name)
+	// A config of ak's own keeps its models.json inside it, so pi is told
+	// where to look; the user's own PI_CODING_AGENT_DIR is already in the
+	// environment and wins.
+	if home, err := config.PiHome(); err == nil && config.PiHomeSandboxed() {
+		env.set(config.PiHomeEnv, home)
+	}
 	// Extra env vars merge last, as for claude.
 	for k, v := range p.Env {
 		env.set(k, v)

@@ -31,14 +31,11 @@ type piModelProvider struct {
 
 // piAgentDir is where pi keeps its configuration.
 func piAgentDir() string {
-	if d := os.Getenv(provider.EnvPiHome); d != "" {
-		return config.ExpandHome(d)
-	}
-	home, err := os.UserHomeDir()
+	dir, err := config.PiHome()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".pi", "agent")
+	return dir
 }
 
 // importPi copies the providers from pi's models.json into ak. Providers ak

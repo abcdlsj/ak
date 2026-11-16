@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -54,4 +55,28 @@ func TestSyncWritesPiModelsAndShim(t *testing.T) {
 		t.Errorf("second sync created %d file(s), want 0", c[ActionCreated])
 	}
 	_ = rep
+}
+
+// A relocated config keeps pi's models.json inside itself: syncing writes
+// nothing into the user's ~/.pi.
+func TestPiModelsStayInARelocatedConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(config.DirEnv, dir)
+	t.Setenv(config.PiHomeEnv, "")
+	cfg := config.Default()
+	cfg.Providers["boxpi"] = config.Provider{Kind: config.KindPi, BaseURL: "https://box.example/v1",
+		PiAPI: "openai-completions", Model: "m", APIKey: "k"}
+	cfg.Resolve()
+	// PiHome is left empty on purpose: the syncer must find the relocated one.
+	s := &Syncer{Cfg: cfg, CodexHome: t.TempDir(), Self: "/usr/bin/ak"}
+	if _, err := s.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "pi", "models.json"))
+	if err != nil {
+		t.Fatalf("models.json was not written inside the config: %v", err)
+	}
+	if !strings.Contains(string(data), "ak-boxpi") {
+		t.Errorf("models.json = %s", data)
+	}
 }

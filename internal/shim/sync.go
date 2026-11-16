@@ -344,14 +344,11 @@ func (s *Syncer) piHome() string {
 	if s.PiHome != "" {
 		return s.PiHome
 	}
-	if v := os.Getenv(provider.EnvPiHome); v != "" {
-		return config.ExpandHome(v)
-	}
-	home, err := os.UserHomeDir()
+	dir, err := config.PiHome()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".pi", "agent")
+	return dir
 }
 
 // codexHome returns the directory holding codex profiles.
