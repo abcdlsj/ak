@@ -97,12 +97,13 @@ Protocol preference for a leg, first that answers:
 
 ## Where it strains
 
-1. **Two pools.** A provider pool (`members`, the loopback gateway at `/p/<name>`)
-   and a service route (`[service.routes.main]`, the listener's names). Same
-   idea, two configs, two code paths, two member kinds (providers vs accounts),
-   and only the service side translates protocols, meters usage and remembers
-   refusals. A local pool of claude providers with different protocols cannot
-   exist, while the same shape works on the service side.
+1. ~~**Two pools.**~~ **Resolved (v0.3.7).** A route may name a provider pool
+   (`[service.routes.dpsk] provider = 'dpsk'`) and a pool's member may be an
+   account, so one pool is defined once and answers both as `ak-<name>` and as
+   a model name. What is still two-sided is the *code path*: the listener
+   translates protocols, meters usage and remembers refusals, the loopback
+   gateway does not. Unifying those is the next step, and it is now a matter of
+   running one relay instead of two.
 2. **Accounts are the routing unit on one side, providers on the other.** "What
    does `main` do" has a different answer depending on which side asks.
 3. **Four places hold a model.** A name can be overridden by a pool map, a
@@ -115,27 +116,27 @@ Protocol preference for a leg, first that answers:
 
 Each step is worth doing alone; none breaks a config that exists today.
 
-**1. One pool, two front doors** (the biggest win). Keep `[providers.x] members`
-as the single pool definition, and let `[service.routes.x]` name a provider
-pool instead of repeating members. Then a local pool gains translation,
-refusal memory and metering; a service route stops being a second concept.
+**1. One pool, two front doors** *(done in v0.3.7)*. `[providers.x] members` is
+the single pool definition, and `[service.routes.x] provider` names it instead
+of repeating the members. A member may be an account, which is what a route
+always routed to.
 
 ```toml
-[providers.main]
+[providers.dpsk]
 kind = 'codex'
-members = ['command-code', 'opendesign']
+members = ['command-code', 'opendesign']   # accounts
 strategy = 'order'
 
 [service.routes]
-main = { provider = 'main' }     # instead of members = [...]
+dpsk = { provider = 'dpsk' }
 ```
 
-**2. A leg, printed.** `ak show <name>` renders the resolved legs — account,
+**2. A leg, printed.** *(Not done.)* `ak show <name>` renders the resolved legs — account,
 model, protocol, endpoint, in fallback order — and `ak list --refresh` is what
 the TUI reads. One screen answers "what will actually be asked", so the four
 precedence rules never need to be remembered.
 
-**3. Isolation as data.** Replace `config_dir`/`codex_home`/a future
+**3. Isolation as data.** *(Not done.)* Replace `config_dir`/`codex_home`/a future
 `antigravity_home` with `[providers.x.env]` plus one `home` field per engine,
 declared by the engine rather than the config (the same move `Endpoint.Protocol`
 made for protocols).

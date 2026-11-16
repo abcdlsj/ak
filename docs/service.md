@@ -73,6 +73,9 @@ strategy = "smart"                 # order (default), rotate, least-used, smart
 [service.routes.fast]              # an alias
 model = "command-code/deepseek/deepseek-v4.1-flash"
 
+[service.routes.dpsk]              # a provider pool, named once
+provider = "dpsk"                  # [providers.dpsk] holds the members
+
 [service.tokens.laptop]            # written by `ak serve token add`
 hash = "sha256:9f2c..."
 routes = ["main", "bili"]          # omitted: every route
@@ -80,7 +83,10 @@ created = 2026-11-12T10:00:00Z
 ```
 
 A pool's members are any model names, pools among them, nested up to four
-deep and never leading back to themselves. `routes` on a token names routes
+deep and never leading back to themselves. A route may instead name a provider
+pool with `provider = "<name>"`: the members are then the pool's own, filled in
+when the file is read and written back as just the provider, so one pool serves
+both as its own command and as a model name (see [pools.md](pools.md)). `routes` on a token names routes
 and accounts; an account allows `<account>` and every `<account>/<model>`.
 A route allowed is allowed whole: its members need no listing.
 

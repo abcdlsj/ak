@@ -14,7 +14,7 @@ ak serve            # optional: launching a pool starts it in the background
 
 | Flag | Meaning |
 | --- | --- |
-| `--member` | a provider in the pool, or another pool; repeatable and ordered |
+| `--member` | a provider or an account, or another pool; repeatable and ordered |
 | `--strategy` | `order` (failover, the default), `rotate` (round-robin), `least-used` or `smart` |
 | `--map` | `member=model`: ask that member for a different model |
 | `--model` | what clients ask the pool for, when that is not each member's own name |
@@ -34,6 +34,31 @@ lost at the reset. Members with nothing to reset (a balance) or no quota
 source come next, in order, and members with nothing left come last by when
 they are back. Only smart pools make the gateway call a balance API, and
 `ak doctor` names the members a smart pool cannot read.
+
+**A member may be an account.** An account already carries its endpoint, its
+key and the model its plan serves, so a pool over subscriptions needs no
+provider of its own for each:
+
+```toml
+[providers.dpsk]
+kind = 'codex'
+members = ['command-code', 'opendesign']   # accounts
+strategy = 'order'
+```
+
+**One pool, two front doors.** The same pool can be a name a client asks for,
+so a service route takes it rather than repeating its members:
+
+```toml
+[service.routes]
+dpsk = { provider = 'dpsk' }
+```
+
+The members are the pool's: load fills them in, save writes only `provider`, and
+a route whose `members` disagree with the pool's is refused. The route's own
+`strategy` applies to the pool's members in the order they are listed, so a
+nested pool reached this way is flattened — its own strategy still applies when
+it is launched as its own command.
 
 **Members may be different models.** A pool is either several accounts of one
 model — the usual case, where affinity keeps a conversation's cache alive — or
