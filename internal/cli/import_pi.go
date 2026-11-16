@@ -106,8 +106,15 @@ func piProviderFrom(id string, src piModelProvider) (config.Provider, bool) {
 	p := config.Provider{Kind: config.KindPi, PiAPI: src.API, PiAuthHeader: src.AuthHeader, Display: src.Name}
 	if len(src.Models) > 0 {
 		p.Model = src.Models[0].ID
-		p.ContextWindow = src.Models[0].ContextWindow
-		p.MaxTokens = src.Models[0].MaxTokens
+		// The numbers may sit on a later entry — pi fills none in by itself, so
+		// a hand-written entry may state them on whichever model is first — and
+		// one model's pair is taken whole rather than borrowed piecemeal.
+		for _, m := range src.Models {
+			if m.ContextWindow > 0 || m.MaxTokens > 0 {
+				p.ContextWindow, p.MaxTokens = m.ContextWindow, m.MaxTokens
+				break
+			}
+		}
 	}
 	if src.BaseURL == "" && p.Model == "" {
 		return config.Provider{}, false
