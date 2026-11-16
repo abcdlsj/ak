@@ -485,3 +485,43 @@ func sameJSON(a, b string) bool {
 	ya, _ := json.Marshal(y)
 	return string(xa) == string(ya)
 }
+
+// Some upstreams split one tool call across two entries of the same delta: the
+// id, type and name in the first, the arguments in the second. A converter that
+// reads one entry per delta takes the call and loses what to pass to it, so the
+// client sees a call with no arguments — which is what ak used to hand Claude
+// Code for every tool call through a translated chat upstream.
+const splitToolCall = `{"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,` +
+	`"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash"}},` +
+	`{"index":0,"function":{"arguments":"{\"command\":\"echo hi\"}"}}]}}]}`
+
+func TestSplitToolCallArguments(t *testing.T) {
+	s := NewStream(Chat, Anthropic, "m")
+	var out bytes.Buffer
+	for _, data := range []string{splitToolCall,
+		`{"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`} {
+		b, err := s.Event([]byte(data))
+		if err != nil {
+			t.Fatalf("event: %v", err)
+		}
+		out.Write(b)
+	}
+	out.Write(s.Close())
+	got := readStream(t, Anthropic, out.Bytes())
+	if got.tool != "bash" || !sameJSON(got.args, `{"command":"echo hi"}`) {
+		t.Errorf("tool call = %s %s, want bash with its arguments\n%s", got.tool, got.args, out.Bytes())
+	}
+
+	// A whole reply keeps them too.
+	whole := `{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,` +
+		`"message":{"role":"assistant","content":null,"tool_calls":[{"index":0,"id":"call_1","type":"function",` +
+		`"function":{"name":"bash"}},{"index":0,"function":{"arguments":"{\"command\":\"echo hi\"}"}}]},` +
+		`"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`
+	body, err := Response(Chat, Anthropic, []byte(whole), "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := readReply(t, Anthropic, body); r.tool != "bash" || !sameJSON(r.args, `{"command":"echo hi"}`) {
+		t.Errorf("whole reply tool call = %s %s\n%s", r.tool, r.args, body)
+	}
+}

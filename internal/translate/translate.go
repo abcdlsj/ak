@@ -146,6 +146,7 @@ func Response(from, to Protocol, body []byte, model string) ([]byte, error) {
 		if err := json.Unmarshal(body, &r); err != nil {
 			return nil, err
 		}
+		mergeToolCalls(&r)
 		hub = r.ToBifrostResponsesResponse()
 	default:
 		return nil, fmt.Errorf("unknown protocol %q", from)
@@ -275,6 +276,7 @@ func (s *Stream) read(data []byte) ([]*schemas.BifrostResponsesStreamResponse, e
 		if err := json.Unmarshal(data, &ev); err != nil {
 			return nil, err
 		}
+		mergeToolCalls(&ev)
 		if s.held != nil {
 			if ev.Usage != nil {
 				s.held.Response.Usage = ev.Usage.ToResponsesResponseUsage()
@@ -344,6 +346,58 @@ func (s *Stream) write(out *bytes.Buffer, ev *schemas.BifrostResponsesStreamResp
 		return fmt.Errorf("unknown protocol %q", s.to)
 	}
 	return nil
+}
+
+// mergeToolCalls folds the tool-call entries of one chat chunk that share an
+// index into the first of them. Some upstreams split a single call across two
+// entries — the id, type and name in one, the arguments in the next — and a
+// converter that reads one entry per delta takes the name and drops the
+// arguments, so the client sees a call with nothing to pass. Concatenating the
+// arguments is what the OpenAI wire does anyway: they arrive in pieces.
+func mergeToolCalls(r *schemas.BifrostChatResponse) {
+	for i := range r.Choices {
+		c := r.Choices[i].ChatStreamResponseChoice
+		if c != nil && c.Delta != nil {
+			c.Delta.ToolCalls = foldToolCalls(c.Delta.ToolCalls)
+		}
+		if c := r.Choices[i].ChatNonStreamResponseChoice; c != nil && c.Message != nil &&
+			c.Message.ChatAssistantMessage != nil {
+			c.Message.ToolCalls = foldToolCalls(c.Message.ToolCalls)
+		}
+	}
+}
+
+// foldToolCalls merges the entries that name the same call, keeping the order
+// they first appeared in.
+func foldToolCalls(calls []schemas.ChatAssistantMessageToolCall) []schemas.ChatAssistantMessageToolCall {
+	if len(calls) < 2 {
+		return calls
+	}
+	out := make([]schemas.ChatAssistantMessageToolCall, 0, len(calls))
+	at := map[uint16]int{}
+	for _, call := range calls {
+		i, seen := at[call.Index]
+		if !seen {
+			at[call.Index] = len(out)
+			out = append(out, call)
+			continue
+		}
+		keep := &out[i]
+		if keep.ID == nil {
+			keep.ID = call.ID
+		}
+		if keep.Type == nil {
+			keep.Type = call.Type
+		}
+		if keep.Function.Name == nil {
+			keep.Function.Name = call.Function.Name
+		}
+		keep.Function.Arguments += call.Function.Arguments
+		if len(keep.ExtraContent) == 0 {
+			keep.ExtraContent = call.ExtraContent
+		}
+	}
+	return out
 }
 
 // saysSomething reports whether a chat chunk carries a delta or a finish:
