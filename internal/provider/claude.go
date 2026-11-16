@@ -153,21 +153,32 @@ func ClaudeEnv(name string, p config.Provider, variant string, key Secret) EnvPl
 	return EnvPlan{Set: env.sorted(envSmallFast), Unset: unsetList(claudeProviderKeys, env)}
 }
 
-// claudeNumbers are the window and the reply limit to tell claude for a model
-// it has no metadata for. One value serves every such model, the tiers
-// included, so each is the smallest of the provider's models': a tier that
-// takes less is never told it has more.
+// claudeNumbers are the two numbers claude cannot know: a model it has no
+// metadata for is taken for a 1M one with 32000 tokens of reply, whatever the
+// endpoint serves.
+//
+// The window is the smallest of the provider's models, tiers and variants
+// included: one value serves every model claude does not know, and a tier that
+// takes less is never told it has more. The reply limit is the primary model's
+// alone, because claude applies it to every model it runs, the ones it knows
+// included — a minimum over the tiers would shorten the main model's replies.
 func claudeNumbers(p config.Provider) (window, output int) {
+	model, haiku, sonnet, opus := normalizeModels(p)
+	models := []string{model, haiku, sonnet, opus}
+	for _, v := range p.Variants {
+		models = append(models, v.Model)
+	}
+	// The provider's own window counts even when it names no model.
+	window = modelmeta.For(p, "").Context
 	seen := map[string]bool{}
-	for _, m := range []string{p.Model, p.Haiku, p.Sonnet, p.Opus} {
+	for _, m := range models {
 		if m == "" || seen[m] {
 			continue
 		}
 		seen[m] = true
-		f := modelmeta.For(p, m)
-		window, output = least(window, f.Context), least(output, f.MaxOutput)
+		window = least(window, modelmeta.For(p, m).Context)
 	}
-	return window, output
+	return window, modelmeta.For(p, model).MaxOutput
 }
 
 // least keeps the smaller of a running minimum and n, ignoring the unknown 0.

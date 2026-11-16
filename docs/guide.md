@@ -144,8 +144,8 @@ Every engine carries a model's context window and reply limit in a file or a
 variable of its own, and guesses badly without them: pi takes every model for a
 128K one and caps every reply at 16384 tokens, Claude Code assumes a model it
 has no metadata for is 1M with 32000 tokens of reply, and codex takes 272K.
-ak fills them from models.dev, the table it already prices usage from, and hands
-them to the engine at launch:
+ak fills them from models.dev, the same document and the same cache its usage
+report prices from, and hands them to the engine at launch:
 
 ```toml
 [providers.relay]
@@ -154,18 +154,22 @@ max_tokens     = 128000    # the longest reply
 ```
 
 A value here wins over models.dev's; left out (or 0), models.dev's answers, and a
-model it does not list gets the engine's own default. ak reads the table when it
-regenerates the commands (`ak add`, `ak edit`, `ak import`, `ak sync`), never at
-launch: a cold cache means the engine keeps its default rather than the launch
-waiting on the network. What each engine gets:
+model it does not list gets the engine's own default. Where several providers on
+models.dev list the same model id, the vendor's own row wins over a relay's
+rounded one. ak reads the catalog when it regenerates the commands (`ak add`,
+`ak edit`, `ak import`, `ak sync`), never at launch: a cold cache means the
+engine keeps its default rather than the launch waiting on the network, and an
+unreachable models.dev keeps the catalog ak already has. What each engine gets:
 
 - **pi**: each model ak registers in `models.json` carries `contextWindow` and
   `maxTokens`, so pi compacts at the right point and asks for a full reply.
 - **claude**: `CLAUDE_CODE_MAX_CONTEXT_TOKENS` and
-  `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, which Claude Code reads for a model it has no
-  metadata for. A claude id it knows keeps its own numbers, and it caps a reply
-  at 128000 whatever ak says. One value serves every such model, tiers included,
-  so it is the smallest of the provider's. Both are in `ak env <provider>`, and
+  `CLAUDE_CODE_MAX_OUTPUT_TOKENS`. The window is read only for a model Claude
+  Code has no metadata for, and one value serves every such model, tiers
+  included, so it is the smallest of the provider's. The reply limit is read for
+  every model, the ones it knows included, so it is the primary model's alone: a
+  tier's smaller limit would shorten the main model's replies. Claude Code caps
+  a reply at 128000 whatever ak says. Both are in `ak env <provider>`, and
   `ak doctor` flags them left in `settings.json`, where they win over a launch.
 - **codex**: `-c model_context_window`, unless the provider brings a
   `model_catalog` of its own. Codex clamps it to the catalog's

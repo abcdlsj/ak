@@ -1,8 +1,6 @@
 package provider
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -327,20 +325,35 @@ func TestClaudeEnvNumbers(t *testing.T) {
 	}
 }
 
-// TestClaudeNumbersSmallestTier checks the one value claude gets for every model
-// it does not know: the smallest of the provider's, so a tier that takes less is
-// never told it has more.
-func TestClaudeNumbersSmallestTier(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv(config.DirEnv, dir)
-	table := `{"big":{"context":1000000,"max_output":128000},"small":{"context":131072,"max_output":32000}}`
-	if err := os.WriteFile(filepath.Join(dir, "model-meta.json"), []byte(table), 0o600); err != nil {
-		t.Fatal(err)
-	}
+// TestClaudeNumbers checks the two values claude gets: the window is the
+// smallest of the provider's models, since one value serves every model it does
+// not know, while the reply limit is the primary model's alone — claude applies
+// it to the models it does know too.
+func TestClaudeNumbers(t *testing.T) {
+	writeCatalog(t, `{"big":{"context":1000000,"max_output":128000},"small":{"context":131072,"max_output":32000}}`)
+
 	p := config.Provider{Model: "big", Haiku: "small"}
-	window, output := claudeNumbers(p)
-	if window != 131072 || output != 32000 {
-		t.Errorf("numbers = %d/%d, want the tier's 131072/32000", window, output)
+	if window, output := claudeNumbers(p); window != 131072 || output != 128000 {
+		t.Errorf("numbers = %d/%d, want the tier's window and the primary's reply", window, output)
+	}
+
+	// A variant's model is one of the provider's too.
+	p = config.Provider{Model: "big", Variants: map[string]config.Variant{"cheap": {Model: "small"}}}
+	if window, _ := claudeNumbers(p); window != 131072 {
+		t.Errorf("window = %d, want the variant's 131072", window)
+	}
+
+	// A tier left out of the provider falls back to the primary model, which is
+	// then the only one that answers.
+	p = config.Provider{Model: "big"}
+	if window, output := claudeNumbers(p); window != 1000000 || output != 128000 {
+		t.Errorf("numbers = %d/%d, want the primary's", window, output)
+	}
+
+	// A provider that states its own numbers gets them even with no model named.
+	p = config.Provider{ContextWindow: 400000, MaxTokens: 64000}
+	if window, output := claudeNumbers(p); window != 400000 || output != 64000 {
+		t.Errorf("numbers = %d/%d, want the provider's own", window, output)
 	}
 }
 
@@ -375,12 +388,8 @@ func TestCodexArgsContextWindow(t *testing.T) {
 		t.Errorf("a window was passed for a model ak knows nothing about:\n%s", got)
 	}
 
-	// The table answers when the provider does not.
-	dir := t.TempDir()
-	t.Setenv(config.DirEnv, dir)
-	if err := os.WriteFile(filepath.Join(dir, "model-meta.json"), []byte(`{"m":{"context":200000}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// The catalog answers when the provider does not.
+	writeCatalog(t, `{"m":{"context":200000}}`)
 	if got := args(config.Provider{Kind: config.KindCodex, BaseURL: "https://x/v1", Model: "m"}); !contains(got, "model_context_window=200000") {
 		t.Errorf("the table's window was not used:\n%s", got)
 	}

@@ -85,11 +85,7 @@ func TestPiModelNumbers(t *testing.T) {
 		t.Errorf("numbers = %v", got)
 	}
 
-	dir := t.TempDir()
-	t.Setenv(config.DirEnv, dir)
-	if err := os.WriteFile(filepath.Join(dir, "model-meta.json"), []byte(`{"m":{"context":200000,"max_output":64000}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeCatalog(t, `{"m":{"context":200000,"max_output":64000}}`)
 	got = piModel("m", config.Provider{})
 	if got["contextWindow"] != 200000 || got["maxTokens"] != 64000 {
 		t.Errorf("the table's numbers = %v", got)
