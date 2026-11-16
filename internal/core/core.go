@@ -13,6 +13,7 @@ import (
 	"github.com/abcdlsj/ak/internal/bind"
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/modelmeta"
+	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/shim"
 	"github.com/abcdlsj/ak/internal/usage"
@@ -288,11 +289,14 @@ func NewSyncer(cfg *config.Config) *shim.Syncer {
 // Sync regenerates every provider's commands.
 func Sync(cfg *config.Config, dryRun bool) (shim.Report, error) {
 	// The engines are told their model's window and reply limit out of the
-	// cached models.dev table, and a launch never waits on the network for it,
+	// cached models.dev catalog, and a launch never waits on the network for it,
 	// so fill the cache here, where a fetch is expected. Failing to reach
-	// models.dev is not this command's failure: an old table still answers.
+	// models.dev is not this command's failure: an old catalog still answers,
+	// and the hint says why the numbers may be missing.
 	if !dryRun {
-		_ = modelmeta.Refresh()
+		if err := modelmeta.Refresh(); err != nil {
+			out.Hint(os.Stdout, "models.dev unreachable, so the engines keep the model numbers ak already has")
+		}
 	}
 	s := NewSyncer(cfg)
 	s.DryRun = dryRun
