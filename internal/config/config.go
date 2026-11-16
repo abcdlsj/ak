@@ -4,9 +4,11 @@ package config
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -315,6 +317,54 @@ func (c *Config) Leaves(name string) []string {
 	return out
 }
 
+// Refs expands a provider into the accounts and models it answers with, in
+// the order it would answer: a plain provider gives its own account and
+// model, a pool its members', in member order. A member is asked for the
+// pool's mapping of it, else the model it was set up with, else the model
+// the name above it means, so the order here is the order the gateway uses.
+//
+// A provider with an endpoint of its own is no account's and gives nothing:
+// the service routes to accounts.
+func (c *Config) Refs(name string) []ModelRef {
+	seen := map[string]bool{}
+	var out []ModelRef
+	var walk func(name, asked, inherited string, depth int)
+	walk = func(name, asked, inherited string, depth int) {
+		p, ok := c.Providers[name]
+		if !ok {
+			// A pool's member may be an account of its own: it answers with
+			// the model the pool asks it for, or the one its plan serves.
+			if _, isAccount := c.Accounts[name]; isAccount {
+				if m := cmp.Or(asked, inherited); !seen[name+"\x00"+m] {
+					seen[name+"\x00"+m] = true
+					out = append(out, ModelRef{Account: name, Model: m})
+				}
+			}
+			return
+		}
+		if depth > MaxPoolDepth {
+			return
+		}
+		if !p.IsPool() {
+			if p.Account == "" {
+				return
+			}
+			m := cmp.Or(asked, p.Model, inherited)
+			if seen[p.Account+"\x00"+m] {
+				return
+			}
+			seen[p.Account+"\x00"+m] = true
+			out = append(out, ModelRef{Account: p.Account, Model: m})
+			return
+		}
+		for _, member := range p.Members {
+			walk(member, p.MemberModels[member], cmp.Or(p.Model, inherited), depth+1)
+		}
+	}
+	walk(name, "", "", 0)
+	return out
+}
+
 // StrategyOrDefault returns the pool's strategy, defaulting to order.
 func (p Provider) StrategyOrDefault() string {
 	if p.Strategy == "" {
@@ -555,6 +605,10 @@ func Save(cfg *Config) error {
 	for name, p := range cfg.Providers {
 		stored.Providers[name] = cfg.Stored(p)
 	}
+	// A route that names a provider keeps naming it: its members are the
+	// provider's, and were only filled in to be routed by.
+	stored.Service.Routes = maps.Clone(stored.Service.Routes)
+	stored.collapseRoutes()
 	data, err := toml.Marshal(&stored)
 	if err != nil {
 		return err

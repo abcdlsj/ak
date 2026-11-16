@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,5 +132,54 @@ func TestServiceRoundTrip(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(dir, "providers.toml"))
 	if strings.Contains(string(b), "[service") {
 		t.Errorf("an empty service was written:\n%s", b)
+	}
+}
+
+// A route naming a provider pool takes the provider's members on load, and
+// writes only the provider back: the members are the provider's to keep.
+func TestRouteOverAProvider(t *testing.T) {
+	cfg := serviceCfg(t)
+	cfg.Providers["a-claude"] = Provider{Kind: KindClaude, Account: "command-code", Model: "m-a"}
+	cfg.Providers["b-claude"] = Provider{Kind: KindClaude, Account: "opendesign", Model: "m-b"}
+	cfg.Providers["mypool"] = Provider{Kind: KindClaude, Members: []string{"a-claude", "b-claude"},
+		MemberModels: map[string]string{"b-claude": "m-mapped"}}
+	cfg.Service.Routes = map[string]Route{"dpsk": {Provider: "mypool"}}
+	cfg.Resolve()
+
+	got := cfg.Service.Routes["dpsk"]
+	if strings.Join(got.Members, ",") != "command-code/m-a,opendesign/m-mapped" {
+		t.Fatalf("members = %v, want the pool's accounts and models", got.Members)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("valid route over a provider: %v", err)
+	}
+	// Writing it back keeps `provider = "mypool"` alone.
+	stored := *cfg
+	stored.Service.Routes = maps.Clone(cfg.Service.Routes)
+	stored.collapseRoutes()
+	if r := stored.Service.Routes["dpsk"]; len(r.Members) != 0 || r.Provider != "mypool" {
+		t.Errorf("stored route = %+v, want only the provider", r)
+	}
+}
+
+// A route may not name something that is no pool, nor a pool whose members
+// are different engines.
+func TestRouteOverAProviderThatIsNoPool(t *testing.T) {
+	cfg := serviceCfg(t)
+	cfg.Providers["a-claude"] = Provider{Kind: KindClaude, Account: "command-code", Model: "m-a"}
+	cfg.Providers["a-codex"] = Provider{Kind: KindCodex, Account: "command-code"}
+	cfg.Providers["mixed"] = Provider{Kind: KindClaude, Members: []string{"a-claude"}}
+	cfg.Service.Routes = map[string]Route{"one": {Provider: "a-claude"}}
+	cfg.Resolve()
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "no pool") {
+		t.Errorf("route over a plain provider: %v", err)
+	}
+
+	cfg.Providers["mixed"] = Provider{Kind: KindClaude, Members: []string{"a-claude"}}
+	cfg.Providers["codexy"] = Provider{Kind: KindClaude, Members: []string{"a-codex"}}
+	cfg.Service.Routes = map[string]Route{"two": {Provider: "codexy"}}
+	cfg.Resolve()
+	if err := Validate(cfg); err == nil {
+		t.Error("a route over another engine's pool was accepted")
 	}
 }

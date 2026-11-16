@@ -377,12 +377,15 @@ func validatePool(cfg *Config, name string, p Provider) error {
 			return fmt.Errorf("pool %q lists member %q twice", name, m)
 		}
 		seen[m] = true
+		// A member is a provider, or an account: an account brings its own
+		// endpoint, key and plan model, which is what a service routes to.
 		mp, ok := cfg.Providers[m]
 		if !ok {
-			return fmt.Errorf("pool %q names unknown member %q", name, m)
-		}
-		if mp.Kind != p.Kind {
-			return fmt.Errorf("pool %q is %s but member %q is %s; a pool's members must share its kind", name, p.Kind, m, mp.Kind)
+			ap, isAccount := cfg.OnAccount(m, p.Kind)
+			if !isAccount {
+				return fmt.Errorf("pool %q names unknown member %q: no provider and no %s account of that name", name, m, p.Kind)
+			}
+			mp = ap
 		}
 		if mp.BaseURL == "" && !mp.IsPool() {
 			return fmt.Errorf("pool %q names %q, which has no base_url (a pi provider that uses pi_provider); a pool member needs an endpoint", name, m)

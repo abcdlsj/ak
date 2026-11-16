@@ -36,6 +36,11 @@ type Service struct {
 type Route struct {
 	// Model makes the route an alias of that model name.
 	Model string `toml:"model,omitempty"`
+	// Provider makes the route the name a provider pool answers to, so the
+	// pool is defined once, as a provider, and reached both as its own
+	// command and as a model name. Members is filled from it on load and
+	// left out when the file is written.
+	Provider string `toml:"provider,omitempty"`
 	// Members make the route a pool over those model names, in order.
 	Members []string `toml:"members,omitempty"`
 	// Strategy is how a pool picks a member, as a provider pool's does.
@@ -43,7 +48,7 @@ type Route struct {
 }
 
 // IsPool reports whether the route spreads over members.
-func (r Route) IsPool() bool { return len(r.Members) > 0 }
+func (r Route) IsPool() bool { return len(r.Members) > 0 || r.Provider != "" }
 
 // Token is one machine's access. Only the hash of the token is kept.
 type Token struct {
@@ -66,6 +71,15 @@ type ModelRef struct {
 	Route   string
 	Account string
 	Model   string
+}
+
+// Name is the ref as a model name: <account>/<model>, or the account alone
+// when no model is named.
+func (r ModelRef) Name() string {
+	if r.Model == "" {
+		return r.Account
+	}
+	return r.Account + "/" + r.Model
 }
 
 // ParseModel resolves a model name: <account>/<model>, <account> alone, or
@@ -185,10 +199,24 @@ func validateRoute(cfg *Config, name string) error {
 	switch {
 	case r.Model != "" && r.IsPool():
 		return fmt.Errorf("route %q sets both model and members; an alias names one model, a pool several", name)
+	case r.Provider != "" && len(r.Members) > 0 && !slices.Equal(r.Members, cfg.refNames(r.Provider)):
+		return fmt.Errorf("route %q names provider %q and other members; a route over a provider pool takes the provider's members", name, r.Provider)
 	case r.Model == "" && !r.IsPool():
-		return fmt.Errorf("route %q needs model (an alias) or members (a pool)", name)
+		return fmt.Errorf("route %q needs model (an alias), members (a pool) or provider (a provider pool)", name)
 	case r.Model != "" && r.Strategy != "":
 		return fmt.Errorf("route %q is an alias; strategy is for pools", name)
+	}
+	if r.Provider != "" {
+		p, ok := cfg.Providers[r.Provider]
+		if !ok {
+			return fmt.Errorf("route %q names unknown provider %q", name, r.Provider)
+		}
+		if !p.IsPool() {
+			return fmt.Errorf("route %q names provider %q, which is no pool; give members or a model instead", name, r.Provider)
+		}
+		if !sameKind(cfg, p) {
+			return fmt.Errorf("route %q names provider %q, whose members are not one engine", name, r.Provider)
+		}
 	}
 	switch r.Strategy {
 	case "", StrategyOrder, StrategyRotate, StrategyLeastUsed, StrategySmart:
@@ -209,6 +237,18 @@ func validateRoute(cfg *Config, name string) error {
 		}
 	}
 	return routeDepth(cfg, name, nil)
+}
+
+// sameKind reports whether a pool's members share one engine, which is what a
+// route over them needs: it answers one protocol family.
+func sameKind(cfg *Config, p Provider) bool {
+	kind := p.Kind
+	for _, m := range p.Members {
+		if mp, ok := cfg.Providers[m]; ok && mp.Kind != kind {
+			return false
+		}
+	}
+	return true
 }
 
 // routeDepth rejects a route that leads back to itself or nests deeper than

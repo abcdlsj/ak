@@ -660,3 +660,34 @@ func TestServiceAccountModel(t *testing.T) {
 		t.Errorf("models of main = %v, want the account's model and the other's", m)
 	}
 }
+
+// A route may name a provider pool instead of repeating its members, so one
+// pool answers both as its own command and as a model name: it reports what
+// the members answer with, and its members' own models are what they are
+// asked for.
+func TestServiceRouteOverAProviderPool(t *testing.T) {
+	r := newRig(t, func(c *config.Config) {
+		c.Providers["both-claude"] = config.Provider{Kind: config.KindClaude, Account: "bili"}
+		c.Providers["kimi-claude"] = config.Provider{Kind: config.KindClaude, Account: "kimi"}
+		c.Providers["mypool"] = config.Provider{Kind: config.KindClaude,
+			Members: []string{"both-claude", "kimi-claude"}, Strategy: config.StrategyOrder}
+		c.Service.Routes = map[string]config.Route{"dpsk": {Provider: "mypool"}}
+	})
+	// The route takes the provider's members, and nothing else.
+	route := r.srv.config().Service.Routes["dpsk"]
+	if got := strings.Join(route.Members, ","); got != "bili/glm-5,kimi/kimi-k3" {
+		t.Fatalf("route members = %q, want the pool's accounts and models", got)
+	}
+	if m := r.srv.modelsOf(r.srv.config(), "dpsk"); len(m) != 2 || m[0] != "glm-5" || m[1] != "kimi-k3" {
+		t.Errorf("models of dpsk = %v", m)
+	}
+	rec := r.do(t, "/v1/messages", withModel(t, "claude_request.json", "dpsk", false))
+	if rec.Code != 200 {
+		t.Fatalf("dpsk: %d %s", rec.Code, rec.Body)
+	}
+	// The first member answered, asked for its own model rather than the
+	// route's name.
+	if r.both.count() != 1 || r.both.last(t).body["model"] != "glm-5" {
+		t.Errorf("member was asked for %v (%d requests)", r.both.last(t).body["model"], r.both.count())
+	}
+}

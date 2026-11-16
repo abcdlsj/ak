@@ -394,7 +394,10 @@ func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	build := func(rt route) (leg, error) {
-		mp := cfg.Providers[rt.member]
+		mp := rt.p
+		if mp.BaseURL == "" && mp.Kind == "" {
+			mp = cfg.Providers[rt.member]
+		}
 		target := strings.TrimRight(mp.BaseURL, "/") + "/" + tail
 		if r.URL.RawQuery != "" {
 			target += "?" + r.URL.RawQuery
@@ -1461,10 +1464,13 @@ func (u tokenUse) now(t time.Time) float64 {
 }
 
 // route is one way to answer a pool's request: a concrete provider, and the
-// model to ask it for (empty passes the request's model through).
+// model to ask it for (empty passes the request's model through). A member may
+// be an account, which is resolved into the provider the pool's engine gives
+// it, so a pool over accounts needs no provider of its own for each.
 type route struct {
 	member string
 	model  string
+	p      config.Provider
 }
 
 // candidates orders the concrete providers a pool's request may go to: healthy
@@ -1539,7 +1545,9 @@ func (s *state) order(cfg *config.Config, top, name string, p config.Provider, m
 	for _, m := range p.Members {
 		mp, ok := cfg.Providers[m]
 		if !ok {
-			continue
+			if mp, ok = cfg.OnAccount(m, p.Kind); !ok {
+				continue
+			}
 		}
 		mm := model
 		if v := p.MemberModels[m]; v != "" {
@@ -1552,7 +1560,7 @@ func (s *state) order(cfg *config.Config, top, name string, p config.Provider, m
 			}
 			rs = s.order(cfg, top, m, mp, mm, now, depth+1)
 		} else {
-			rs = []route{{member: m, model: mm}}
+			rs = []route{{member: m, model: mm, p: mp}}
 		}
 		if len(rs) == 0 {
 			continue

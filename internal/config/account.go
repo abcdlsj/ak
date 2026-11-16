@@ -92,6 +92,9 @@ func (c *Config) Resolve() {
 	for name, p := range c.Providers {
 		c.Providers[name] = c.resolve(p)
 	}
+	// A route naming a provider follows that provider, so it is expanded
+	// after the providers are what their accounts make them.
+	c.expandRoutes()
 }
 
 func (c *Config) resolve(p Provider) Provider { return c.resolveOn(p, "") }

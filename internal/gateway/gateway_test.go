@@ -2,15 +2,19 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/vendor"
 )
 
 func init() { retryPause = time.Millisecond }
@@ -265,5 +269,50 @@ func TestRewriteModelNoModelField(t *testing.T) {
 	in, _ := json.Marshal(map[string]any{"input": "hi"})
 	if got := rewriteModel(in, "x"); string(got) != string(in) {
 		t.Errorf("rewriteModel changed a body without a model: %s", got)
+	}
+}
+
+// A pool's member may be an account: it brings its own endpoint, key and
+// model, so a pool over subscriptions needs no provider of its own for each.
+func TestPoolOverAccounts(t *testing.T) {
+	up := newUpstream(t)
+	dir := t.TempDir()
+	body := fmt.Sprintf("id = %%q\nname = \"Test\"\n[[endpoints]]\nprotocol = \"anthropic\"\nbase_url = %q\nmodel = \"vendor-model\"\n", up.server.URL)
+	if err := os.WriteFile(filepath.Join(dir, "acctvendor.toml"), []byte(fmt.Sprintf(body, "acctvendor")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vendor.LoadDir(dir)
+	t.Cleanup(func() { vendor.LoadDir("") })
+
+	cfg := &config.Config{
+		Version:  config.Version,
+		Settings: config.Settings{Prefix: "ak-"},
+		Accounts: map[string]config.Account{"acct": {Vendor: "acctvendor", APIKey: "sk-account"}},
+		Providers: map[string]config.Provider{
+			"pool": {Kind: config.KindClaude, Members: []string{"acct"},
+				MemberModels: map[string]string{"acct": "member-model"}},
+		},
+	}
+	cfg.Resolve()
+	if err := config.Validate(cfg); err != nil {
+		t.Fatalf("a pool over an account: %v", err)
+	}
+
+	rec := post(New(cfg).Handler(), "/p/pool/v1/messages", `{"model":"asked"}`)
+	if !strings.Contains(rec.Body.String(), "member-model") {
+		t.Fatalf("body = %s, want the model the pool mapped the account to", rec.Body)
+	}
+	if got := up.gotAuth.Load(); got != "Bearer sk-account" {
+		t.Errorf("auth = %v, want the account's key", got)
+	}
+	// A member that maps nothing is asked for the model its plan serves.
+	delete(cfg.Providers["pool"].MemberModels, "acct")
+	p := cfg.Providers["pool"]
+	p.MemberModels = nil
+	cfg.Providers["pool"] = p
+	cfg.Resolve()
+	rec = post(New(cfg).Handler(), "/p/pool/v1/messages", `{"model":"asked"}`)
+	if !strings.Contains(rec.Body.String(), "vendor-model") {
+		t.Errorf("body = %s, want the account's own model", rec.Body)
 	}
 }
