@@ -30,7 +30,7 @@ type providerFlag struct {
 }
 
 var providerFlags = []providerFlag{
-	{"kind", "claude", "Engine: claude, codex or pi", func(p *config.Provider, v string) { p.Kind = config.Kind(v) }},
+	{"kind", "claude", "Engine: claude, codex, pi or antigravity", func(p *config.Provider, v string) { p.Kind = config.Kind(v) }},
 	{"account", "", "Account to run on (`ak accounts`); its vendor gives the endpoint and its key is used", func(p *config.Provider, v string) { p.Account = v }},
 	{"base-url", "", "API endpoint", func(p *config.Provider, v string) { p.BaseURL = v }},
 	{"key", "", "API key, a reference (env:NAME, cmd:..., keychain:...), or - to read it from stdin, kept out of shell history", func(p *config.Provider, v string) { p.SetKey(v) }},
@@ -47,6 +47,7 @@ var providerFlags = []providerFlag{
 	{"pi-auth-header", "", "Send the pi key as Authorization: Bearer (true)", func(p *config.Provider, v string) { p.PiAuthHeader = isTrueFlag(v) }},
 	{"config-dir", "", "Isolate claude's whole config here (CLAUDE_CONFIG_DIR)", func(p *config.Provider, v string) { p.ConfigDir = v }},
 	{"codex-home", "", "Isolate codex's whole home here (CODEX_HOME)", func(p *config.Provider, v string) { p.CodexHome = v }},
+	{"gemini-dir", "", "Isolate agy's whole environment here (--gemini_dir); one directory is one Antigravity account", func(p *config.Provider, v string) { p.GeminiDir = v }},
 	{"display", "", "Name shown in listings", func(p *config.Provider, v string) { p.Display = v }},
 	{"quota", "", "Balance source id (deepseek, kimi, zhipu, newapi, …), or off", func(p *config.Provider, v string) { p.Quota = v }},
 	{"quota-cmd", "", "Shell command printing the balance as JSON or a number", func(p *config.Provider, v string) { p.QuotaCmd = v }},
@@ -295,7 +296,9 @@ its vendor (kimi, commandcode, dpsk), the provider pi knows, or its host.
 			if _, err := applyQuotaVarFlag(cmd, &p); err != nil {
 				return err
 			}
-			if p.BaseURL == "" && !p.IsPool() && p.PiProvider == "" && p.Account == "" {
+			// An antigravity provider has no endpoint to ask for: its directory
+			// and its own sign-in are the whole configuration.
+			if p.BaseURL == "" && !p.IsPool() && p.PiProvider == "" && p.Account == "" && p.Kind != config.KindAntigravity {
 				d := ui.NewDraft(name)
 				if err := runForm(cmd, d, cfg); err != nil {
 					return err

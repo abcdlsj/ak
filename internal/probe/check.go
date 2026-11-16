@@ -56,6 +56,11 @@ func Check(ctx context.Context, p config.Provider, key string) Result {
 	if p.IsPool() {
 		return Result{Status: StatusSkip, Detail: "a pool is checked through its members"}
 	}
+	// agy talks to Antigravity on its own terms: there is no endpoint ak could
+	// post to, and no key to send. Whether the account works is agy's answer.
+	if p.Kind == config.KindAntigravity {
+		return Result{Status: StatusSkip, Detail: "skipped (agy signs in itself)"}
+	}
 	if trimBase(p.BaseURL) == "" {
 		return Result{Status: StatusFail, Detail: "no base_url"}
 	}

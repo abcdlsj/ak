@@ -160,6 +160,10 @@ func TestCheckSkips(t *testing.T) {
 	if r := Check(context.Background(), config.Provider{Kind: config.KindClaude, BaseURL: "http://x"}, ""); r.Status != StatusSkip || r.Detail != "no model to test" {
 		t.Fatalf("no model: %+v", r)
 	}
+	// agy has no endpoint ak could post to; a missing base_url is not a fault.
+	if r := Check(context.Background(), config.Provider{Kind: config.KindAntigravity, GeminiDir: "/tmp/a", Model: "m"}, ""); r.Status != StatusSkip {
+		t.Fatalf("antigravity: %+v", r)
+	}
 }
 
 func TestAggregate(t *testing.T) {

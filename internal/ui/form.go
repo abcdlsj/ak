@@ -34,8 +34,11 @@ type Draft struct {
 	PiProvider     string
 	PiAPI          string
 	PiAuth         bool
-	Quota          string
-	QuotaCmd       string
+	// GeminiDir is an antigravity provider's whole agy environment, passed to
+	// agy as --gemini_dir; one directory is one account.
+	GeminiDir string
+	Quota     string
+	QuotaCmd  string
 	// Members is the comma-separated member list of a pool; empty makes the
 	// provider a normal upstream.
 	Members  string
@@ -83,7 +86,8 @@ func EditDraft(cfg *config.Config, name string) *Draft {
 		KeyField: p.KeyField, WireAPI: p.WireAPI, Reasoning: p.Reasoning,
 		DefaultVariant: p.DefaultVariant,
 		PiProvider:     p.PiProvider, PiAPI: p.PiAPI, PiAuth: p.PiAuthHeader,
-		Quota: p.Quota, QuotaCmd: p.QuotaCmd,
+		GeminiDir: p.GeminiDir,
+		Quota:     p.Quota, QuotaCmd: p.QuotaCmd,
 		Members: strings.Join(p.Members, ", "), Strategy: p.Strategy,
 		Maps:     joinMaps(p.MemberModels),
 		Account:  p.Account,
@@ -141,8 +145,10 @@ func (d *Draft) Provider() config.Provider {
 	p.PiAuthHeader = d.PiAuth
 	// Fields of the other engine are cleared, not carried along; a default
 	// value is left unset.
-	p.KeyField, p.WireAPI = "", ""
+	p.KeyField, p.WireAPI, p.GeminiDir = "", "", ""
 	switch p.Kind {
+	case config.KindAntigravity:
+		p.GeminiDir = strings.TrimSpace(d.GeminiDir)
 	case config.KindClaude:
 		if d.KeyField != "auth_token" {
 			p.KeyField = d.KeyField
@@ -266,7 +272,7 @@ func (d *Draft) IsNew() bool { return !d.existing }
 func (d *Draft) PickForm(cfg *config.Config) *huh.Form {
 	return huh.NewForm(huh.NewGroup(
 		huh.NewSelect[string]().Title("Engine").Value(&d.Kind).
-			Options(huh.NewOption("claude", string(config.KindClaude)), huh.NewOption("codex", string(config.KindCodex)), huh.NewOption("pi", string(config.KindPi))),
+			Options(huh.NewOption("claude", string(config.KindClaude)), huh.NewOption("codex", string(config.KindCodex)), huh.NewOption("pi", string(config.KindPi)), huh.NewOption("antigravity", string(config.KindAntigravity))),
 		huh.NewSelect[string]().Title("Runs on").Value(&d.choice).
 			Description("An account, a vendor to sign in to, or your own endpoint; / filters").
 			OptionsFunc(func() []huh.Option[string] { return pickOptions(cfg, config.Kind(d.Kind)) }, &d.Kind).
@@ -395,6 +401,18 @@ func (d *Draft) Form(cfg *config.Config) *huh.Form {
 			selectOf("Default variant", &d.DefaultVariant, variantOptions(config.ReasoningLevels(), d.base.Variants)...),
 		)
 		groups = append(groups, huh.NewGroup(fields...))
+	case config.KindAntigravity:
+		groups = append(groups, huh.NewGroup(
+			huh.NewInput().Title("Gemini directory").Value(&d.GeminiDir).
+				Description("agy's whole environment and its account; ~/.gemini is the machine's own installation").
+				Validate(func(s string) error {
+					if strings.TrimSpace(s) == "" {
+						return errors.New("required")
+					}
+					return nil
+				}),
+			selectOf("Default effort", &d.DefaultVariant, variantOptions(config.EffortLevels(), d.base.Variants)...),
+		))
 	case config.KindPi:
 		var fields []huh.Field
 		if !onAccount {
@@ -431,7 +449,7 @@ func (d *Draft) endpointGroup() *huh.Group {
 					return nil
 				}
 				// A pi provider may instead name one pi already knows.
-				if d.Kind == string(config.KindPi) {
+				if d.Kind == string(config.KindPi) || d.Kind == string(config.KindAntigravity) {
 					return nil
 				}
 				return errors.New("required unless the provider is a pool")

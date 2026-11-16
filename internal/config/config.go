@@ -52,9 +52,10 @@ const (
 type Kind string
 
 const (
-	KindClaude Kind = "claude"
-	KindCodex  Kind = "codex"
-	KindPi     Kind = "pi"
+	KindClaude      Kind = "claude"
+	KindCodex       Kind = "codex"
+	KindPi          Kind = "pi"
+	KindAntigravity Kind = "antigravity"
 )
 
 // Config is the top-level structure of providers.toml.
@@ -72,22 +73,25 @@ type Settings struct {
 	BinDir  string `toml:"bin_dir"`
 	Prefix  string `toml:"prefix"`
 	Default string `toml:"default,omitempty"`
-	// DefaultClaude, DefaultCodex and DefaultPi are what the engine's own
-	// command (claude, codex, pi) runs on through `ak init`'s shell functions
-	// where no binding applies: a provider[:variant] of that kind. Empty
-	// keeps the engine's own command.
-	DefaultClaude string `toml:"default_claude,omitempty"`
-	DefaultCodex  string `toml:"default_codex,omitempty"`
-	DefaultPi     string `toml:"default_pi,omitempty"`
-	// ClaudeArgs, CodexArgs and PiArgs are put in front of the user's own
-	// arguments on every launch of that engine through ak: a provider, the
-	// shell functions of ak init, natively or not.
-	ClaudeArgs []string `toml:"claude_args,omitempty"`
-	CodexArgs  []string `toml:"codex_args,omitempty"`
-	PiArgs     []string `toml:"pi_args,omitempty"`
-	ClaudeBin  string   `toml:"claude_bin,omitempty"`
-	CodexBin   string   `toml:"codex_bin,omitempty"`
-	PiBin      string   `toml:"pi_bin,omitempty"`
+	// DefaultClaude, DefaultCodex, DefaultPi and DefaultAntigravity are what
+	// the engine's own command (claude, codex, pi, agy) runs on through `ak
+	// init`'s shell functions where no binding applies: a provider[:variant] of
+	// that kind. Empty keeps the engine's own command.
+	DefaultClaude      string `toml:"default_claude,omitempty"`
+	DefaultCodex       string `toml:"default_codex,omitempty"`
+	DefaultPi          string `toml:"default_pi,omitempty"`
+	DefaultAntigravity string `toml:"default_antigravity,omitempty"`
+	// ClaudeArgs, CodexArgs, PiArgs and AntigravityArgs are put in front of the
+	// user's own arguments on every launch of that engine through ak: a
+	// provider, the shell functions of ak init, natively or not.
+	ClaudeArgs      []string `toml:"claude_args,omitempty"`
+	CodexArgs       []string `toml:"codex_args,omitempty"`
+	PiArgs          []string `toml:"pi_args,omitempty"`
+	AntigravityArgs []string `toml:"antigravity_args,omitempty"`
+	ClaudeBin       string   `toml:"claude_bin,omitempty"`
+	CodexBin        string   `toml:"codex_bin,omitempty"`
+	PiBin           string   `toml:"pi_bin,omitempty"`
+	AntigravityBin  string   `toml:"antigravity_bin,omitempty"`
 	// GatewayAddr is the listen address of the pool gateway, host:port.
 	GatewayAddr string `toml:"gateway_addr,omitempty"`
 	// MaxInflight bounds how many requests the gateway handles at once; over
@@ -100,7 +104,7 @@ type Settings struct {
 }
 
 // Kinds are the engines, in display order.
-var Kinds = []Kind{KindClaude, KindCodex, KindPi}
+var Kinds = []Kind{KindClaude, KindCodex, KindPi, KindAntigravity}
 
 // EngineDefault returns the target the engine's own command runs on where no
 // binding applies, or "".
@@ -112,6 +116,8 @@ func (s Settings) EngineDefault(k Kind) string {
 		return s.DefaultCodex
 	case KindPi:
 		return s.DefaultPi
+	case KindAntigravity:
+		return s.DefaultAntigravity
 	}
 	return ""
 }
@@ -125,6 +131,8 @@ func (s Settings) EngineArgs(k Kind) []string {
 		return s.CodexArgs
 	case KindPi:
 		return s.PiArgs
+	case KindAntigravity:
+		return s.AntigravityArgs
 	}
 	return nil
 }
@@ -138,6 +146,8 @@ func (s *Settings) EngineDefaultPtr(k Kind) *string {
 		return &s.DefaultCodex
 	case KindPi:
 		return &s.DefaultPi
+	case KindAntigravity:
+		return &s.DefaultAntigravity
 	}
 	return nil
 }
@@ -221,6 +231,15 @@ type Provider struct {
 	// exports CODEX_HOME, so config.toml, auth, MCP servers and sessions live
 	// there instead of ~/.codex.
 	CodexHome string `toml:"codex_home,omitempty"`
+
+	// antigravity-only. GeminiDir isolates the provider's whole agy
+	// environment: the launch passes it as --gemini_dir, so config (hooks, MCP
+	// servers, skills, plugins, projects), conversations, settings, logs and
+	// the OAuth credential all live there instead of ~/.gemini. Because the
+	// credential travels with the directory, one provider is one Antigravity
+	// account, and providers run side by side. Required: an empty value would
+	// silently put the launch back on ~/.gemini.
+	GeminiDir string `toml:"gemini_dir,omitempty"`
 
 	// Members names, in order, what this provider routes over. When non-empty
 	// the provider is a pool: BaseURL and the key fields are unused, and its

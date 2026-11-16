@@ -138,11 +138,11 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 		return fmt.Errorf("provider %q has negative max_concurrency", name)
 	}
 	switch p.Kind {
-	case KindClaude, KindCodex, KindPi:
+	case KindClaude, KindCodex, KindPi, KindAntigravity:
 	case "":
-		return fmt.Errorf("provider %q is missing kind (claude, codex or pi)", name)
+		return fmt.Errorf("provider %q is missing kind (claude, codex, pi or antigravity)", name)
 	default:
-		return fmt.Errorf("provider %q has invalid kind %q; must be claude, codex or pi", name, p.Kind)
+		return fmt.Errorf("provider %q has invalid kind %q; must be claude, codex, pi or antigravity", name, p.Kind)
 	}
 	if err := validateEnv(name, p); err != nil {
 		return err
@@ -155,6 +155,11 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 	}
 	if p.Kind == KindCodex {
 		if err := validateCodex(name, p); err != nil {
+			return err
+		}
+	}
+	if p.Kind == KindAntigravity {
+		if err := validateAntigravity(name, p); err != nil {
 			return err
 		}
 	}
@@ -171,7 +176,7 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 		}
 		return validatePool(cfg, name, p)
 	}
-	if p.BaseURL == "" && p.PiProvider == "" {
+	if p.BaseURL == "" && p.PiProvider == "" && p.Kind != KindAntigravity {
 		return fmt.Errorf("provider %q is missing base_url", name)
 	}
 	if p.APIKey != "" && p.APIKeyRef != "" {
@@ -242,6 +247,30 @@ func validateOnAccount(cfg *Config, name string, p Provider) error {
 	return nil
 }
 
+// validateAntigravity rejects what agy cannot honour. It takes no API key and
+// cannot be pointed at another endpoint, so the fields that would express
+// either are a mistake worth reporting instead of ignoring: the launch would
+// look configured while still signing in through the directory's own account.
+func validateAntigravity(name string, p Provider) error {
+	switch {
+	case p.IsPool():
+		return fmt.Errorf("provider %q is antigravity and cannot be a pool; agy talks to Antigravity's own endpoints", name)
+	case p.BaseURL != "":
+		return fmt.Errorf("provider %q sets base_url, which agy ignores; put the account in gemini_dir and sign in with agy", name)
+	case p.APIKey != "" || p.APIKeyRef != "":
+		return fmt.Errorf("provider %q sets a key, which agy does not use; agy keeps its own credential in gemini_dir", name)
+	case p.Account != "":
+		return fmt.Errorf("provider %q sets account, which antigravity does not use; each provider is its own agy account", name)
+	case p.KeyField != "", p.WireAPI != "", p.Reasoning != "", p.ModelCatalog != "", p.ProviderID != "":
+		return fmt.Errorf("provider %q sets a claude or codex field that antigravity does not use", name)
+	case p.PiProvider != "", p.PiAPI != "", p.PiAuthHeader:
+		return fmt.Errorf("provider %q sets a pi field that antigravity does not use", name)
+	case p.Haiku != "", p.Sonnet != "", p.Opus != "":
+		return fmt.Errorf("provider %q sets a claude model tier that antigravity does not use; set model instead", name)
+	}
+	return nil
+}
+
 func validateCodex(name string, p Provider) error {
 	switch p.WireAPI {
 	case "", "responses", "chat":
@@ -299,10 +328,18 @@ var ClaudeRoutingKeys = []string{
 // that the settings layer can be passed to claude as JSON.
 func validateIsolation(name string, p Provider) error {
 	if p.ConfigDir != "" && p.Kind != KindClaude {
-		return fmt.Errorf("provider %q sets config_dir, which only applies to claude (codex uses codex_home)", name)
+		return fmt.Errorf("provider %q sets config_dir, which only applies to claude (codex uses codex_home, antigravity uses gemini_dir)", name)
 	}
 	if p.CodexHome != "" && p.Kind != KindCodex {
-		return fmt.Errorf("provider %q sets codex_home, which only applies to codex (claude uses config_dir)", name)
+		return fmt.Errorf("provider %q sets codex_home, which only applies to codex (claude uses config_dir, antigravity uses gemini_dir)", name)
+	}
+	if p.GeminiDir != "" && p.Kind != KindAntigravity {
+		return fmt.Errorf("provider %q sets gemini_dir, which only applies to antigravity (claude uses config_dir, codex uses codex_home)", name)
+	}
+	if p.Kind == KindAntigravity && p.GeminiDir == "" {
+		// Without it agy falls back to ~/.gemini, which is the machine's real
+		// installation: the launch would share its account and rewrite it.
+		return fmt.Errorf("provider %q is missing gemini_dir", name)
 	}
 	if len(p.Settings) > 0 {
 		if p.Kind != KindClaude {
@@ -448,6 +485,8 @@ func validateVariants(name string, p Provider) error {
 			return fmt.Errorf("provider %q variant %q collides with a reasoning effort level", name, v)
 		case p.Kind == KindPi && validThinking[v]:
 			return fmt.Errorf("provider %q variant %q collides with a built-in thinking level", name, v)
+		case p.Kind == KindAntigravity && validEffort[v]:
+			return fmt.Errorf("provider %q variant %q collides with a built-in effort level", name, v)
 		}
 	}
 	return nil
@@ -466,6 +505,8 @@ func validVariant(p Provider, v string) bool {
 		return validReasoning[v]
 	case KindPi:
 		return validThinking[v]
+	case KindAntigravity:
+		return validEffort[v]
 	}
 	return false
 }
@@ -506,6 +547,13 @@ var validThinking = map[string]bool{
 	"high": true, "xhigh": true, "max": true,
 }
 
+// validEffort lists agy's --effort values. They double as the implicit
+// variants of an antigravity shim, each adding --effort <level>. agy's scale
+// starts at low; it has no minimal.
+var validEffort = map[string]bool{
+	"low": true, "medium": true, "high": true, "xhigh": true, "max": true,
+}
+
 // implicitClaudeVariants lists the built-in model tier variants of a claude
 // shim.
 var implicitClaudeVariants = map[string]bool{
@@ -517,10 +565,14 @@ var implicitClaudeVariants = map[string]bool{
 var (
 	reasoningLevels = []string{"minimal", "low", "medium", "high", "xhigh", "max"}
 	claudeTiers     = []string{"opus", "sonnet", "haiku"}
+	effortLevels    = []string{"low", "medium", "high", "xhigh", "max"}
 )
 
 // ReasoningLevels lists codex reasoning efforts, weakest first.
 func ReasoningLevels() []string { return reasoningLevels }
+
+// EffortLevels lists agy reasoning efforts, weakest first.
+func EffortLevels() []string { return effortLevels }
 
 // ThinkingLevels lists pi thinking levels, weakest first.
 func ThinkingLevels() []string {

@@ -377,6 +377,12 @@ func noKey(cfg *config.Config, p config.Provider) bool {
 	if p.PiProvider != "" {
 		return false
 	}
+	// An antigravity provider holds no key: agy signs in itself and keeps the
+	// credential in the provider's gemini_dir, next to the conversations it
+	// belongs to.
+	if p.Kind == config.KindAntigravity {
+		return false
+	}
 	return p.APIKey == "" && p.APIKeyRef == ""
 }
 

@@ -123,7 +123,7 @@ type EnvPlan struct {
 	Unset []string
 }
 
-var engines = []Engine{claudeEngine{}, codexEngine{}, piEngine{}}
+var engines = []Engine{claudeEngine{}, codexEngine{}, piEngine{}, agyEngine{}}
 
 // Engines lists every supported engine.
 func Engines() []Engine { return engines }
