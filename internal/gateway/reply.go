@@ -15,7 +15,10 @@ import (
 type translated struct {
 	w        http.ResponseWriter
 	from, to translate.Protocol
-	header   http.Header
+	// model is what the upstream was asked for, so a converted stream names
+	// the model that answered even when the upstream's events do not.
+	model  string
+	header http.Header
 
 	status  int
 	stream  *translate.Stream
@@ -23,8 +26,8 @@ type translated struct {
 	broken  bool   // the stream could not be converted; the rest is dropped
 }
 
-func newTranslated(w http.ResponseWriter, from, to translate.Protocol) *translated {
-	return &translated{w: w, from: from, to: to, header: http.Header{}}
+func newTranslated(w http.ResponseWriter, from, to translate.Protocol, model string) *translated {
+	return &translated{w: w, from: from, to: to, model: model, header: http.Header{}}
 }
 
 // Header is the upstream's headers, kept apart: only the ones that still
@@ -37,7 +40,7 @@ func (t *translated) WriteHeader(code int) {
 	}
 	t.status = code
 	if code < 300 && isEventStream(t.header) {
-		t.stream = translate.NewStream(t.from, t.to)
+		t.stream = translate.NewStream(t.from, t.to, t.model)
 		h := t.w.Header()
 		h.Set("Content-Type", "text/event-stream")
 		h.Set("Cache-Control", "no-cache")
@@ -118,7 +121,7 @@ func (t *translated) finish() {
 	}
 	body := t.pending
 	if status < 300 {
-		out, err := translate.Response(t.from, t.to, body)
+		out, err := translate.Response(t.from, t.to, body, t.model)
 		if err != nil {
 			status, out = http.StatusBadGateway, translate.Error(t.to, http.StatusBadGateway, "ak: translating the reply: "+err.Error())
 		}

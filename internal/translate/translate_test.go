@@ -149,8 +149,13 @@ func TestChatUpstreamReportsStreamUsage(t *testing.T) {
 type reply struct {
 	text, thinking, tool, args string
 	input, output              float64
-	ended                      bool // a stream reached its protocol's end
+	ended                      bool   // a stream reached its protocol's end
+	model                      string // what the reply says it came from
 }
+
+// wantModel is what a converted reply must say it came from: the name the
+// request asked the upstream for, not the one the upstream's own events use.
+const wantModel = "upstream-model"
 
 // The recorded replies all say this.
 var wantReply = reply{
@@ -173,7 +178,7 @@ func readReply(t *testing.T, p Protocol, body []byte) reply {
 	if err := json.Unmarshal(body, &v); err != nil {
 		t.Fatalf("%s reply does not parse: %v\n%s", p, err, body)
 	}
-	var r reply
+	r := reply{model: str(v["model"])}
 	u := obj(v["usage"])
 	switch p {
 	case Anthropic:
@@ -221,11 +226,13 @@ func TestResponseEveryPair(t *testing.T) {
 				continue
 			}
 			t.Run(string(from)+"->"+string(to), func(t *testing.T) {
-				out, err := Response(from, to, fixture(t, replyFixture[from]))
+				out, err := Response(from, to, fixture(t, replyFixture[from]), wantModel)
 				if err != nil {
 					t.Fatal(err)
 				}
-				checkReply(t, readReply(t, to, out), false, out)
+				got := readReply(t, to, out)
+				checkReply(t, got, false, out)
+				checkModel(t, got.model)
 			})
 		}
 	}
@@ -250,6 +257,15 @@ func checkReply(t *testing.T, got reply, stream bool, raw []byte) {
 	}
 	if t.Failed() {
 		t.Logf("converted:\n%s", raw)
+	}
+}
+
+// checkModel asserts a converted reply names the model ak asked the member
+// for: a client attributes usage by it, so an empty one loses that usage.
+func checkModel(t *testing.T, got string) {
+	t.Helper()
+	if got != wantModel {
+		t.Errorf("model = %q, want %q", got, wantModel)
 	}
 }
 
@@ -301,6 +317,7 @@ func readStream(t *testing.T, p Protocol, b []byte) reply {
 			d := obj(v["delta"])
 			switch v["type"] {
 			case "message_start":
+				r.model = str(obj(v["message"])["model"])
 				r.input = num(obj(obj(v["message"])["usage"])["input_tokens"])
 			case "content_block_start":
 				if b := obj(v["content_block"]); b["type"] == "tool_use" {
@@ -331,10 +348,15 @@ func readStream(t *testing.T, p Protocol, b []byte) reply {
 			case "response.function_call_arguments.delta":
 				r.args += str(v["delta"])
 			case "response.completed":
-				u := obj(obj(v["response"])["usage"])
+				resp := obj(v["response"])
+				r.model = str(resp["model"])
+				u := obj(resp["usage"])
 				r.input, r.output, r.ended = num(u["input_tokens"]), num(u["output_tokens"]), true
 			}
 		case Chat:
+			if m := str(v["model"]); m != "" {
+				r.model = m
+			}
 			if u := obj(v["usage"]); u != nil {
 				r.input, r.output = num(u["prompt_tokens"]), num(u["completion_tokens"])
 			}
@@ -362,7 +384,7 @@ func TestStreamEveryPair(t *testing.T) {
 				continue
 			}
 			t.Run(string(from)+"->"+string(to), func(t *testing.T) {
-				s := NewStream(from, to)
+				s := NewStream(from, to, wantModel)
 				var out bytes.Buffer
 				for _, data := range events(fixture(t, streamFixture[from])) {
 					b, err := s.Event(data)
@@ -372,7 +394,9 @@ func TestStreamEveryPair(t *testing.T) {
 					out.Write(b)
 				}
 				out.Write(s.Close())
-				checkReply(t, readStream(t, to, out.Bytes()), true, out.Bytes())
+				got := readStream(t, to, out.Bytes())
+				checkReply(t, got, true, out.Bytes())
+				checkModel(t, got.model)
 			})
 		}
 	}

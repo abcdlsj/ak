@@ -402,7 +402,7 @@ func (s *Server) serviceLeg(cfg *config.Config, proto translate.Protocol, count 
 		if err != nil {
 			return leg{}, model, fmt.Errorf("cannot translate %s to %s: %w", proto, upProto, err)
 		}
-		lg.reply = func(w http.ResponseWriter) replyWriter { return newTranslated(w, upProto, proto) }
+		lg.reply = func(w http.ResponseWriter) replyWriter { return newTranslated(w, upProto, proto, model) }
 		return lg, model, nil
 	}
 	if len(refused) > 0 {

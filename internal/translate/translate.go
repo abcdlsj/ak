@@ -123,8 +123,10 @@ func readRequest(ctx *schemas.BifrostContext, p Protocol, body []byte) (*schemas
 }
 
 // Response converts a whole, non-streamed reply of an upstream speaking from
-// into the client's protocol to.
-func Response(from, to Protocol, body []byte) ([]byte, error) {
+// into the client's protocol to, naming model as what answered when it is not
+// empty: a client attributes its usage by that name, and an upstream that
+// leaves it out would leave the reply unattributable.
+func Response(from, to Protocol, body []byte, model string) ([]byte, error) {
 	ctx := newCtx()
 	var hub *schemas.BifrostResponsesResponse
 	switch from {
@@ -151,6 +153,9 @@ func Response(from, to Protocol, body []byte) ([]byte, error) {
 	if hub == nil {
 		return nil, errors.New("empty reply")
 	}
+	if model != "" {
+		hub.Model = model
+	}
 	switch to {
 	case Anthropic:
 		return json.Marshal(anthropic.ToAnthropicResponsesResponse(ctx, hub))
@@ -166,10 +171,14 @@ func Response(from, to Protocol, body []byte) ([]byte, error) {
 // for concurrent use; each reply gets its own.
 type Stream struct {
 	from, to Protocol
-	ctx      *schemas.BifrostContext
-	seq      int
-	anth     *anthropic.AnthropicResponsesStreamState
-	chat     *schemas.ChatToResponsesStreamState
+	// model is what the upstream was asked for. A chat stream's lifecycle
+	// events carry no model of their own, so the client would be told the
+	// reply came from no model at all; the name goes where it is missing.
+	model string
+	ctx   *schemas.BifrostContext
+	seq   int
+	anth  *anthropic.AnthropicResponsesStreamState
+	chat  *schemas.ChatToResponsesStreamState
 	// usage gathers what an Anthropic stream reports on message_start and
 	// message_delta: bifrost's converter leaves it to its own accumulator,
 	// so the completed event carries it only when it is put there.
@@ -180,9 +189,10 @@ type Stream struct {
 }
 
 // NewStream starts converting a stream from an upstream speaking from to a
-// client speaking to.
-func NewStream(from, to Protocol) *Stream {
-	s := &Stream{from: from, to: to, ctx: newCtx()}
+// client speaking to. model is what the upstream was asked for; it fills in
+// the model a converted event would otherwise leave empty.
+func NewStream(from, to Protocol, model string) *Stream {
+	s := &Stream{from: from, to: to, model: model, ctx: newCtx()}
 	switch from {
 	case Anthropic:
 		s.anth = anthropic.AcquireAnthropicResponsesStreamState()
@@ -207,6 +217,17 @@ func (s *Stream) Event(data []byte) ([]byte, error) {
 		var err error
 		if hub, err = s.read(data); err != nil {
 			return nil, err
+		}
+	}
+	// The model is stated by ak, not read off the events: bifrost leaves it
+	// out of the lifecycle events it synthesizes, and a client that is told
+	// the reply came from no model cannot attribute the usage it records.
+	// The name the member was asked for is the answer it gave.
+	if s.model != "" {
+		for _, ev := range hub {
+			if ev.Response != nil {
+				ev.Response.Model = s.model
+			}
 		}
 	}
 	return s.frames(hub)
