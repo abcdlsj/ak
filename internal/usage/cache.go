@@ -21,7 +21,7 @@ type Cache struct {
 	Files map[string]*fileState
 }
 
-const cacheVersion = 4
+const cacheVersion = 5
 
 func newCache() *Cache {
 	return &Cache{Version: cacheVersion, Zone: zoneID(), Files: map[string]*fileState{}}

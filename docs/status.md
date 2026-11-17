@@ -169,6 +169,8 @@ ak usage                 all history
 ak usage --days 7        the last seven days, today included
 ak usage kimi --json     one provider, machine-readable
 ak usage --ak-only       leave out engine logins and other tools
+ak usage --sessions      each session's tokens and cache hit rate
+ak usage --session a1b2  one session, by id or id prefix
 ```
 
 Cost comes from models.dev prices, fetched once a day into
@@ -177,6 +179,16 @@ launch hands its engine. A provider's own `[providers.x.pricing]`
 overrides them: either explicit per-million prices, or a `discount` multiplier
 on the models.dev figure. A model with no price anywhere is counted in tokens
 and named in one line under the total, never added to the cost as zero.
+
+**Cache hits.** claude, codex and pi each log how much of a prompt the provider
+served from its prompt cache, so a session can be asked what the cache saved
+it: `ak usage --sessions` lists them, `--session <id>` (any prefix of the id)
+prints one with its token breakdown, and `--json` carries the same rows. A hit
+is cache reads over the whole prompt — input, cache reads and cache writes —
+the one split all three agree on; a cache write counts as prompt volume, so a
+session that filled a cache and never reused it reads `0%`. A session no
+provider reported cache activity for shows `-`, not a miss. agy records no
+cache figures, so no antigravity row has a hit rate to show.
 
 **Antigravity.** agy records no token usage at all — its conversations hold
 content, its summaries a step count — so an antigravity provider is reported in

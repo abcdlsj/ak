@@ -64,6 +64,8 @@ type piParser struct {
 	st struct {
 		RawProvider string `json:"provider,omitempty"`
 		Model       string `json:"model,omitempty"`
+		// Session is the id in the session header pi writes first.
+		Session string `json:"session,omitempty"`
 	}
 }
 
@@ -86,7 +88,8 @@ type piUsage struct {
 func (p *piParser) Parse(line []byte) (Record, bool) {
 	if !bytes.Contains(line, []byte(`"message"`)) &&
 		!bytes.Contains(line, []byte(`"model_change"`)) &&
-		!bytes.Contains(line, []byte(`"usage"`)) {
+		!bytes.Contains(line, []byte(`"usage"`)) &&
+		!bytes.Contains(line, []byte(`"type":"session"`)) {
 		return Record{}, false
 	}
 	var d struct {
@@ -110,6 +113,10 @@ func (p *piParser) Parse(line []byte) (Record, bool) {
 	}
 
 	switch d.Type {
+	case "session":
+		// The header line: the file's own id, which a fork replaces.
+		p.st.Session = d.ID
+		return Record{}, false
 	case "model_change":
 		if d.Provider != "" {
 			p.st.RawProvider = d.Provider
@@ -177,6 +184,7 @@ func (p *piParser) record(id, iso string, msgTS int64, rawProvider, model string
 			strconv.FormatInt(u.CacheRead, 10), strconv.FormatInt(u.CacheWrite, 10)),
 		Time:        t,
 		Model:       model,
+		Session:     p.st.Session,
 		RawProvider: rawProvider,
 		Tokens: Tokens{
 			Input: u.Input, Output: u.Output,

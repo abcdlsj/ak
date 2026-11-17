@@ -119,9 +119,19 @@ func SinceDays(n int) string {
 // Load scans the logs (incrementally, via the cache) and returns attributed rows.
 // The first scan parses the whole history; later ones only read new bytes.
 func Load(cfg *config.Config) ([]Row, error) {
-	home, err := os.UserHomeDir()
+	buckets, a, err := loadBuckets(cfg)
 	if err != nil {
 		return nil, err
+	}
+	return attribute(buckets, a), nil
+}
+
+// loadBuckets scans the logs and resolves what attribution needs, which is
+// also what the per-session report reads.
+func loadBuckets(cfg *config.Config) ([]bucket, *attribution, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, err
 	}
 	// The session index and the price table (a network fetch when stale)
 	// load alongside the scan, so summarizing afterwards never waits.
@@ -142,12 +152,12 @@ func Load(cfg *config.Config) ([]Row, error) {
 	// A cache write failure does not affect the result.
 	_ = saveCache(cache)
 	wg.Wait()
-	return attribute(buckets, &attribution{
+	return buckets, &attribution{
 		sessions: sessions,
 		codexIDs: codexProviderNames(cfg, provider.BaseCodexProviderIDs()),
 		piIDs:    piProviderNames(cfg),
 		homes:    isolatedHomeOwners(cfg),
-	}), nil
+	}, nil
 }
 
 // Rename relabels the rows whose model is from as to. A name a route was
@@ -253,27 +263,34 @@ func (a *attribution) mappedRaw(engine, raw string) bool {
 	return false
 }
 
+// providerOf resolves a bucket's ak provider: the source's own mapping first,
+// then a directory only one provider runs in, then the engine's default login.
+func providerOf(b bucket, a *attribution) string {
+	prov := ""
+	if src := sourceFor(b.Engine); src != nil {
+		prov = src.Provider(b, a)
+	}
+	if (prov == "" || (prov == b.RawProvider && !a.mappedRaw(b.Engine, b.RawProvider))) && b.path != "" {
+		if owner := a.ownerByHome(b.Engine, b.path); owner != "" {
+			prov = owner
+		}
+	}
+	// Unattributed usage ran on the engine's own default login.
+	if prov == "" {
+		prov = b.Engine
+	}
+	if prov == "" {
+		prov = unknownProvider
+	}
+	return prov
+}
+
 // attribute resolves each bucket's ak provider and folds away session detail.
 func attribute(buckets []bucket, a *attribution) []Row {
 	type key struct{ date, provider, model, engine string }
 	acc := map[key]*Row{}
 	for _, b := range buckets {
-		prov := ""
-		if src := sourceFor(b.Engine); src != nil {
-			prov = src.Provider(b, a)
-		}
-		if (prov == "" || (prov == b.RawProvider && !a.mappedRaw(b.Engine, b.RawProvider))) && b.path != "" {
-			if owner := a.ownerByHome(b.Engine, b.path); owner != "" {
-				prov = owner
-			}
-		}
-		// Unattributed usage ran on the engine's own default login.
-		if prov == "" {
-			prov = b.Engine
-		}
-		if prov == "" {
-			prov = unknownProvider
-		}
+		prov := providerOf(b, a)
 		k := key{b.Date, prov, b.Model, b.Engine}
 		r := acc[k]
 		if r == nil {

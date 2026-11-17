@@ -52,6 +52,9 @@ type codexParser struct {
 	st struct {
 		Model       string `json:"model,omitempty"`
 		RawProvider string `json:"provider,omitempty"`
+		// Session is the id session_meta carries; codex has no session id on
+		// the events themselves.
+		Session string `json:"session,omitempty"`
 		// LastTotal is the cumulative total of the last token_count; codex
 		// repeats the event with an unchanged total, which must not count twice.
 		LastTotal int64 `json:"last_total,omitempty"`
@@ -76,6 +79,8 @@ func (p *codexParser) Parse(line []byte) (Record, bool) {
 			Type          string `json:"type"`
 			ModelProvider string `json:"model_provider"`
 			Model         string `json:"model"`
+			SessionID     string `json:"session_id"`
+			ID            string `json:"id"`
 			Info          *struct {
 				Total struct {
 					TotalTokens int64 `json:"total_tokens"`
@@ -99,6 +104,12 @@ func (p *codexParser) Parse(line []byte) (Record, bool) {
 		// A forked session repeats its parent's meta later on; the first one is ours.
 		if p.st.RawProvider == "" {
 			p.st.RawProvider = d.Payload.ModelProvider
+		}
+		if p.st.Session == "" {
+			p.st.Session = d.Payload.SessionID
+			if p.st.Session == "" {
+				p.st.Session = d.Payload.ID
+			}
 		}
 		return Record{}, false
 	case d.Type == "turn_context":
@@ -142,6 +153,7 @@ func (p *codexParser) Parse(line []byte) (Record, bool) {
 		Time:        ts,
 		Model:       model,
 		RawProvider: p.st.RawProvider,
+		Session:     p.st.Session,
 		Tokens:      Tokens{Input: input, CacheRead: u.Cached, Output: u.Output, Thinking: u.Reasoning},
 	}, true
 }
