@@ -42,6 +42,13 @@ sign-in when it has one, a device sign-in, or pasting a key.`,
 			if err != nil {
 				return err
 			}
+			if len(args) == 1 && !cmd.Flags().Changed("key") && method == "" {
+				if _, isVendor := vendor.Lookup(args[0]); !isVendor {
+					if p, ok := cfg.Providers[args[0]]; ok && p.UsesEngineLogin() {
+						return loginNativeProvider(cfg, args[0], p)
+					}
+				}
+			}
 			v, err := lookupVendor(args[0])
 			if err != nil {
 				return err
@@ -272,4 +279,32 @@ func completeLogin(cmd *cobra.Command, args []string, toComplete string) ([]stri
 		return completeAccounts(cmd, args, toComplete)
 	}
 	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+// loginNativeProvider launches a directory-isolated provider's own engine so
+// the engine handles OAuth sign-in and stores credentials in its own home.
+func loginNativeProvider(cfg *config.Config, name string, p config.Provider) error {
+	if dir := p.HomeDir(); dir != "" {
+		if err := os.MkdirAll(config.ExpandHome(dir), 0o700); err != nil {
+			return err
+		}
+	}
+	switch p.Kind {
+	case config.KindAntigravity:
+		out.Hint(os.Stdout, "agy opens a sign-in page and asks you to paste the code back; the account stays in %s", config.ExpandHome(p.GeminiDir))
+		return execProviderToSignIn(cfg, name, "", nil)
+	case config.KindCodex:
+		out.Hint(os.Stdout, "codex signs in and saves the credential in %s", config.ExpandHome(p.CodexHome))
+		return execProviderToSignIn(cfg, name, "", []string{"login"})
+	case config.KindClaude:
+		out.Hint(os.Stdout, "claude signs in inside %s; run `/login` if prompted", config.ExpandHome(p.ConfigDir))
+		return execProviderToSignIn(cfg, name, "", nil)
+	case config.KindPi:
+		if p.PiProvider != "" {
+			return execProviderToSignIn(cfg, name, "", []string{"auth", "login", p.PiProvider})
+		}
+		out.Hint(os.Stdout, "pi keeps credentials in %s; run `/login` inside pi or `ak %s auth login <provider>`", config.ExpandHome(p.PiDir), name)
+		return execProviderToSignIn(cfg, name, "", nil)
+	}
+	return fmt.Errorf("provider %q (%s) does not support engine login", name, p.Kind)
 }

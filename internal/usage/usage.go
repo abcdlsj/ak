@@ -11,7 +11,9 @@ package usage
 
 import (
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -144,6 +146,7 @@ func Load(cfg *config.Config) ([]Row, error) {
 		sessions: sessions,
 		codexIDs: codexProviderNames(cfg, provider.BaseCodexProviderIDs()),
 		piIDs:    piProviderNames(cfg),
+		homes:    isolatedHomeOwners(cfg),
 	}), nil
 }
 
@@ -178,6 +181,76 @@ type attribution struct {
 	codexIDs map[string]string
 	// piIDs maps a pi provider id to the ak provider using it.
 	piIDs map[string]string
+	// homes maps an exclusive isolated engine directory prefix to its provider.
+	homes []homeOwner
+}
+
+type homeOwner struct {
+	engine string
+	prefix string
+	name   string
+}
+
+func isolatedHomeOwners(cfg *config.Config) []homeOwner {
+	type key struct{ engine, dir string }
+	counts := map[key]int{}
+	names := map[key]string{}
+	for _, name := range cfg.Names() {
+		p := cfg.Providers[name]
+		dir := p.HomeDir()
+		if dir == "" || p.Kind == config.KindAntigravity {
+			continue
+		}
+		k := key{string(p.Kind), filepath.Clean(config.ExpandHome(dir))}
+		counts[k]++
+		names[k] = name
+	}
+	var out []homeOwner
+	for k, n := range counts {
+		if n != 1 {
+			continue
+		}
+		out = append(out, homeOwner{
+			engine: k.engine,
+			prefix: k.dir + string(filepath.Separator),
+			name:   names[k],
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if len(out[i].prefix) != len(out[j].prefix) {
+			return len(out[i].prefix) > len(out[j].prefix)
+		}
+		return out[i].prefix < out[j].prefix
+	})
+	return out
+}
+
+func (a *attribution) ownerByHome(engine, path string) string {
+	if path == "" || len(a.homes) == 0 {
+		return ""
+	}
+	clean := filepath.Clean(path)
+	for _, h := range a.homes {
+		if h.engine == engine && strings.HasPrefix(clean, h.prefix) {
+			return h.name
+		}
+	}
+	return ""
+}
+
+func (a *attribution) mappedRaw(engine, raw string) bool {
+	if raw == "" {
+		return false
+	}
+	switch engine {
+	case "codex":
+		_, ok := a.codexIDs[raw]
+		return ok
+	case "pi":
+		_, ok := a.piIDs[raw]
+		return ok
+	}
+	return false
 }
 
 // attribute resolves each bucket's ak provider and folds away session detail.
@@ -188,6 +261,11 @@ func attribute(buckets []bucket, a *attribution) []Row {
 		prov := ""
 		if src := sourceFor(b.Engine); src != nil {
 			prov = src.Provider(b, a)
+		}
+		if (prov == "" || (prov == b.RawProvider && !a.mappedRaw(b.Engine, b.RawProvider))) && b.path != "" {
+			if owner := a.ownerByHome(b.Engine, b.path); owner != "" {
+				prov = owner
+			}
 		}
 		// Unattributed usage ran on the engine's own default login.
 		if prov == "" {

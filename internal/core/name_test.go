@@ -23,6 +23,9 @@ func TestSuggestName(t *testing.T) {
 		{config.Provider{Kind: config.KindCodex, BaseURL: "http://api-ai-coding.bilibili.co/api/v1/codex"}, "bilibili-codex"},
 		{config.Provider{Kind: config.KindClaude, BaseURL: "http://127.0.0.1:3425"}, ""},
 		{config.Provider{Kind: config.KindClaude, Members: []string{"a"}}, ""},
+		{config.Provider{Kind: config.KindAntigravity, GeminiDir: "~/.local/share/ak/agy/work"}, "work"},
+		{config.Provider{Kind: config.KindCodex, CodexHome: "~/.codex-pro"}, "codex-pro"},
+		{config.Provider{Kind: config.KindClaude, ConfigDir: "~/.claude"}, ""},
 	}
 	for _, c := range cases {
 		if got := SuggestName(cfg, c.p); got != c.want {

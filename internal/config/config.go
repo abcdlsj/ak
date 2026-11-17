@@ -58,6 +58,39 @@ const (
 	KindAntigravity Kind = "antigravity"
 )
 
+// ParseKind parses an engine name, accepting "agy" as an alias for antigravity.
+func ParseKind(s string) (Kind, bool) {
+	switch s {
+	case string(KindClaude):
+		return KindClaude, true
+	case string(KindCodex):
+		return KindCodex, true
+	case string(KindPi):
+		return KindPi, true
+	case string(KindAntigravity), "agy":
+		return KindAntigravity, true
+	}
+	return "", false
+}
+
+// CommandName returns the engine's executable and shell command name.
+func (k Kind) CommandName() string {
+	if k == KindAntigravity {
+		return "agy"
+	}
+	return string(k)
+}
+
+// DefaultHomeDir returns ak's default isolated directory for an engine provider.
+func DefaultHomeDir(k Kind, name string) string {
+	sub := k.CommandName()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join("~", ".local", "share", "ak", sub, name)
+	}
+	return filepath.Join(home, ".local", "share", "ak", sub, name)
+}
+
 // Config is the top-level structure of providers.toml.
 type Config struct {
 	Version   int                 `toml:"version"`
@@ -235,6 +268,10 @@ type Provider struct {
 	// PiAuthHeader sends the key as Authorization: Bearer instead of the
 	// Anthropic-style x-api-key, for relays that expect a bearer token.
 	PiAuthHeader bool `toml:"pi_auth_header,omitempty"`
+	// PiDir isolates pi's whole agent directory: the launch exports
+	// PI_CODING_AGENT_DIR, so auth.json, models.json, extensions and sessions
+	// live there instead of ~/.pi/agent.
+	PiDir string `toml:"pi_dir,omitempty"`
 	// CodexHome isolates the provider's whole codex environment: the shim
 	// exports CODEX_HOME, so config.toml, auth, MCP servers and sessions live
 	// there instead of ~/.codex.
@@ -318,6 +355,57 @@ type Variant struct {
 // IsPool reports whether the provider routes over other providers rather
 // than talking to an upstream itself.
 func (p Provider) IsPool() bool { return len(p.Members) > 0 }
+
+// HomeDir returns the isolated engine directory configured for this provider,
+// or "" when the provider shares the engine's default directory.
+func (p Provider) HomeDir() string {
+	switch p.Kind {
+	case KindClaude:
+		return p.ConfigDir
+	case KindCodex:
+		return p.CodexHome
+	case KindPi:
+		return p.PiDir
+	case KindAntigravity:
+		return p.GeminiDir
+	}
+	return ""
+}
+
+// SetHomeDir sets the engine-specific isolation directory field and clears the
+// others.
+func (p *Provider) SetHomeDir(dir string) {
+	p.ConfigDir, p.CodexHome, p.PiDir, p.GeminiDir = "", "", "", ""
+	switch p.Kind {
+	case KindClaude:
+		p.ConfigDir = dir
+	case KindCodex:
+		p.CodexHome = dir
+	case KindPi:
+		p.PiDir = dir
+	case KindAntigravity:
+		p.GeminiDir = dir
+	}
+}
+
+// UsesEngineLogin reports whether the provider delegates authentication to the
+// engine's own native/OAuth sign-in rather than an ak-managed endpoint and key.
+func (p Provider) UsesEngineLogin() bool {
+	if p.IsPool() || p.Account != "" {
+		return false
+	}
+	switch p.Kind {
+	case KindAntigravity:
+		return true
+	case KindClaude:
+		return p.BaseURL == "" && p.ConfigDir != ""
+	case KindCodex:
+		return p.BaseURL == "" && p.CodexHome != ""
+	case KindPi:
+		return p.BaseURL == "" && (p.PiProvider != "" || p.PiDir != "")
+	}
+	return false
+}
 
 // MaxPoolDepth bounds how deeply pools may nest.
 const MaxPoolDepth = 4

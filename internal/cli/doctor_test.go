@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,5 +58,40 @@ func TestDoctorHintOnce(t *testing.T) {
 	d.hint("Run `ak sync`")
 	if len(d.hints) != 1 {
 		t.Errorf("hints = %q", d.hints)
+	}
+}
+
+func TestDoctorEngineBinAntigravity(t *testing.T) {
+	dir := t.TempDir()
+	agyBin := filepath.Join(dir, "agy")
+	if err := os.WriteFile(agyBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Settings.AntigravityBin = agyBin
+	d := &doctor{}
+	d.engineBin(cfg, config.KindAntigravity)
+	if d.problems != 0 {
+		t.Fatalf("expected agy bin to resolve, got %d problems", d.problems)
+	}
+
+	t.Setenv("PATH", t.TempDir())
+	cfg.Settings.AntigravityBin = ""
+	d = &doctor{}
+	d.engineBin(cfg, config.KindAntigravity)
+	if d.problems != 1 || len(d.hints) == 0 || !strings.Contains(d.hints[0], "antigravity_bin") {
+		t.Fatalf("missing agy bin check failed: problems=%d hints=%v", d.problems, d.hints)
+	}
+}
+
+func TestDoctorSharedNativeHome(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Providers["pro1"] = config.Provider{Kind: config.KindCodex, CodexHome: dir}
+	cfg.Providers["pro2"] = config.Provider{Kind: config.KindCodex, CodexHome: dir}
+	d := &doctor{}
+	doctorNativeHomes(d, cfg)
+	if d.problems != 1 {
+		t.Fatalf("expected shared codex_home problem, got %d", d.problems)
 	}
 }

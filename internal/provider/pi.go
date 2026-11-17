@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -48,23 +49,31 @@ func (piEngine) Launch(name string, p config.Provider, key Secret, ctx Context) 
 
 	env := newEnv()
 	providerID := p.PiProvider
-	if providerID == "" {
-		providerID = PiProviderID(name)
-		env.setSecret(EnvKey(name), key)
+	if !p.UsesEngineLogin() {
+		if providerID == "" {
+			providerID = PiProviderID(name)
+			env.setSecret(EnvKey(name), key)
+		}
 	}
 	env.set("AK_PROVIDER", name)
-	// A config of ak's own keeps its models.json inside it, so pi is told
-	// where to look; the user's own PI_CODING_AGENT_DIR is already in the
-	// environment and wins.
-	if home, err := config.PiHome(); err == nil && config.PiHomeSandboxed() {
+	// An isolated pi_dir overrides the agent directory directly; otherwise, a
+	// config of ak's own keeps its models.json inside it, while the user's own
+	// PI_CODING_AGENT_DIR is already in the environment and wins.
+	if p.PiDir != "" {
+		env.set(config.PiHomeEnv, config.ExpandHome(p.PiDir))
+	} else if home, err := config.PiHome(); err == nil && config.PiHomeSandboxed() {
 		env.set(config.PiHomeEnv, home)
 	}
+	setAgentHome(env, p.PiDir)
 	// Extra env vars merge last, as for claude.
 	for k, v := range p.Env {
 		env.set(k, v)
 	}
 
-	args := []string{"--provider", providerID}
+	var args []string
+	if providerID != "" {
+		args = append(args, "--provider", providerID)
+	}
 	if p.Model != "" {
 		args = append(args, "--model", p.Model)
 	}
@@ -124,12 +133,54 @@ func (piEngine) Shared(ctx Context, cfg *config.Config) (string, []byte, error) 
 	return PiModelsJSON(ctx.PiHome, cfg, ctx.Gateway)
 }
 
+// SharedFiles implements SharedFilesWriter: it returns models.json for the
+// shared pi home and for every distinct isolated pi_dir.
+func (piEngine) SharedFiles(ctx Context, cfg *config.Config) ([]SharedFile, error) {
+	seen := map[string]bool{}
+	var dirs []string
+	if ctx.PiHome != "" {
+		clean := filepath.Clean(ctx.PiHome)
+		seen[clean] = true
+		dirs = append(dirs, clean)
+	}
+	var extra []string
+	for _, name := range cfg.Names() {
+		p := cfg.Providers[name]
+		if p.Kind != config.KindPi || p.PiDir == "" {
+			continue
+		}
+		clean := filepath.Clean(config.ExpandHome(p.PiDir))
+		if !seen[clean] {
+			seen[clean] = true
+			extra = append(extra, clean)
+		}
+	}
+	sort.Strings(extra)
+	dirs = append(dirs, extra...)
+
+	var out []SharedFile
+	for _, dir := range dirs {
+		path, content, err := piModelsJSON(dir, cfg, ctx.Gateway, ctx.PiHome)
+		if err != nil {
+			return nil, err
+		}
+		if path != "" {
+			out = append(out, SharedFile{Path: path, Content: content})
+		}
+	}
+	return out, nil
+}
+
 // PiModelsJSON merges ak's pi providers into <agentDir>/models.json. Existing
 // content is preserved: only provider ids under PiProviderPrefix are replaced.
 // When the file is absent and there is nothing to add it returns "" so nothing
 // is written. When ak's entries are unchanged it returns the file as it is, so
 // the user's formatting is never disturbed without cause.
 func PiModelsJSON(agentDir string, cfg *config.Config, gateway string) (string, []byte, error) {
+	return piModelsJSON(agentDir, cfg, gateway, "")
+}
+
+func piModelsJSON(agentDir string, cfg *config.Config, gateway, defaultHome string) (string, []byte, error) {
 	path := filepath.Join(agentDir, "models.json")
 	orig, err := os.ReadFile(path)
 	exists := err == nil
@@ -161,14 +212,24 @@ func PiModelsJSON(agentDir string, cfg *config.Config, gateway string) (string, 
 	}
 
 	// What ak wants now.
+	cleanDir := filepath.Clean(agentDir)
+	cleanDefault := filepath.Clean(defaultHome)
 	after := map[string]string{}
 	for _, name := range cfg.Names() {
 		p := cfg.Providers[name]
 		if p.Kind != config.KindPi {
 			continue
 		}
-		// A provider pinned to an existing pi provider needs no entry.
-		if p.PiProvider != "" && !p.IsPool() {
+		if p.PiDir != "" {
+			if filepath.Clean(config.ExpandHome(p.PiDir)) != cleanDir {
+				continue
+			}
+		} else if defaultHome != "" && cleanDir != cleanDefault {
+			continue
+		}
+		// A provider using pi's own sign-in or pinned to an existing pi
+		// provider needs no entry in models.json.
+		if p.UsesEngineLogin() || (p.PiProvider != "" && !p.IsPool()) {
 			continue
 		}
 		entry := piProviderEntry(name, p, gateway)

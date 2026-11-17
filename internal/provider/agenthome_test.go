@@ -29,6 +29,12 @@ func TestAgentHomeIsReported(t *testing.T) {
 			home: "/tmp/codex-work",
 		},
 		{
+			name: "pi pi_dir",
+			eng:  piEngine{},
+			p:    config.Provider{Kind: config.KindPi, PiDir: "/tmp/pi-work"},
+			home: "/tmp/pi-work",
+		},
+		{
 			name: "agy gemini_dir",
 			eng:  agyEngine{},
 			p:    config.Provider{Kind: config.KindAntigravity, GeminiDir: "/tmp/agy-work"},

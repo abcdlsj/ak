@@ -39,10 +39,11 @@ func newVendorListCmd() *cobra.Command {
 				warnf("ak: vendor skipped: %v", err)
 			}
 			if kind != "" {
-				if _, ok := parseKind(kind); !ok {
+				k, ok := parseKind(kind)
+				if !ok {
 					return fmt.Errorf("unknown engine %q; must be %s", kind, kindList())
 				}
-				printVendorKinds(vendor.All(), kind)
+				printVendorKinds(vendor.All(), string(k))
 				return nil
 			}
 			printVendors(vendor.All())
@@ -143,6 +144,9 @@ func accountProvider(cmd *cobra.Command, cfg *config.Config, account string) (co
 	kind, _ := cmd.Flags().GetString("kind")
 	switch {
 	case cmd.Flags().Changed("kind"):
+		if k, ok := parseKind(kind); ok {
+			kind = string(k)
+		}
 		if !slices.Contains(kinds, kind) {
 			return config.Provider{}, fmt.Errorf("%s serves %s, not %s", v.Name, strings.Join(kinds, ", "), kind)
 		}

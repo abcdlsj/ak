@@ -117,8 +117,22 @@ func (s *Syncer) Sync() (Report, error) {
 		}
 	}
 
-	// Engines that keep one shared file (pi's models.json) write it once here.
+	// Engines that keep shared files (pi's models.json) write them once here.
 	for _, eng := range provider.Engines() {
+		if sf, ok := eng.(provider.SharedFilesWriter); ok {
+			files, err := sf.SharedFiles(ctx, s.Cfg)
+			if err != nil {
+				return rep, err
+			}
+			for _, f := range files {
+				if f.Path == "" {
+					continue
+				}
+				want[f.Path] = true
+				rep.Results = append(rep.Results, s.writeShared(f.Path, f.Content))
+			}
+			continue
+		}
 		sw, ok := eng.(provider.SharedWriter)
 		if !ok {
 			continue

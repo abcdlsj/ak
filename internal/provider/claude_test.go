@@ -394,3 +394,50 @@ func TestCodexArgsContextWindow(t *testing.T) {
 		t.Errorf("the table's window was not used:\n%s", got)
 	}
 }
+
+func TestClaudeEnv_NativeOAuth(t *testing.T) {
+	p := config.Provider{Kind: config.KindClaude, ConfigDir: "/tmp/claude-pro"}
+	plan := ClaudeEnv("pro", p, "", Literal(""))
+	env := envMap(plan)
+	unset := unsetSet(plan)
+
+	if env["CLAUDE_CONFIG_DIR"] != "/tmp/claude-pro" || env[EnvAgentHome] != "/tmp/claude-pro" {
+		t.Fatalf("home env = %v", env)
+	}
+	for _, k := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"} {
+		if _, ok := env[k]; ok {
+			t.Errorf("%s must not be set for native claude", k)
+		}
+		if !unset[k] {
+			t.Errorf("%s must be unset for native claude", k)
+		}
+	}
+}
+
+func TestCodexNativeOAuth(t *testing.T) {
+	p := config.Provider{Kind: config.KindCodex, CodexHome: "/tmp/codex-pro"}
+	l, err := codexEngine{}.Launch("cxpro", p, Literal(""), Context{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, a := range l.Args {
+		joined += a + " "
+	}
+	if !contains(joined, `cli_auth_credentials_store="file"`) {
+		t.Errorf("missing file credential store override: %s", joined)
+	}
+	if contains(joined, "model_providers") || contains(joined, "model_provider=") {
+		t.Errorf("native codex must not override model_provider: %s", joined)
+	}
+	env := envMap(l.Env)
+	if env["CODEX_HOME"] != "/tmp/codex-pro" || env[EnvAgentHome] != "/tmp/codex-pro" {
+		t.Fatalf("home env = %v", env)
+	}
+	if _, ok := env[EnvKey("cxpro")]; ok {
+		t.Errorf("native codex must not export %s", EnvKey("cxpro"))
+	}
+	if !unsetSet(l.Env)["OPENAI_API_KEY"] {
+		t.Error("native codex must unset OPENAI_API_KEY unless provider.env sets it")
+	}
+}

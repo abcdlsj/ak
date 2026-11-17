@@ -73,6 +73,14 @@ func TestShellInitRuns(t *testing.T) {
 			if !strings.Contains(out, "command ak __engine "+string(k)) {
 				t.Errorf("%s: no function for %s:\n%s", sh, k, out)
 			}
+			cmd := k.CommandName()
+			if sh == "fish" {
+				if !strings.Contains(out, "function "+cmd+" --wraps "+cmd) {
+					t.Errorf("%s: wrong fish function name for %s:\n%s", sh, k, out)
+				}
+			} else if !strings.Contains(out, "function "+cmd+" {") {
+				t.Errorf("%s: wrong shell function name for %s:\n%s", sh, k, out)
+			}
 		}
 	}
 	if _, err := shellInit("tcsh", config.Kinds); err == nil {
@@ -89,7 +97,7 @@ func TestShellInitRuns(t *testing.T) {
 		if sh == "bash" {
 			script = "shopt -s expand_aliases\n" + script
 		}
-		script += out + "typeset -f claude | grep -q __engine && typeset -f pi | grep -q __engine"
+		script += out + "typeset -f claude | grep -q __engine && typeset -f pi | grep -q __engine && typeset -f agy | grep -q __engine"
 		if b, err := exec.Command(bin, "-c", script).CombinedOutput(); err != nil {
 			t.Errorf("%s: %v\n%s", sh, err, b)
 		}
@@ -137,12 +145,34 @@ func TestWhichRows(t *testing.T) {
 func TestBindingRows(t *testing.T) {
 	cfg := config.Default()
 	cfg.Settings.DefaultCodex = "gpt"
-	list := []bind.Binding{{Place: "/w/repo/.git", Engine: "claude", Target: "kimi"}}
+	list := []bind.Binding{
+		{Place: "/w/repo/.git", Engine: "claude", Target: "kimi"},
+		{Place: "/w/repo/.git", Engine: "antigravity", Target: "work"},
+	}
 	rows := bindingRows(cfg, list)
-	if len(rows) != 2 || rows[0][0] != "codex" || rows[0][2] != "default" || rows[1][2] != "/w/repo" {
+	if len(rows) != 3 || rows[0][0] != "codex" || rows[0][2] != "default" || rows[1][2] != "/w/repo" || rows[2][0] != "agy" {
 		t.Errorf("rows = %q", rows)
 	}
 	if !hasEngineDefaults(cfg) || hasEngineDefaults(config.Default()) {
 		t.Error("hasEngineDefaults is wrong")
+	}
+}
+
+func TestAgyBindAndWhichAlias(t *testing.T) {
+	t.Setenv(overrideEnv, "")
+	k, ok := parseKind("agy")
+	if !ok || k != config.KindAntigravity {
+		t.Fatalf("parseKind(agy) = %q, %v", k, ok)
+	}
+	root := t.TempDir()
+	store := &bind.Store{Path: filepath.Join(root, "bindings.json"), Repo: func(string) string { return "" }}
+	cfg := config.Default()
+	cfg.Providers["work"] = config.Provider{Kind: config.KindAntigravity, GeminiDir: filepath.Join(root, "agy-work")}
+	if _, err := store.Set(root, string(k), "work"); err != nil {
+		t.Fatal(err)
+	}
+	rows, broken := whichRows(cfg, store, []config.Kind{config.KindAntigravity}, root)
+	if broken || len(rows) != 1 || rows[0][0] != "agy" || rows[0][1] != "work" {
+		t.Fatalf("whichRows = %q, broken=%v", rows, broken)
 	}
 }

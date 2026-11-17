@@ -85,14 +85,22 @@ func codexVariant(name string, p config.Provider) Variant {
 // as a quoted key, so an id containing a dot still parses (a dotted path would
 // split it).
 func CodexArgs(name string, p config.Provider) []string {
-	id := CodexProviderID(name, p)
-	wire := p.WireAPI
-	if wire == "" {
-		wire = "responses"
+	var args []string
+	if p.UsesEngineLogin() {
+		// Delegate OAuth to codex itself, storing credentials in <CODEX_HOME>/auth.json
+		// instead of the OS keyring so isolated homes never share or overwrite tokens.
+		args = append(args, codexOverride("cli_auth_credentials_store", "file")...)
+	} else {
+		id := CodexProviderID(name, p)
+		wire := p.WireAPI
+		if wire == "" {
+			wire = "responses"
+		}
+		table := fmt.Sprintf("{%s={name=%s,base_url=%s,wire_api=%s,env_key=%s}}",
+			tomlString(id), tomlString(id), tomlString(p.BaseURL), tomlString(wire), tomlString(EnvKey(name)))
+		args = append(args, codexRaw("model_provider", tomlString(id))...)
+		args = append(args, codexRaw("model_providers", table)...)
 	}
-	table := fmt.Sprintf("{%s={name=%s,base_url=%s,wire_api=%s,env_key=%s}}",
-		tomlString(id), tomlString(id), tomlString(p.BaseURL), tomlString(wire), tomlString(EnvKey(name)))
-	args := codexRaw("model_provider", tomlString(id))
 	if p.Model != "" {
 		args = append(args, codexRaw("model", tomlString(p.Model))...)
 	}
@@ -109,7 +117,7 @@ func CodexArgs(name string, p config.Provider) []string {
 		// max_context_window anyway.
 		args = append(args, codexRaw("model_context_window", strconv.Itoa(window))...)
 	}
-	return append(args, codexRaw("model_providers", table)...)
+	return args
 }
 
 // codexOverride renders `-c key="value"`, the value as a TOML basic string.
@@ -132,7 +140,9 @@ func tomlString(s string) string {
 // CodexEnv computes the environment plan for a codex provider.
 func CodexEnv(name string, p config.Provider, key Secret) EnvPlan {
 	env := newEnv()
-	env.setSecret(EnvKey(name), key)
+	if !p.UsesEngineLogin() {
+		env.setSecret(EnvKey(name), key)
+	}
 	env.set("AK_PROVIDER", name)
 	if p.CodexHome != "" {
 		env.set("CODEX_HOME", config.ExpandHome(p.CodexHome))
@@ -142,7 +152,11 @@ func CodexEnv(name string, p config.Provider, key Secret) EnvPlan {
 	for k, v := range p.Env {
 		env.set(k, v)
 	}
-	return EnvPlan{Set: env.sorted()}
+	var unset []string
+	if p.UsesEngineLogin() && !env.has("OPENAI_API_KEY") {
+		unset = []string{"OPENAI_API_KEY"}
+	}
+	return EnvPlan{Set: env.sorted(), Unset: unset}
 }
 
 // CodexProviderID returns the table name for [model_providers.<id>], which

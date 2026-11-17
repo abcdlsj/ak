@@ -128,6 +128,19 @@ func TestQuickStatusPiProviderNeedsNoKey(t *testing.T) {
 	}
 }
 
+func TestQuickStatusNativeDirsNeedNoKey(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["cl"] = config.Provider{Kind: config.KindClaude, ConfigDir: "/tmp/claude-pro"}
+	cfg.Providers["cx"] = config.Provider{Kind: config.KindCodex, CodexHome: "/tmp/codex-pro"}
+	cfg.Providers["pi"] = config.Provider{Kind: config.KindPi, PiDir: "/tmp/pi-pro"}
+	for name := range cfg.Providers {
+		st := QuickStatus(cfg, name)
+		if st.NoKey || st.NeedsLogin {
+			t.Errorf("%s: status = %+v, want NoKey=false and NeedsLogin=false", name, st)
+		}
+	}
+}
+
 // A renamed provider's auth.json entry follows its name, and its key survives.
 func TestRenameMovesAuthEntry(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())

@@ -61,6 +61,9 @@ func Check(ctx context.Context, p config.Provider, key string) Result {
 	if p.Kind == config.KindAntigravity {
 		return Result{Status: StatusSkip, Detail: "skipped (agy signs in itself)"}
 	}
+	if p.UsesEngineLogin() {
+		return Result{Status: StatusSkip, Detail: fmt.Sprintf("skipped (%s signs in itself)", p.Kind)}
+	}
 	if trimBase(p.BaseURL) == "" {
 		return Result{Status: StatusFail, Detail: "no base_url"}
 	}

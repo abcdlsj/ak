@@ -34,11 +34,12 @@ type Draft struct {
 	PiProvider     string
 	PiAPI          string
 	PiAuth         bool
-	// GeminiDir is an antigravity provider's whole agy environment, passed to
-	// agy as --gemini_dir; one directory is one account.
-	GeminiDir string
-	Quota     string
-	QuotaCmd  string
+	// HomeDir is the engine's isolated directory (config_dir, codex_home,
+	// pi_dir or gemini_dir).
+	HomeDir  string
+	Native   bool
+	Quota    string
+	QuotaCmd string
 	// Members is the comma-separated member list of a pool; empty makes the
 	// provider a normal upstream.
 	Members  string
@@ -67,6 +68,7 @@ type Draft struct {
 const (
 	choiceAccount = "account:"
 	choiceVendor  = "vendor:"
+	choiceNative  = "native"
 )
 
 // NewDraft starts a draft for a new provider.
@@ -86,8 +88,9 @@ func EditDraft(cfg *config.Config, name string) *Draft {
 		KeyField: p.KeyField, WireAPI: p.WireAPI, Reasoning: p.Reasoning,
 		DefaultVariant: p.DefaultVariant,
 		PiProvider:     p.PiProvider, PiAPI: p.PiAPI, PiAuth: p.PiAuthHeader,
-		GeminiDir: p.GeminiDir,
-		Quota:     p.Quota, QuotaCmd: p.QuotaCmd,
+		HomeDir: p.HomeDir(),
+		Native:  full.UsesEngineLogin() && !(full.Kind == config.KindPi && full.PiProvider != "" && full.PiDir == ""),
+		Quota:   p.Quota, QuotaCmd: p.QuotaCmd,
 		Members: strings.Join(p.Members, ", "), Strategy: p.Strategy,
 		Maps:     joinMaps(p.MemberModels),
 		Account:  p.Account,
@@ -134,6 +137,23 @@ func (d *Draft) Provider() config.Provider {
 		p.Reasoning = d.Reasoning
 	}
 	if p.Account != "" {
+		if h := strings.TrimSpace(d.HomeDir); h != "" {
+			p.SetHomeDir(h)
+		}
+		return p
+	}
+
+	if d.Native || p.Kind == config.KindAntigravity {
+		p.BaseURL, p.APIKey, p.APIKeyRef, p.AuthKey = "", "", "", ""
+		p.Members, p.Strategy, p.MemberModels = nil, "", nil
+		p.KeyField, p.WireAPI, p.PiAPI, p.PiAuthHeader = "", "", "", false
+		p.Quota, p.QuotaCmd = "", ""
+		if p.Kind == config.KindPi {
+			p.PiProvider = strings.TrimSpace(d.PiProvider)
+		} else {
+			p.PiProvider = ""
+		}
+		p.SetHomeDir(strings.TrimSpace(d.HomeDir))
 		return p
 	}
 
@@ -145,10 +165,9 @@ func (d *Draft) Provider() config.Provider {
 	p.PiAuthHeader = d.PiAuth
 	// Fields of the other engine are cleared, not carried along; a default
 	// value is left unset.
-	p.KeyField, p.WireAPI, p.GeminiDir = "", "", ""
+	p.KeyField, p.WireAPI = "", ""
+	p.SetHomeDir(strings.TrimSpace(d.HomeDir))
 	switch p.Kind {
-	case config.KindAntigravity:
-		p.GeminiDir = strings.TrimSpace(d.GeminiDir)
 	case config.KindClaude:
 		if d.KeyField != "auth_token" {
 			p.KeyField = d.KeyField
@@ -188,6 +207,16 @@ func (d *Draft) Provider() config.Provider {
 		p.Members = nil
 		p.Strategy = ""
 		p.MemberModels = nil
+	}
+	return p
+}
+
+// Finalize builds the provider for name, filling in the default isolated
+// directory when a native-login or antigravity provider left it blank.
+func (d *Draft) Finalize(name string) config.Provider {
+	p := d.Provider()
+	if (d.Native || p.Kind == config.KindAntigravity) && p.HomeDir() == "" {
+		p.SetHomeDir(config.DefaultHomeDir(p.Kind, name))
 	}
 	return p
 }
@@ -280,9 +309,12 @@ func (d *Draft) PickForm(cfg *config.Config) *huh.Form {
 	)).WithShowHelp(true)
 }
 
-// pickOptions lists, for an engine, the accounts that serve it, then the
-// vendors to sign in to, then an endpoint of one's own.
+// pickOptions lists, for an engine, the accounts that serve it, its own native
+// OAuth option, the vendors to sign in to, then an endpoint of one's own.
 func pickOptions(cfg *config.Config, kind config.Kind) []huh.Option[string] {
+	if kind == config.KindAntigravity {
+		return []huh.Option[string]{huh.NewOption("Antigravity account (isolated directory)", choiceNative)}
+	}
 	var opts []huh.Option[string]
 	for _, n := range cfg.AccountNames() {
 		v, ok := vendor.Lookup(cfg.Accounts[n].Vendor)
@@ -290,6 +322,7 @@ func pickOptions(cfg *config.Config, kind config.Kind) []huh.Option[string] {
 			opts = append(opts, huh.NewOption(n+"  ·  "+v.Name, choiceAccount+n))
 		}
 	}
+	opts = append(opts, huh.NewOption(string(kind)+"'s own OAuth sign-in (isolated directory)", choiceNative))
 	for _, v := range vendor.All() {
 		if _, serves := v.Endpoint(string(kind)); serves {
 			opts = append(opts, huh.NewOption("sign in to "+v.Name+" ("+v.ID+")", choiceVendor+v.ID))
@@ -315,12 +348,15 @@ func (d *Draft) UseAccount(cfg *config.Config, name string) {
 	d.defaults = endpointOf(cfg, name, config.Kind(d.Kind))
 }
 
-// ApplyPick takes the pick step's choice of account; a vendor to sign in to
-// is left for the caller (SignInFirst), who then calls UseAccount.
+// ApplyPick takes the pick step's choice of account or native sign-in; a
+// vendor to sign in to is left for the caller (SignInFirst), who then calls
+// UseAccount.
 func (d *Draft) ApplyPick(cfg *config.Config) {
 	if name, ok := strings.CutPrefix(d.choice, choiceAccount); ok {
 		d.UseAccount(cfg, name)
+		return
 	}
+	d.Native = d.choice == choiceNative || d.Kind == string(config.KindAntigravity)
 }
 
 // formKeys moves between fields with ↑/↓ as well as tab, and changes a
@@ -347,6 +383,8 @@ func selectOf(title string, value *string, opts ...huh.Option[string]) *huh.Sele
 // what it runs on (core.SuggestName), which the field shows.
 func (d *Draft) Form(cfg *config.Config) *huh.Form {
 	onAccount := d.Account != ""
+	kind := config.Kind(d.Kind)
+	native := d.Native || kind == config.KindAntigravity
 	def := func(v string) string {
 		if v == "" {
 			return ""
@@ -354,10 +392,14 @@ func (d *Draft) Form(cfg *config.Config) *huh.Form {
 		return v + " (account default)"
 	}
 
+	watch := &d.BaseURL
+	if native {
+		watch = &d.HomeDir
+	}
 	basics := []huh.Field{
 		huh.NewInput().Title("Name").Value(&d.Name).
 			Description("The command becomes ak-<name>; blank takes the name shown").
-			PlaceholderFunc(func() string { return core.SuggestName(cfg, d.Provider()) }, &d.BaseURL).
+			PlaceholderFunc(func() string { return core.SuggestName(cfg, d.Provider()) }, watch).
 			Validate(func(s string) error {
 				if s == "" && !d.existing {
 					return nil
@@ -374,11 +416,11 @@ func (d *Draft) Form(cfg *config.Config) *huh.Form {
 		huh.NewInput().Title("Display name").Value(&d.Display),
 	}
 	groups := []*huh.Group{huh.NewGroup(basics...)}
-	if !onAccount {
+	if !onAccount && !native {
 		groups = append(groups, d.endpointGroup())
 	}
 
-	switch config.Kind(d.Kind) {
+	switch kind {
 	case config.KindClaude:
 		fields := []huh.Field{
 			huh.NewInput().Title("Opus-tier model").Value(&d.Opus).Placeholder(def(d.defaults.Opus)).Description("Blank uses the primary model"),
@@ -386,31 +428,29 @@ func (d *Draft) Form(cfg *config.Config) *huh.Form {
 			huh.NewInput().Title("Haiku-tier model").Value(&d.Haiku).Placeholder(def(d.defaults.Haiku)),
 			selectOf("Default variant", &d.DefaultVariant, variantOptions(config.ClaudeTiers(), d.base.Variants)...),
 		}
-		if !onAccount {
+		if native {
+			fields = append(fields, d.homeInput(kind))
+		} else if !onAccount {
 			fields = append(fields, selectOf("Auth variable", &d.KeyField,
 				huh.NewOption("ANTHROPIC_AUTH_TOKEN", "auth_token"), huh.NewOption("ANTHROPIC_API_KEY", "api_key")))
 		}
 		groups = append(groups, huh.NewGroup(fields...))
 	case config.KindCodex:
 		var fields []huh.Field
-		if !onAccount {
+		if !onAccount && !native {
 			fields = append(fields, selectOf("Wire API", &d.WireAPI, huh.NewOption("responses", "responses"), huh.NewOption("chat", "chat")))
 		}
 		fields = append(fields,
 			selectOf("Default reasoning effort", &d.Reasoning, reasoningOptions()...),
 			selectOf("Default variant", &d.DefaultVariant, variantOptions(config.ReasoningLevels(), d.base.Variants)...),
 		)
+		if native {
+			fields = append(fields, d.homeInput(kind))
+		}
 		groups = append(groups, huh.NewGroup(fields...))
 	case config.KindAntigravity:
 		groups = append(groups, huh.NewGroup(
-			huh.NewInput().Title("Gemini directory").Value(&d.GeminiDir).
-				Description("agy's whole environment and its account; ~/.gemini is the machine's own installation").
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
-						return errors.New("required")
-					}
-					return nil
-				}),
+			d.homeInput(kind),
 			selectOf("Default effort", &d.DefaultVariant, variantOptions(config.EffortLevels(), d.base.Variants)...),
 		))
 	case config.KindPi:
@@ -418,15 +458,47 @@ func (d *Draft) Form(cfg *config.Config) *huh.Form {
 		if !onAccount {
 			fields = append(fields,
 				huh.NewInput().Title("Existing pi provider").Value(&d.PiProvider).
-					Description("Use a provider pi already knows; blank registers ak-<name> from the endpoint"),
-				selectOf("Wire API", &d.PiAPI, huh.NewOption("anthropic-messages", "anthropic-messages"), huh.NewOption("openai-completions", "openai-completions"), huh.NewOption("openai-responses", "openai-responses")),
-				huh.NewConfirm().Title("Send the key as Authorization: Bearer").Value(&d.PiAuth),
+					Description("Use a provider pi already knows; blank uses pi's default or registers ak-<name>"),
 			)
+			if native {
+				fields = append(fields, d.homeInput(kind))
+			} else {
+				fields = append(fields,
+					selectOf("Wire API", &d.PiAPI, huh.NewOption("anthropic-messages", "anthropic-messages"), huh.NewOption("openai-completions", "openai-completions"), huh.NewOption("openai-responses", "openai-responses")),
+					huh.NewConfirm().Title("Send the key as Authorization: Bearer").Value(&d.PiAuth),
+				)
+			}
 		}
 		fields = append(fields, selectOf("Default variant", &d.DefaultVariant, variantOptions(config.ThinkingLevels(), d.base.Variants)...))
 		groups = append(groups, huh.NewGroup(fields...))
 	}
 	return huh.NewForm(groups...).WithKeyMap(formKeys()).WithShowHelp(true)
+}
+
+func (d *Draft) homeInput(kind config.Kind) *huh.Input {
+	return huh.NewInput().Title(homeTitle(kind)).Value(&d.HomeDir).
+		Description("Isolated directory holding this account; blank uses ~/.local/share/ak/...").
+		PlaceholderFunc(func() string {
+			n := strings.TrimSpace(d.Name)
+			if n == "" {
+				n = "<name>"
+			}
+			return config.DefaultHomeDir(kind, n)
+		}, &d.Name)
+}
+
+func homeTitle(kind config.Kind) string {
+	switch kind {
+	case config.KindClaude:
+		return "Claude config directory"
+	case config.KindCodex:
+		return "Codex home directory"
+	case config.KindPi:
+		return "Pi agent directory"
+	case config.KindAntigravity:
+		return "Gemini directory"
+	}
+	return "Home directory"
 }
 
 // endpointGroup asks for a provider's own upstream, or the members of a pool.

@@ -381,3 +381,42 @@ func TestRename(t *testing.T) {
 		t.Error("renaming lost tokens")
 	}
 }
+
+func TestIsolatedHomeAttribution(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(config.DirEnv, filepath.Join(home, "akcfg"))
+	t.Setenv(config.PiHomeEnv, filepath.Join(home, "pi-shared"))
+
+	cx1 := filepath.Join(home, "cx-pro1")
+	cx2 := filepath.Join(home, "cx-pro2")
+	pi1 := filepath.Join(home, "pi-pro1")
+
+	writeFile(t, filepath.Join(cx1, "sessions", "s1.jsonl"),
+		`{"timestamp":"2026-09-01T10:00:00Z","type":"session_meta","payload":{"model_provider":"openai"}}`+"\n"+
+			`{"timestamp":"2026-09-01T10:00:00Z","type":"turn_context","payload":{"model":"gpt-5"}}`+"\n"+
+			codexTokenLine("2026-09-01T10:00:01Z", 150, 100, 0, 50))
+	writeFile(t, filepath.Join(cx2, "sessions", "s2.jsonl"),
+		`{"timestamp":"2026-09-01T10:00:00Z","type":"session_meta","payload":{"model_provider":"openai"}}`+"\n"+
+			`{"timestamp":"2026-09-01T10:00:00Z","type":"turn_context","payload":{"model":"gpt-5"}}`+"\n"+
+			codexTokenLine("2026-09-01T10:00:01Z", 250, 200, 0, 50))
+	writeFile(t, filepath.Join(pi1, "sessions", "p1.jsonl"),
+		piAssistant("m1", "2026-09-01T10:00:02.000Z", 1756720802000, "anthropic", "claude-sonnet", 300, 30, 0, 0, 0)+"\n")
+
+	cfg := config.Default()
+	cfg.Providers["cx-pro1"] = config.Provider{Kind: config.KindCodex, CodexHome: cx1}
+	cfg.Providers["cx-pro2"] = config.Provider{Kind: config.KindCodex, CodexHome: cx2}
+	cfg.Providers["pi-pro1"] = config.Provider{Kind: config.KindPi, PiDir: pi1}
+
+	rows, err := Load(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int64{}
+	for _, r := range rows {
+		got[r.Provider] += r.Tokens.Total()
+	}
+	if got["cx-pro1"] != 150 || got["cx-pro2"] != 250 || got["pi-pro1"] != 330 {
+		t.Fatalf("attributed totals = %v, want cx-pro1=150 cx-pro2=250 pi-pro1=330", got)
+	}
+}

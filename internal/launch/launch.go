@@ -96,15 +96,23 @@ func Build(cfg *config.Config, name, variant string, args []string, o Options) (
 		delete(env, k)
 	}
 	set := l.Env.Set
-	argv := append([]string{bin}, l.Args...)
+	piSub := p.Kind == config.KindPi && isPiSubcommand(args)
+	argv := []string{bin}
+	if !piSub {
+		argv = append(argv, l.Args...)
+	}
 	if v != nil {
 		set = append(append([]provider.KV(nil), set...), v.Env...)
-		argv = append(argv, v.Args...)
+		if !piSub {
+			argv = append(argv, v.Args...)
+		}
 		env[envVariant] = v.Name
 	} else {
 		delete(env, envVariant)
 	}
-	argv = append(argv, cfg.Settings.EngineArgs(p.Kind)...)
+	if !piSub {
+		argv = append(argv, cfg.Settings.EngineArgs(p.Kind)...)
+	}
 	if p.Kind == config.KindCodex {
 		argv = append(argv, codexDaemonArgs(args)...)
 	}
@@ -216,6 +224,17 @@ func envList(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// piSubcommands are pi's own subcommands, which must appear right after `pi`
+// rather than behind `--provider` / `--model` / `--thinking`.
+var piSubcommands = map[string]bool{
+	"install": true, "remove": true, "uninstall": true, "update": true,
+	"list": true, "config": true, "auth": true, "mcp": true,
+}
+
+func isPiSubcommand(args []string) bool {
+	return len(args) > 0 && piSubcommands[args[0]]
 }
 
 // claudeSubcommands are claude's own commands. They start no session, so a

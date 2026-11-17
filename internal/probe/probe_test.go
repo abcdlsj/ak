@@ -164,6 +164,18 @@ func TestCheckSkips(t *testing.T) {
 	if r := Check(context.Background(), config.Provider{Kind: config.KindAntigravity, GeminiDir: "/tmp/a", Model: "m"}, ""); r.Status != StatusSkip {
 		t.Fatalf("antigravity: %+v", r)
 	}
+	for _, p := range []config.Provider{
+		{Kind: config.KindClaude, ConfigDir: "/tmp/c"},
+		{Kind: config.KindCodex, CodexHome: "/tmp/x"},
+		{Kind: config.KindPi, PiDir: "/tmp/p"},
+	} {
+		if r := Check(context.Background(), p, ""); r.Status != StatusSkip {
+			t.Fatalf("%s native: %+v", p.Kind, r)
+		}
+		if _, err := Models(context.Background(), p, ""); err == nil || !strings.Contains(err.Error(), p.Kind.CommandName()) {
+			t.Fatalf("%s native models err = %v", p.Kind, err)
+		}
+	}
 }
 
 func TestAggregate(t *testing.T) {

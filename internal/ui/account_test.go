@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -75,5 +78,53 @@ func TestAuthSummary(t *testing.T) {
 		if got := ansi.Strip(authSummary(cfg, p)); got != want {
 			t.Errorf("%+v: %q, want %q", p, got, want)
 		}
+	}
+}
+
+func TestNativeAndAgySummaryAndDraft(t *testing.T) {
+	agyDir := t.TempDir()
+	raw := []byte(`{"token":{"access_token":"ya29.a","refresh_token":"1//r"},"id_token_email":"pro@gmail.com"}`)
+	if err := provider.WriteAntigravityToken(agyDir, raw); err != nil {
+		t.Fatal(err)
+	}
+	cxDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cxDir, "auth.json"), []byte(`{"tokens":{"access_token":"a","refresh_token":"r"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	emptyDir := t.TempDir()
+
+	cfg := config.Default()
+	cfg.Providers["agy-pro"] = config.Provider{Kind: config.KindAntigravity, GeminiDir: agyDir}
+	cfg.Providers["agy-new"] = config.Provider{Kind: config.KindAntigravity, GeminiDir: emptyDir}
+	cfg.Providers["cx-pro"] = config.Provider{Kind: config.KindCodex, CodexHome: cxDir}
+	cfg.Providers["cx-new"] = config.Provider{Kind: config.KindCodex, CodexHome: emptyDir}
+	cfg.Providers["cl-pro"] = config.Provider{Kind: config.KindClaude, ConfigDir: emptyDir}
+
+	if got := ansi.Strip(authSummary(cfg, cfg.Providers["agy-pro"])); got != "agy · pro@gmail.com" {
+		t.Errorf("agy-pro authSummary = %q", got)
+	}
+	if got := runsOn(cfg, "agy-pro"); got != "agy · pro@gmail.com" {
+		t.Errorf("agy-pro runsOn = %q", got)
+	}
+	if got := ansi.Strip(authSummary(cfg, cfg.Providers["agy-new"])); got != "not signed in" {
+		t.Errorf("agy-new authSummary = %q", got)
+	}
+	if got := ansi.Strip(authSummary(cfg, cfg.Providers["cx-pro"])); got != "codex's own sign-in" {
+		t.Errorf("cx-pro authSummary = %q", got)
+	}
+	if got := ansi.Strip(authSummary(cfg, cfg.Providers["cx-new"])); got != "sign in on first launch" {
+		t.Errorf("cx-new authSummary = %q", got)
+	}
+	if got := runsOn(cfg, "cl-pro"); got != "claude · native" {
+		t.Errorf("cl-pro runsOn = %q", got)
+	}
+
+	d := NewDraft("work")
+	d.Kind = string(config.KindAntigravity)
+	d.choice = choiceNative
+	d.ApplyPick(cfg)
+	final := d.Finalize("work")
+	if final.HomeDir() == "" || final.Kind != config.KindAntigravity {
+		t.Fatalf("Finalize agy = %+v", final)
 	}
 }

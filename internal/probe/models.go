@@ -61,6 +61,9 @@ func Models(ctx context.Context, p config.Provider, key string) ([]string, error
 	if usesPiOwn(p) {
 		return nil, errors.New("it uses pi's own provider; ask pi for its models")
 	}
+	if p.UsesEngineLogin() {
+		return nil, fmt.Errorf("it uses %s's own sign-in; ask %s for its models", p.Kind, p.Kind.CommandName())
+	}
 	if p.IsPool() {
 		return nil, errors.New("a pool has no models of its own; name a member")
 	}

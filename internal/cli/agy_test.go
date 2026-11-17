@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -218,5 +219,58 @@ func TestAgyDirFlagInSharedArgs(t *testing.T) {
 		if got := antigravityDirFlag(c.args); got != c.want {
 			t.Errorf("antigravityDirFlag(%v) = %q, want %q", c.args, got, c.want)
 		}
+	}
+}
+
+func TestNativeProviderListAndAddFlags(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cxDir := filepath.Join(home, ".local/share/ak/codex/plus")
+	if err := os.MkdirAll(cxDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cxDir, "auth.json"), []byte(`{"tokens":{"access_token":"tok"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clDir := filepath.Join(home, ".local/share/ak/claude/max")
+	piDir := filepath.Join(home, ".local/share/ak/pi/sub")
+
+	cfg := config.Default()
+	cfg.Providers["plus"] = config.Provider{Kind: config.KindCodex, CodexHome: "~/.local/share/ak/codex/plus"}
+	cfg.Providers["max"] = config.Provider{Kind: config.KindClaude, ConfigDir: "~/.local/share/ak/claude/max"}
+	cfg.Providers["sub"] = config.Provider{Kind: config.KindPi, PiDir: "~/.local/share/ak/pi/sub"}
+
+	rows := listRows(cfg, core.RemoteModels{})
+	byName := map[string]listRow{}
+	for _, r := range rows {
+		byName[r.Name] = r
+	}
+
+	if r := byName["plus"]; r.NativeState != "ok" || runsOn(r) != "codex "+shortPath(cxDir) {
+		t.Errorf("codex row = %+v, runsOn = %q", r, runsOn(r))
+	}
+	if r := byName["max"]; r.NativeState != "unknown" || runsOn(r) != "claude "+shortPath(clDir) {
+		t.Errorf("claude row = %+v, runsOn = %q", r, runsOn(r))
+	}
+	if r := byName["sub"]; r.NativeState != "missing" || !strings.Contains(runsOn(r), "not signed in") || shortPath(piDir) == "" {
+		t.Errorf("pi row = %+v, runsOn = %q", r, runsOn(r))
+	}
+
+	if k, ok := parseKind("agy"); !ok || k != config.KindAntigravity {
+		t.Errorf("parseKind(agy) = %q, %v", k, ok)
+	}
+	if got := config.DefaultHomeDir(config.KindCodex, "plus"); got != cxDir {
+		t.Errorf("DefaultHomeDir(codex, plus) = %q, want %q", got, cxDir)
+	}
+
+	cmd := newAddCmd()
+	if err := cmd.Flags().Set("kind", "agy"); err != nil {
+		t.Fatal(err)
+	}
+	var p config.Provider
+	applyProviderFlags(cmd, &p, false)
+	if p.Kind != config.KindAntigravity {
+		t.Errorf("applyProviderFlags(--kind agy) -> Kind = %q, want %q", p.Kind, config.KindAntigravity)
 	}
 }

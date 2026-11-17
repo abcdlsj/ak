@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/abcdlsj/ak/internal/config"
@@ -16,12 +17,20 @@ import (
 // knows, or its endpoint's host. A name already taken gets -2, -3, …; a pool,
 // or an endpoint that names nothing (an IP address), gets "".
 func SuggestName(cfg *config.Config, p config.Provider) string {
-	src := source(cfg, p)
-	if src == "" || p.Kind == "" {
+	if p.Kind == "" {
 		return ""
 	}
-	base := src + "-" + string(p.Kind)
-	if config.ValidateName(base) != nil {
+	var base string
+	if p.UsesEngineLogin() && p.PiProvider == "" {
+		base = homeSourceName(p.HomeDir())
+	} else {
+		src := source(cfg, p)
+		if src == "" {
+			return ""
+		}
+		base = src + "-" + string(p.Kind)
+	}
+	if base == "" || config.ValidateName(base) != nil {
 		return ""
 	}
 	for name, i := base, 2; ; name, i = fmt.Sprintf("%s-%d", base, i), i+1 {
@@ -29,6 +38,32 @@ func SuggestName(cfg *config.Config, p config.Provider) string {
 			return name
 		}
 	}
+}
+
+func homeSourceName(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	base := filepath.Base(config.ExpandHome(dir))
+	base = strings.ToLower(strings.TrimLeft(base, "._-"))
+	switch base {
+	case "", "claude", "codex", "pi", "agy", "antigravity", "agent", "gemini":
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range base {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	s := strings.Trim(b.String(), "._-")
+	if s == "" {
+		return ""
+	}
+	return s
 }
 
 // NameFor is name, or when it is blank the suggested one; it fails when

@@ -22,7 +22,7 @@ func newInstallCmd() *cobra.Command {
 	var shell string
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Set up the shell so claude/codex/pi follow bindings (ak init, once)",
+		Short: "Set up the shell so claude/codex/pi/agy follow bindings (ak init, once)",
 		Long: `install sets up the shell functions of ak init for your shell, detected
 from $SHELL unless --shell names one: for fish a file in
 ~/.config/fish/conf.d, for zsh and bash a marked block in ~/.zshrc or
@@ -79,7 +79,7 @@ func newUninstallCmd() *cobra.Command {
 			if !removed {
 				out.Hint(os.Stdout, "nothing to remove")
 			} else {
-				out.Hint(os.Stdout, "Open a new shell for claude/codex/pi to be the engines' own again.")
+				out.Hint(os.Stdout, "Open a new shell for claude/codex/pi/agy to be the engines' own again.")
 			}
 			return nil
 		},

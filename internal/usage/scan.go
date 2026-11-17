@@ -43,6 +43,9 @@ type bucket struct {
 	// Slots is the day's timeline: total tokens per slotLen slot, keyed by
 	// the slot's index from local midnight.
 	Slots map[uint16]int64
+	// path is the source log file on this scan; unexported so the gob cache
+	// ignores it and keeps its version.
+	path string
 }
 
 type bucketKey struct{ Date, Model, RawProvider, Session string }
@@ -141,13 +144,19 @@ func scan(files []logFile, cache *Cache) []bucket {
 	var out []bucket
 	for i, f := range files {
 		if reads[i] == nil {
-			out = append(out, cache.Files[f.path].Buckets...)
+			for _, b := range cache.Files[f.path].Buckets {
+				b.path = f.path
+				out = append(out, b)
+			}
 			continue
 		}
 		r := <-reads[i]
 		<-window
 		if st := s.apply(f, r); st != nil {
-			out = append(out, st.Buckets...)
+			for _, b := range st.Buckets {
+				b.path = f.path
+				out = append(out, b)
+			}
 		}
 	}
 	return out

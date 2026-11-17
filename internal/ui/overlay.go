@@ -2,8 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
@@ -89,9 +91,11 @@ func (o *formOverlay) save(a *app) (bool, tea.Cmd) {
 	var err error
 	if o.draft.IsNew() {
 		if o.draft.Name, err = core.NameFor(a.cfg, o.draft.Name, p); err == nil {
+			p = o.draft.Finalize(o.draft.Name)
 			err = core.Add(a.cfg, o.draft.Name, p)
 		}
 	} else {
+		p = o.draft.Finalize(o.draft.Name)
 		err = core.Edit(a.cfg, o.draft.Orig(), o.draft.Name, p)
 	}
 	if err != nil {
@@ -101,6 +105,11 @@ func (o *formOverlay) save(a *app) (bool, tea.Cmd) {
 			return false, tea.Batch(o.init(a), a.notify(err.Error(), true))
 		}
 		return false, a.notify(err.Error(), true)
+	}
+	if dir := p.HomeDir(); dir != "" {
+		if mkErr := os.MkdirAll(config.ExpandHome(dir), 0o700); mkErr != nil {
+			return false, a.notify(mkErr.Error(), true)
+		}
 	}
 	// Leave the cursor on what was just saved.
 	a.home().focus(a.cfg, o.draft.Name)

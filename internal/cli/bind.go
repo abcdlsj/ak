@@ -54,7 +54,7 @@ func resolveEngine(cfg *config.Config, store *bind.Store, k config.Kind, dir str
 		return r, nil
 	}
 	if err := config.ValidateTarget(cfg, k, r.Target); err != nil {
-		return r, fmt.Errorf("%s (%s): %w", k, r.Source, err)
+		return r, fmt.Errorf("%s (%s): %w", k.CommandName(), r.Source, err)
 	}
 	return r, nil
 }
@@ -70,20 +70,15 @@ func displayPlace(place string) string {
 	return place
 }
 
-// parseKind accepts an engine name.
+// parseKind accepts an engine name, including "agy" for antigravity.
 func parseKind(s string) (config.Kind, bool) {
-	for _, k := range config.Kinds {
-		if string(k) == s {
-			return k, true
-		}
-	}
-	return "", false
+	return config.ParseKind(s)
 }
 
 func kindList() string {
 	names := make([]string, len(config.Kinds))
 	for i, k := range config.Kinds {
-		names[i] = string(k)
+		names[i] = k.CommandName()
 	}
 	return strings.Join(names, ", ")
 }
@@ -92,7 +87,7 @@ func newBindCmd() *cobra.Command {
 	var engine string
 	cmd := &cobra.Command{
 		Use:   "bind <provider[:variant]|native>",
-		Short: "Make claude/codex/pi typed in this repository run on a provider",
+		Short: "Make claude/codex/pi/agy typed in this repository run on a provider",
 		Long: `bind makes the engine's own command, typed in this repository (every
 worktree of it) or, outside one, this directory and those below it, run on a
 provider. It needs the shell functions from ak init. The engine is the
@@ -141,7 +136,7 @@ or the one --engine names. Nothing is written into the directory.`,
 				if _, err = store.Set(wd, string(k), target); err != nil {
 					return err
 				}
-				out.Done(os.Stdout, "%s here runs %s", k, describeTarget(target))
+				out.Done(os.Stdout, "%s here runs %s", k.CommandName(), describeTarget(target))
 			}
 			return nil
 		},
@@ -163,15 +158,17 @@ func newUnbindCmd() *cobra.Command {
 		Use:       "unbind [engine]",
 		Short:     "Remove this repository's binding, for one engine or all",
 		Args:      cobra.MaximumNArgs(1),
-		ValidArgs: []string{"claude", "codex", "pi"},
+		ValidArgs: []string{"claude", "codex", "pi", "agy", "antigravity"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			engine := ""
+			engineDisplay := ""
 			if len(args) == 1 {
 				k, ok := parseKind(args[0])
 				if !ok {
 					return fmt.Errorf("unknown engine %q; one of %s", args[0], kindList())
 				}
 				engine = string(k)
+				engineDisplay = k.CommandName()
 			}
 			store, err := bind.Default()
 			if err != nil {
@@ -193,7 +190,7 @@ func newUnbindCmd() *cobra.Command {
 						continue
 					}
 					if b, ok, _ := store.Lookup(wd, string(k)); ok {
-						out.Hint(os.Stdout, "%s here follows %s, bound at %s", k, b.Target, displayPlace(b.Place))
+						out.Hint(os.Stdout, "%s here follows %s, bound at %s", k.CommandName(), b.Target, displayPlace(b.Place))
 					}
 				}
 				return nil
@@ -202,7 +199,7 @@ func newUnbindCmd() *cobra.Command {
 				out.Done(os.Stdout, "unbound every engine here")
 				return nil
 			}
-			out.Done(os.Stdout, "unbound %s here", engine)
+			out.Done(os.Stdout, "unbound %s here", engineDisplay)
 			return nil
 		},
 	}
@@ -242,11 +239,15 @@ func bindingRows(cfg *config.Config, list []bind.Binding) [][]string {
 	var rows [][]string
 	for _, k := range config.Kinds {
 		if t := cfg.Settings.EngineDefault(k); t != "" {
-			rows = append(rows, []string{string(k), t, "default"})
+			rows = append(rows, []string{k.CommandName(), t, "default"})
 		}
 	}
 	for _, b := range list {
-		rows = append(rows, []string{b.Engine, b.Target, displayPlace(b.Place)})
+		eng := b.Engine
+		if k, ok := parseKind(eng); ok {
+			eng = k.CommandName()
+		}
+		rows = append(rows, []string{eng, b.Target, displayPlace(b.Place)})
 	}
 	return rows
 }
@@ -264,8 +265,8 @@ func hasEngineDefaults(cfg *config.Config) bool {
 func newWhichCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:       "which [engine...]",
-		Short:     "Show what claude/codex/pi typed here runs on, and why",
-		ValidArgs: []string{"claude", "codex", "pi"},
+		Short:     "Show what claude/codex/pi/agy typed here runs on, and why",
+		ValidArgs: []string{"claude", "codex", "pi", "agy", "antigravity"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kinds := config.Kinds
 			if len(args) > 0 {
@@ -306,15 +307,16 @@ func whichRows(cfg *config.Config, store *bind.Store, kinds []config.Kind, dir s
 	var rows [][]string
 	broken := false
 	for _, k := range kinds {
+		name := k.CommandName()
 		r, err := resolveEngine(cfg, store, k, dir)
 		switch {
 		case err != nil:
 			broken = true
-			rows = append(rows, []string{out.Mark(out.Broken) + " " + string(k), out.Or(r.Target), out.Err(whyLine(r, err))})
+			rows = append(rows, []string{out.Mark(out.Broken) + " " + name, out.Or(r.Target), out.Err(whyLine(r, err))})
 		case r.Target == "":
-			rows = append(rows, []string{string(k), out.Dim(bind.Native), r.Source})
+			rows = append(rows, []string{name, out.Dim(bind.Native), r.Source})
 		default:
-			rows = append(rows, []string{string(k), r.Target, r.Source})
+			rows = append(rows, []string{name, r.Target, r.Source})
 		}
 	}
 	return rows, broken
@@ -360,7 +362,8 @@ func newResolveCmd() *cobra.Command {
 			}
 			r, err := resolveEngine(cfg, store, k, wd)
 			if err != nil {
-				return fmt.Errorf("%w; fix it with `ak bind`, `ak unbind` or `ak default %s`, or run it natively with AK=native %s", err, k, k)
+				c := k.CommandName()
+				return fmt.Errorf("%w; fix it with `ak bind`, `ak unbind` or `ak default %s`, or run it natively with AK=native %s", err, c, c)
 			}
 			if r.Target != "" {
 				fmt.Println(r.Target)
@@ -399,7 +402,8 @@ func newEngineCmd() *cobra.Command {
 			}
 			r, err := resolveEngine(cfg, store, k, wd)
 			if err != nil {
-				return fmt.Errorf("%w; fix it with `ak bind`, `ak unbind` or `ak default %s`, or run it natively with AK=native %s", err, k, k)
+				c := k.CommandName()
+				return fmt.Errorf("%w; fix it with `ak bind`, `ak unbind` or `ak default %s`, or run it natively with AK=native %s", err, c, c)
 			}
 			if r.Target != "" {
 				return runTarget(r.Target, args[1:])
@@ -417,7 +421,7 @@ func newInitCmd() *cobra.Command {
 	var engines []string
 	cmd := &cobra.Command{
 		Use:   "init <zsh|bash|fish>",
-		Short: "Print shell functions that route claude/codex/pi through ak",
+		Short: "Print shell functions that route claude/codex/pi/agy through ak",
 		Long: `init prints shell functions named after the engines. Each asks ak what
 the command runs on in the current directory (AK=..., a binding, the engine
 default) and launches that provider, or the engine's own command when nothing
@@ -448,25 +452,28 @@ still run the engine's own command.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringSliceVar(&engines, "engines", []string{"claude", "codex", "pi"}, "the engines to wrap")
+	cmd.Flags().StringSliceVar(&engines, "engines", []string{"claude", "codex", "pi", "agy"}, "the engines to wrap")
 	return cmd
 }
 
-// shellInit renders the functions for shell.
+// shellInit renders the functions for shell. Each function takes the engine's
+// command name (e.g. agy for antigravity) and forwards to `ak __engine <kind>`.
 func shellInit(shell string, kinds []config.Kind) (string, error) {
 	var b strings.Builder
 	switch shell {
 	case "zsh", "bash":
 		b.WriteString("# ak: route engine commands by directory; see `ak init --help`.\n")
 		for _, k := range kinds {
+			cmd := k.CommandName()
 			// The function keyword form, so an alias of the same name does
 			// not turn the definition into a syntax error.
-			fmt.Fprintf(&b, "unalias %[1]s 2>/dev/null\nfunction %[1]s { command ak __engine %[1]s \"$@\"; }\n", k)
+			fmt.Fprintf(&b, "unalias %[1]s 2>/dev/null\nfunction %[1]s { command ak __engine %[2]s \"$@\"; }\n", cmd, k)
 		}
 	case "fish":
 		b.WriteString("# ak: route engine commands by directory; see `ak init --help`.\n")
 		for _, k := range kinds {
-			fmt.Fprintf(&b, "function %[1]s --wraps %[1]s\n    command ak __engine %[1]s $argv\nend\n", k)
+			cmd := k.CommandName()
+			fmt.Fprintf(&b, "function %[1]s --wraps %[1]s\n    command ak __engine %[2]s $argv\nend\n", cmd, k)
 		}
 	default:
 		return "", fmt.Errorf("unsupported shell %q; one of zsh, bash, fish", shell)

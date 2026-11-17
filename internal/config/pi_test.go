@@ -43,6 +43,7 @@ func TestValidatePi(t *testing.T) {
 		{Kind: KindPi, BaseURL: "https://relay.example", Model: "m1"},
 		{Kind: KindPi, BaseURL: "https://relay.example", Model: "m1", PiAPI: "openai-completions"},
 		{Kind: KindPi, PiProvider: "commandcode", Model: "deepseek/x"},
+		{Kind: KindPi, PiDir: "~/.pi-pro"},
 		{Kind: KindPi, BaseURL: "https://relay.example", Variants: map[string]Variant{"fast": {Model: "m2"}}},
 	}
 	for i, p := range ok {
@@ -52,9 +53,10 @@ func TestValidatePi(t *testing.T) {
 	}
 
 	bad := []Provider{
-		{Kind: KindPi},                       // no endpoint, no pi_provider
-		{Kind: KindPi, BaseURL: "https://x"}, // no model
-		{Kind: KindPi, BaseURL: "https://x", Model: "m", PiAPI: "grpc"},                                       // bad api
+		{Kind: KindPi},                                                  // no endpoint, no pi_provider, no pi_dir
+		{Kind: KindPi, BaseURL: "https://x"},                            // no model
+		{Kind: KindPi, BaseURL: "https://x", PiDir: "~/.pi-iso"},        // endpoint with pi_dir still needs a model
+		{Kind: KindPi, BaseURL: "https://x", Model: "m", PiAPI: "grpc"}, // bad api
 		{Kind: KindPi, BaseURL: "https://x", Model: "m", Variants: map[string]Variant{"high": {Model: "m2"}}}, // collides with a thinking level
 	}
 	for i, p := range bad {

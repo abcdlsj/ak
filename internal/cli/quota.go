@@ -224,7 +224,7 @@ func printQuota(holders []core.Holder, results []quota.Quota) {
 	cells := make([][]string, 0, len(results))
 	var noSource []string
 	for i, q := range results {
-		if q.NoSource {
+		if q.NoSource && !holders[i].Provider.UsesEngineLogin() {
 			noSource = append(noSource, q.Provider)
 		}
 		cells = append(cells, append([]string{holderCell(holders[i])}, quotaRow(q)...))

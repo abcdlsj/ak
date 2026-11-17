@@ -30,7 +30,13 @@ type providerFlag struct {
 }
 
 var providerFlags = []providerFlag{
-	{"kind", "claude", "Engine: claude, codex, pi or antigravity", func(p *config.Provider, v string) { p.Kind = config.Kind(v) }},
+	{"kind", "claude", "Engine: claude, codex, pi or antigravity (agy)", func(p *config.Provider, v string) {
+		if k, ok := config.ParseKind(v); ok {
+			p.Kind = k
+		} else {
+			p.Kind = config.Kind(v)
+		}
+	}},
 	{"account", "", "Account to run on (`ak accounts`); its vendor gives the endpoint and its key is used", func(p *config.Provider, v string) { p.Account = v }},
 	{"base-url", "", "API endpoint", func(p *config.Provider, v string) { p.BaseURL = v }},
 	{"key", "", "API key, a reference (env:NAME, cmd:..., keychain:...), or - to read it from stdin, kept out of shell history", func(p *config.Provider, v string) { p.SetKey(v) }},
@@ -45,6 +51,7 @@ var providerFlags = []providerFlag{
 	{"pi-provider", "", "Existing pi provider id to use (skips models.json)", func(p *config.Provider, v string) { p.PiProvider = v }},
 	{"pi-api", "", "pi wire API: anthropic-messages, openai-completions, openai-responses", func(p *config.Provider, v string) { p.PiAPI = v }},
 	{"pi-auth-header", "", "Send the pi key as Authorization: Bearer (true)", func(p *config.Provider, v string) { p.PiAuthHeader = isTrueFlag(v) }},
+	{"pi-dir", "", "Isolate pi's whole agent directory here (PI_CODING_AGENT_DIR)", func(p *config.Provider, v string) { p.PiDir = v }},
 	{"config-dir", "", "Isolate claude's whole config here (CLAUDE_CONFIG_DIR)", func(p *config.Provider, v string) { p.ConfigDir = v }},
 	{"codex-home", "", "Isolate codex's whole home here (CODEX_HOME)", func(p *config.Provider, v string) { p.CodexHome = v }},
 	{"gemini-dir", "", "Isolate agy's whole environment here (--gemini_dir); one directory is one Antigravity account", func(p *config.Provider, v string) { p.GeminiDir = v }},
@@ -296,27 +303,46 @@ its vendor (kimi, commandcode, dpsk), the provider pi knows, or its host.
 			if _, err := applyQuotaVarFlag(cmd, &p); err != nil {
 				return err
 			}
-			// An antigravity provider has no endpoint to ask for: its directory
-			// and its own sign-in are the whole configuration.
-			if p.BaseURL == "" && !p.IsPool() && p.PiProvider == "" && p.Account == "" && p.Kind != config.KindAntigravity {
+			native, _ := cmd.Flags().GetBool("native")
+			// Open the interactive form when nothing tells ak what upstream or
+			// engine sign-in the provider uses.
+			if !native && !p.UsesEngineLogin() && p.BaseURL == "" && !p.IsPool() && p.Account == "" {
 				d := ui.NewDraft(name)
+				if cmd.Flags().Changed("kind") {
+					d.Kind = string(p.Kind)
+				}
 				if err := runForm(cmd, d, cfg); err != nil {
 					return err
 				}
 				name, p = d.Name, d.Provider()
+				if d.Native {
+					native = true
+				}
 			}
 			if name, err = core.NameFor(cfg, name, p); err != nil {
 				return err
 			}
+			if (native || p.Kind == config.KindAntigravity) && p.HomeDir() == "" {
+				p.SetHomeDir(config.DefaultHomeDir(p.Kind, name))
+			}
 			if err := core.Add(cfg, name, p); err != nil {
 				return err
 			}
+			if dir := p.HomeDir(); dir != "" {
+				if err := os.MkdirAll(config.ExpandHome(dir), 0o700); err != nil {
+					return err
+				}
+			}
 			out.Done(os.Stdout, "added %s (%s)", name, commandOf(cfg, name))
+			if p.UsesEngineLogin() && p.PiProvider == "" {
+				printNativeLoginHint(name, p)
+			}
 			return runSync(cfg, false)
 		},
 	}
 	addProviderFlags(cmd, true)
 	addPoolFlags(cmd)
+	cmd.Flags().Bool("native", false, "Use the engine's own OAuth sign-in in an isolated directory (~/.local/share/ak/<engine>/<name>)")
 	cmd.Flags().String("settings", "", `claude settings layer as a JSON object, e.g. '{"effortLevel":"low"}'; '' clears it`)
 	cmd.Flags().StringArray("quota-var", nil, "value only the balance query reads, name=value (repeatable; name= removes it)")
 	cmd.Flags().String("vendor", "", "Run on an account of this vendor (`ak vendor list`): --account, else one named after the vendor")
@@ -378,7 +404,12 @@ func newEditCmd() *cobra.Command {
 				if err := runForm(cmd, d, cfg); err != nil {
 					return err
 				}
-				newName, p = d.Name, d.Provider()
+				newName = d.Name
+				if strings.TrimSpace(newName) != "" {
+					p = d.Finalize(newName)
+				} else {
+					p = d.Provider()
+				}
 			}
 			if err := core.Edit(cfg, name, newName, p); err != nil {
 				return err
@@ -484,7 +515,7 @@ func newDefaultCmd() *cobra.Command {
 		Short:             "Show or set the default provider, or what an engine's own command runs on",
 		Long: `default with a provider sets the one the launcher opens on.
 
-default <engine> <provider[:variant]> sets what claude, codex or pi, typed
+default <engine> <provider[:variant]> sets what claude, codex, pi or agy, typed
 where no binding applies, runs on through the shell functions of ak init;
 native puts the engine's own command back.`,
 		Args: cobra.MaximumNArgs(2),
@@ -601,6 +632,19 @@ func printEnvPlan(plan envPlanView, cmd string) {
 
 // envPlanView is the masked environment display.
 type envPlanView []string
+
+func printNativeLoginHint(name string, p config.Provider) {
+	switch p.Kind {
+	case config.KindAntigravity:
+		out.Hint(os.Stdout, "Sign in with `ak agy login %s` (or `ak login %s`), or copy this Mac's account in with `ak agy import %s --keychain`", name, name, name)
+	case config.KindCodex:
+		out.Hint(os.Stdout, "Sign in with `ak login %s` (or `ak %s login`), kept in %s", name, name, shortPath(config.ExpandHome(p.CodexHome)))
+	case config.KindClaude:
+		out.Hint(os.Stdout, "Sign in by launching `ak %s` (or `ak login %s`), kept in %s", name, name, shortPath(config.ExpandHome(p.ConfigDir)))
+	case config.KindPi:
+		out.Hint(os.Stdout, "Sign in with `ak %s auth login <provider>` (or `/login` inside `ak %s`), kept in %s", name, name, shortPath(config.ExpandHome(p.PiDir)))
+	}
+}
 
 func newUICmd() *cobra.Command {
 	return &cobra.Command{

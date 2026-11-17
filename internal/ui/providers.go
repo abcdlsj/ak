@@ -3,6 +3,8 @@ package ui
 import (
 	"cmp"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -322,6 +324,28 @@ func runsOn(cfg *config.Config, name string) string {
 		return p.Account
 	case p.IsPool():
 		return "pool · " + p.StrategyOrDefault()
+	case p.Kind == config.KindAntigravity:
+		auth := provider.ReadNativeAuth(p)
+		switch {
+		case auth.Account != "":
+			return "agy · " + auth.Account
+		case auth.State == "missing":
+			return "agy · not signed in"
+		default:
+			return "agy"
+		}
+	case p.Kind == config.KindPi && p.PiProvider != "" && p.PiDir == "":
+		return "pi · " + p.PiProvider
+	case p.UsesEngineLogin():
+		auth := provider.ReadNativeAuth(p)
+		switch {
+		case auth.Account != "":
+			return string(p.Kind) + " · " + auth.Account
+		case auth.State == "missing":
+			return string(p.Kind) + " · not signed in"
+		default:
+			return string(p.Kind) + " · native"
+		}
 	case p.PiProvider != "":
 		return "pi · " + p.PiProvider
 	}
@@ -344,7 +368,7 @@ func statusMark(a *app, name string) (lipgloss.Style, string) {
 		return dimStyle, "·"
 	case st.OK():
 		return okStyle, "●"
-	case st.NoEngine || st.NoKey:
+	case st.NoEngine || st.NoKey || st.NeedsLogin:
 		return errStyle, "●"
 	default:
 		return warnStyle, "●"
@@ -418,8 +442,11 @@ func detailPanel(a *app, name string, width int) string {
 		if p.Account != "" {
 			field("account", accountSummary(cfg, p.Account))
 		}
-		if p.PiProvider == "" {
+		if !p.UsesEngineLogin() && p.PiProvider == "" {
 			field("endpoint", p.BaseURL)
+		}
+		if home := p.HomeDir(); home != "" {
+			field("directory", shortHome(home))
 		}
 	}
 	field("sign-in", authSummary(cfg, p))
@@ -435,10 +462,12 @@ func detailPanel(a *app, name string, width int) string {
 			field("tiers", tiersSummary(p))
 		}
 	case config.KindCodex:
-		field("wire api", p.WireAPI)
+		if !p.UsesEngineLogin() {
+			field("wire api", p.WireAPI)
+		}
 		field("effort", p.Reasoning)
 	case config.KindPi:
-		if p.PiProvider == "" && !p.IsPool() {
+		if p.PiProvider == "" && !p.IsPool() && !p.UsesEngineLogin() {
 			field("pi api", cmp.Or(p.PiAPI, "anthropic-messages"))
 		}
 	}
@@ -469,6 +498,34 @@ func authSummary(cfg *config.Config, p config.Provider) string {
 	switch {
 	case p.IsPool():
 		return "each member's own"
+	case p.Kind == config.KindAntigravity:
+		auth := provider.ReadNativeAuth(p)
+		switch {
+		case auth.State == "missing":
+			return errStyle.Render("not signed in")
+		case auth.State == "expired":
+			return warnStyle.Render("expired")
+		case auth.State == "expiring":
+			return warnStyle.Render("expiring")
+		case auth.Account != "":
+			return "agy · " + auth.Account
+		default:
+			return "agy sign-in"
+		}
+	case p.Kind == config.KindPi && p.PiProvider != "" && p.PiDir == "":
+		return "pi's own sign-in"
+	case p.UsesEngineLogin():
+		auth := provider.ReadNativeAuth(p)
+		if auth.Account != "" {
+			return string(p.Kind) + " · " + auth.Account
+		}
+		if auth.SignedIn {
+			return string(p.Kind) + "'s own sign-in"
+		}
+		if auth.State == "missing" {
+			return dimStyle.Render("sign in on first launch")
+		}
+		return string(p.Kind) + "'s own sign-in"
 	case p.PiProvider != "":
 		return "pi's own sign-in"
 	case p.Account != "":
@@ -478,6 +535,14 @@ func authSummary(cfg *config.Config, p config.Provider) string {
 		return "the account's key"
 	}
 	return keySummary(p)
+}
+
+func shortHome(path string) string {
+	expanded := config.ExpandHome(path)
+	if home, err := os.UserHomeDir(); err == nil && (expanded == home || strings.HasPrefix(expanded, home+string(filepath.Separator))) {
+		return "~" + strings.TrimPrefix(expanded, home)
+	}
+	return path
 }
 
 // tiersSummary lists the claude model tiers.

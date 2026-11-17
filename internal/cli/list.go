@@ -79,6 +79,11 @@ type listRow struct {
 	AgyAccount string `json:"agy_account,omitempty"`
 	// AgyState is ok, expiring, expired or missing, for the same providers.
 	AgyState string `json:"agy_state,omitempty"`
+	// HomeDir, NativeAccount and NativeState are set for directory-isolated
+	// native-login providers of claude, codex and pi.
+	HomeDir       string `json:"home_dir,omitempty"`
+	NativeAccount string `json:"native_account,omitempty"`
+	NativeState   string `json:"native_state,omitempty"`
 }
 
 func listRows(cfg *config.Config, routes core.RemoteModels) []listRow {
@@ -86,23 +91,32 @@ func listRows(cfg *config.Config, routes core.RemoteModels) []listRow {
 	for _, name := range cfg.Names() {
 		p := cfg.Providers[name]
 		account, state := agyCredential(p)
+		var homeDir, nativeAccount, nativeState string
+		if p.UsesEngineLogin() && p.Kind != config.KindAntigravity && p.HomeDir() != "" {
+			homeDir = p.HomeDir()
+			auth := provider.ReadNativeAuth(p)
+			nativeAccount, nativeState = auth.Account, auth.State
+		}
 		rows = append(rows, listRow{
-			Name:         name,
-			Command:      cfg.Settings.Prefix + name,
-			Kind:         string(p.Kind),
-			Display:      p.Display,
-			Account:      p.Account,
-			BaseURL:      p.BaseURL,
-			Model:        p.Model,
-			PiProvider:   p.PiProvider,
-			Members:      p.Members,
-			Strategy:     p.Strategy,
-			MemberModels: p.MemberModels,
-			Serves:       core.ModelNames(cfg, name, routes.Models),
-			Default:      cfg.Settings.Default == name,
-			GeminiDir:    p.GeminiDir,
-			AgyAccount:   account,
-			AgyState:     state,
+			Name:          name,
+			Command:       cfg.Settings.Prefix + name,
+			Kind:          string(p.Kind),
+			Display:       p.Display,
+			Account:       p.Account,
+			BaseURL:       p.BaseURL,
+			Model:         p.Model,
+			PiProvider:    p.PiProvider,
+			Members:       p.Members,
+			Strategy:      p.Strategy,
+			MemberModels:  p.MemberModels,
+			Serves:        core.ModelNames(cfg, name, routes.Models),
+			Default:       cfg.Settings.Default == name,
+			GeminiDir:     p.GeminiDir,
+			AgyAccount:    account,
+			AgyState:      state,
+			HomeDir:       homeDir,
+			NativeAccount: nativeAccount,
+			NativeState:   nativeState,
 		})
 	}
 	return rows
@@ -173,7 +187,22 @@ func runsOn(r listRow) string {
 	if r.GeminiDir != "" {
 		return agyRunsOn(r)
 	}
+	if r.NativeState != "" {
+		return nativeRunsOn(r)
+	}
 	return endpoint(r)
+}
+
+func nativeRunsOn(r listRow) string {
+	switch {
+	case r.NativeAccount != "":
+		return r.Kind + " " + r.NativeAccount
+	case r.NativeState == "missing":
+		return r.Kind + " " + out.Warn("not signed in")
+	case r.HomeDir != "":
+		return r.Kind + " " + shortPath(config.ExpandHome(r.HomeDir))
+	}
+	return r.Kind
 }
 
 // agyRunsOn says which Google account a provider signs in as; without one the

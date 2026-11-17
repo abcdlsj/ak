@@ -261,3 +261,47 @@ func TestEngineArgs(t *testing.T) {
 		t.Errorf("native launch: %s %v", argsOf(p), p.Env)
 	}
 }
+
+func TestPiSubcommandAndNativeLaunch(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Settings.PiArgs = []string{"--offline"}
+	cfg.Providers["mypi"] = config.Provider{Kind: config.KindPi, PiDir: "/tmp/pi-pro", Model: "sonnet"}
+
+	p := build(t, cfg, "mypi", Options{}, "-p", "hi")
+	if got := argsOf(p); got != "--model sonnet --offline -p hi" {
+		t.Errorf("pi native args = %q", got)
+	}
+	if envOf(p)[config.PiHomeEnv] != "/tmp/pi-pro" {
+		t.Errorf("PI_CODING_AGENT_DIR = %q", envOf(p)[config.PiHomeEnv])
+	}
+
+	sub := build(t, cfg, "mypi", Options{}, "auth", "login", "anthropic")
+	if got := argsOf(sub); got != "auth login anthropic" {
+		t.Errorf("pi subcommand args = %q, want bare subcommand", got)
+	}
+	if envOf(sub)[config.PiHomeEnv] != "/tmp/pi-pro" {
+		t.Errorf("pi subcommand lost PI_CODING_AGENT_DIR: %v", envOf(sub))
+	}
+}
+
+func TestAgyLaunch(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "agy")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := fixture(t)
+	cfg.Settings.AntigravityBin = bin
+	cfg.Providers["work"] = config.Provider{Kind: config.KindAntigravity, GeminiDir: "/tmp/agy-work", Model: "gemini-3.8-flash"}
+
+	p := build(t, cfg, "work:high", Options{}, "-p", "hi")
+	if p.Bin != bin {
+		t.Fatalf("bin = %q, want %q", p.Bin, bin)
+	}
+	if got := argsOf(p); got != "--gemini_dir /tmp/agy-work --model gemini-3.8-flash --effort high -p hi" {
+		t.Errorf("agy args = %q", got)
+	}
+	if envOf(p)["SSH_CONNECTION"] == "" || envOf(p)["WARREN_AGENT_HOME"] != "/tmp/agy-work" {
+		t.Errorf("agy env = %v", envOf(p))
+	}
+}

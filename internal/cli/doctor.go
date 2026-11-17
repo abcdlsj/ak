@@ -234,6 +234,7 @@ func runDoctor(cfg *config.Config) error {
 	if hasKind(cfg, config.KindAntigravity) {
 		doctorAntigravity(d, cfg)
 	}
+	doctorNativeHomes(d, cfg)
 
 	if len(cfg.Providers) == 0 {
 		out.Empty(os.Stdout, "No providers configured yet.", "Add one with `ak add`, or `ak import --from claude-settings`.")
@@ -361,19 +362,17 @@ func count(n int, what string) string {
 
 // engineBin checks that engine k's executable resolves, naming what was found.
 func (d *doctor) engineBin(cfg *config.Config, k config.Kind) {
-	configured, name := cfg.Settings.ClaudeBin, "claude"
-	switch k {
-	case config.KindCodex:
-		configured, name = cfg.Settings.CodexBin, "codex"
-	case config.KindPi:
-		configured, name = cfg.Settings.PiBin, "pi"
+	eng := provider.EngineFor(k)
+	if eng == nil {
+		return
 	}
+	configured, name := eng.ConfiguredBin(cfg.Settings), eng.BinName()
 	if p := lookPathOr(configured, name); p != "" {
 		d.fine("%s: %s", name, p)
 		return
 	}
 	d.bad("%s executable not found", name)
-	d.hint("Install %s, or set %s_bin in providers.toml", name, name)
+	d.hint("Install %s, or set %s_bin in providers.toml", name, k)
 }
 
 // keyRefProblems resolves every api_key_ref and names the ones that fail, so
@@ -619,11 +618,56 @@ func doctorAntigravity(d *doctor, cfg *config.Config) {
 	cmd := exec.Command(bin, "--gemini_dir="+dir, "help")
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	if err := cmd.Run(); err != nil {
-		d.bad("%s does not accept --gemini_dir any more", bin)
-		d.note("Every antigravity provider would launch against ~/.gemini and the")
-		d.note("account this Mac is signed in to, instead of its own.")
-		d.hint("Check `agy --help` and the ak release notes before using agy again")
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			d.bad("%s does not accept --gemini_dir any more", bin)
+			d.note("Every antigravity provider would launch against ~/.gemini and the")
+			d.note("account this Mac is signed in to, instead of its own.")
+			d.hint("Check `agy --help` and the ak release notes before using agy again")
+		}
 	}
+}
+
+// doctorNativeHomes reports native-login providers of the same engine that
+// point at the same isolated directory, which would merge their accounts.
+func doctorNativeHomes(d *doctor, cfg *config.Config) {
+	type kindDir struct {
+		kind config.Kind
+		dir  string
+	}
+	byDir := map[kindDir][]string{}
+	for _, name := range cfg.Names() {
+		p := cfg.Providers[name]
+		if !p.UsesEngineLogin() || p.Kind == config.KindAntigravity {
+			continue
+		}
+		dir := p.HomeDir()
+		if dir == "" {
+			continue
+		}
+		kd := kindDir{p.Kind, filepath.Clean(config.ExpandHome(dir))}
+		byDir[kd] = append(byDir[kd], name)
+	}
+	for kd, sharing := range byDir {
+		if len(sharing) > 1 {
+			d.bad("%s share %s, so they share one %s account", strings.Join(sharing, ", "), kd.dir, kd.kind.CommandName())
+			d.hint("Give each its own directory: `ak edit <provider> --%s <dir>`", homeFlagForKind(kd.kind))
+		}
+	}
+}
+
+func homeFlagForKind(k config.Kind) string {
+	switch k {
+	case config.KindClaude:
+		return "config-dir"
+	case config.KindCodex:
+		return "codex-home"
+	case config.KindPi:
+		return "pi-dir"
+	case config.KindAntigravity:
+		return "gemini-dir"
+	}
+	return "dir"
 }
 
 // antigravityDirFlag names the directory flag in a settings argument list, or

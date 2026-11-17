@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,11 +41,7 @@ at the same time.
 // defaultGeminiDir is where a provider's environment lives when the command
 // line names no directory: one per provider, under ak's own data directory.
 func defaultGeminiDir(name string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join("~", ".local", "share", "ak", "agy", name)
-	}
-	return filepath.Join(home, ".local", "share", "ak", "agy", name)
+	return config.DefaultHomeDir(config.KindAntigravity, name)
 }
 
 func newAgyAddCmd() *cobra.Command {

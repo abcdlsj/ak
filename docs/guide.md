@@ -1,8 +1,8 @@
 # Guide
 
-## Typing claude and codex directly
+## Typing claude, codex, pi and agy directly
 
-`ak install` sets up shell functions named `claude`, `codex` and `pi`. Each
+`ak install` sets up shell functions named `claude`, `codex`, `pi` and `agy`. Each
 asks ak what the command runs on in the current directory and launches that
 provider, or the engine's own command when nothing applies. The shell comes
 from `$SHELL` (or `--shell zsh|bash|fish`): fish gets
@@ -263,6 +263,7 @@ of separation are available when that is too much sharing:
 | `settings` | claude | a settings layer passed as `--settings`; its values replace the shared `settings.json`'s, the rest stays shared |
 | `config_dir` | claude | everything: exports `CLAUDE_CONFIG_DIR` |
 | `codex_home` | codex | everything: exports `CODEX_HOME` |
+| `pi_dir` | pi | everything: exports `PI_CODING_AGENT_DIR` |
 | `gemini_dir` | antigravity | everything, the account included: passed as `--gemini_dir` |
 
 ```toml
@@ -281,6 +282,18 @@ its `env`: those come from the provider. A separate directory starts empty,
 so sign in, MCP servers and plugins are set up there again; `ak usage`
 reads its sessions, and `ak hook install` and `ak doctor` cover its
 `settings.json` too.
+
+To run multiple native OAuth subscriptions side by side without an API key
+(`claude` Pro/Max, `codex` ChatGPT Plus/Pro, or `pi`), omit `base_url` and
+isolate the directory:
+
+```sh
+ak add pro1 --kind codex --native      # isolated under ~/.local/share/ak/codex/pro1
+ak login pro1                          # delegates OAuth to `codex login`
+```
+
+Each engine signs in and refreshes its own token inside its directory; native
+providers do not join pools or `ak serve`.
 
 ## Antigravity
 

@@ -121,6 +121,11 @@ func execProviderWith(cfg *config.Config, name, variant string, args []string, s
 	if err != nil {
 		return err
 	}
+	if home := p.HomeDir(); home != "" {
+		if err := os.MkdirAll(config.ExpandHome(home), 0o700); err != nil {
+			return fmt.Errorf("prepare %s directory %s: %w", name, home, err)
+		}
+	}
 	if plan.Pool {
 		if err := ensureGateway(gatewayAddr(cfg)); err != nil {
 			return err

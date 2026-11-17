@@ -310,3 +310,52 @@ func TestPiLaunchTellsPiWhereASandboxWrites(t *testing.T) {
 		t.Errorf("PI_CODING_AGENT_DIR = %q, want the config's own", got)
 	}
 }
+
+func TestPiLaunchNativeDir(t *testing.T) {
+	p := config.Provider{Kind: config.KindPi, PiDir: "/tmp/pi-pro"}
+	l, err := piEngine{}.Launch("pipro", p, Literal(""), Context{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Args) != 0 {
+		t.Errorf("args = %q, want empty for native pi_dir without model/pi_provider", l.Args)
+	}
+	env := envMap(l.Env)
+	if env[config.PiHomeEnv] != "/tmp/pi-pro" || env[EnvAgentHome] != "/tmp/pi-pro" {
+		t.Fatalf("env = %v", env)
+	}
+	if _, ok := env[EnvKey("pipro")]; ok {
+		t.Error("native pi must not export AK_KEY_*")
+	}
+}
+
+func TestPiSharedFilesIsolatedDir(t *testing.T) {
+	defDir := t.TempDir()
+	isoDir := t.TempDir()
+	nativeDir := t.TempDir()
+
+	cfg := config.Default()
+	cfg.Providers["shared"] = config.Provider{Kind: config.KindPi, BaseURL: "https://s.example", Model: "m1"}
+	cfg.Providers["iso"] = config.Provider{Kind: config.KindPi, BaseURL: "https://i.example", Model: "m2", PiDir: isoDir}
+	cfg.Providers["native"] = config.Provider{Kind: config.KindPi, PiDir: nativeDir}
+
+	files, err := (piEngine{}).SharedFiles(Context{PiHome: defDir}, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]string{}
+	for _, f := range files {
+		byPath[f.Path] = string(f.Content)
+	}
+	if !strings.Contains(byPath[filepath.Join(defDir, "models.json")], "ak-shared") ||
+		strings.Contains(byPath[filepath.Join(defDir, "models.json")], "ak-iso") {
+		t.Errorf("default models.json wrong:\n%s", byPath[filepath.Join(defDir, "models.json")])
+	}
+	if !strings.Contains(byPath[filepath.Join(isoDir, "models.json")], "ak-iso") ||
+		strings.Contains(byPath[filepath.Join(isoDir, "models.json")], "ak-shared") {
+		t.Errorf("isolated models.json wrong:\n%s", byPath[filepath.Join(isoDir, "models.json")])
+	}
+	if _, ok := byPath[filepath.Join(nativeDir, "models.json")]; ok {
+		t.Error("native-only pi_dir must not create models.json")
+	}
+}

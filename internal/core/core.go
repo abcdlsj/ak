@@ -393,14 +393,8 @@ func noKey(cfg *config.Config, p config.Provider) bool {
 		}
 		return false
 	}
-	// A provider pi already knows signs in through pi itself.
-	if p.PiProvider != "" {
-		return false
-	}
-	// An antigravity provider holds no key: agy signs in itself and keeps the
-	// credential in the provider's gemini_dir, next to the conversations it
-	// belongs to.
-	if p.Kind == config.KindAntigravity {
+	// Native-login and existing-pi providers sign in through the engine itself.
+	if p.UsesEngineLogin() || p.PiProvider != "" {
 		return false
 	}
 	return p.APIKey == "" && p.APIKeyRef == ""

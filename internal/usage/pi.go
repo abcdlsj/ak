@@ -25,10 +25,18 @@ func (piSource) Roots(cfg *config.Config, home string) []string {
 	} else {
 		home = filepath.Join(home, ".pi", "agent")
 	}
+	var roots []string
 	if d := os.Getenv("PI_CODING_AGENT_SESSION_DIR"); d != "" {
-		return []string{config.ExpandHome(d)}
+		roots = append(roots, config.ExpandHome(d))
+	} else {
+		roots = append(roots, filepath.Join(home, "sessions"))
 	}
-	return []string{filepath.Join(home, "sessions")}
+	for _, name := range cfg.Names() {
+		if d := cfg.Providers[name].PiDir; d != "" {
+			roots = append(roots, filepath.Join(config.ExpandHome(d), "sessions"))
+		}
+	}
+	return roots
 }
 
 // Provider attributes a pi session: an ak-managed provider records its

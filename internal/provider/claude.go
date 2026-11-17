@@ -99,7 +99,7 @@ func ClaudeArgs(name string, p config.Provider) ([]string, error) {
 // An empty variant means no variant.
 func ClaudeEnv(name string, p config.Provider, variant string, key Secret) EnvPlan {
 	env := newEnv()
-	env.set("ANTHROPIC_BASE_URL", p.BaseURL)
+	env.setIf("ANTHROPIC_BASE_URL", p.BaseURL)
 
 	authKey := envAuthToken
 	if p.KeyField == "api_key" {

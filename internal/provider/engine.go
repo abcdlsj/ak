@@ -48,6 +48,18 @@ type SharedWriter interface {
 	Shared(ctx Context, cfg *config.Config) (path string, content []byte, err error)
 }
 
+// SharedFile is one shared configuration file written by Sync.
+type SharedFile struct {
+	Path    string
+	Content []byte
+}
+
+// SharedFilesWriter may be implemented by an engine that writes a shared file
+// per isolated agent directory as well as the default one.
+type SharedFilesWriter interface {
+	SharedFiles(ctx Context, cfg *config.Config) ([]SharedFile, error)
+}
+
 // poolKey is the placeholder the shim sends to the local gateway. The gateway
 // ignores it and injects each member's real key, so no upstream key is ever
 // written into a pool command.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/out"
 	"github.com/abcdlsj/ak/internal/probe"
@@ -34,6 +35,21 @@ on its root. The first that answers with a list wins.`,
 			p, ok := cfg.Providers[name]
 			if !ok {
 				return fmt.Errorf("provider %q does not exist", name)
+			}
+			if p.Kind == config.KindAntigravity {
+				models, err := antigravityModels(cfg, name)
+				if err != nil {
+					return err
+				}
+				ids := make([]string, len(models))
+				for i, m := range models {
+					ids[i] = m.ID
+				}
+				if asJSON {
+					return json.NewEncoder(os.Stdout).Encode(ids)
+				}
+				printModels(ids)
+				return nil
 			}
 			// A pool answers with its members' models, and a name a remote
 			// service chose with the models it said it stands for; asking the

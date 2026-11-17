@@ -186,8 +186,11 @@ func validateProvider(cfg *Config, name string, p Provider) error {
 		}
 		return validatePool(cfg, name, p)
 	}
-	if p.BaseURL == "" && p.PiProvider == "" && p.Kind != KindAntigravity {
+	if p.BaseURL == "" && !p.UsesEngineLogin() {
 		return fmt.Errorf("provider %q is missing base_url", name)
+	}
+	if p.UsesEngineLogin() && p.Kind != KindAntigravity && (p.APIKey != "" || p.APIKeyRef != "") {
+		return fmt.Errorf("provider %q sets a key with no base_url; set base_url for an API key, or omit the key so %s signs in itself", name, p.Kind)
 	}
 	if p.APIKey != "" && p.APIKeyRef != "" {
 		return fmt.Errorf("provider %q sets both api_key and api_key_ref; only one is allowed", name)
@@ -342,13 +345,16 @@ var ClaudeRoutingKeys = []string{
 // that the settings layer can be passed to claude as JSON.
 func validateIsolation(name string, p Provider) error {
 	if p.ConfigDir != "" && p.Kind != KindClaude {
-		return fmt.Errorf("provider %q sets config_dir, which only applies to claude (codex uses codex_home, antigravity uses gemini_dir)", name)
+		return fmt.Errorf("provider %q sets config_dir, which only applies to claude (codex uses codex_home, pi uses pi_dir, antigravity uses gemini_dir)", name)
 	}
 	if p.CodexHome != "" && p.Kind != KindCodex {
-		return fmt.Errorf("provider %q sets codex_home, which only applies to codex (claude uses config_dir, antigravity uses gemini_dir)", name)
+		return fmt.Errorf("provider %q sets codex_home, which only applies to codex (claude uses config_dir, pi uses pi_dir, antigravity uses gemini_dir)", name)
+	}
+	if p.PiDir != "" && p.Kind != KindPi {
+		return fmt.Errorf("provider %q sets pi_dir, which only applies to pi (claude uses config_dir, codex uses codex_home, antigravity uses gemini_dir)", name)
 	}
 	if p.GeminiDir != "" && p.Kind != KindAntigravity {
-		return fmt.Errorf("provider %q sets gemini_dir, which only applies to antigravity (claude uses config_dir, codex uses codex_home)", name)
+		return fmt.Errorf("provider %q sets gemini_dir, which only applies to antigravity (claude uses config_dir, codex uses codex_home, pi uses pi_dir)", name)
 	}
 	if p.Kind == KindAntigravity && p.GeminiDir == "" {
 		// Without it agy falls back to ~/.gemini, which is the machine's real
@@ -442,7 +448,7 @@ func validatePool(cfg *Config, name string, p Provider) error {
 			return fmt.Errorf("pool %q names %q, which resolves to no account", name, m)
 		}
 		if mp.BaseURL == "" && !mp.IsPool() {
-			return fmt.Errorf("pool %q names %q, which has no base_url (a pi provider that uses pi_provider); a pool member needs an endpoint", name, m)
+			return fmt.Errorf("pool %q names %q, which has no base_url (it signs in through the engine itself); a pool member needs an endpoint", name, m)
 		}
 		if w, mw := wireOf(p), wireOf(mp); w != mw {
 			return fmt.Errorf("pool %q speaks %s but member %q speaks %s; pools do not translate between protocols", name, w, m, mw)
@@ -533,7 +539,7 @@ func validatePi(name string, p Provider) error {
 	default:
 		return fmt.Errorf("provider %q has invalid pi_api %q; must be anthropic-messages, openai-completions or openai-responses", name, p.PiAPI)
 	}
-	if p.PiProvider != "" {
+	if p.UsesEngineLogin() {
 		return nil
 	}
 	if p.Model == "" {
