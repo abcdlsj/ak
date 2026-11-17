@@ -137,7 +137,10 @@ func DedupKey(p config.Provider, key string) string {
 		vars = append(vars, k+"="+v)
 	}
 	sort.Strings(vars)
-	return strings.Join([]string{key, hostOf(p.BaseURL), p.Quota, p.QuotaCmd, strings.Join(vars, "&")}, "\x00")
+	// The home is part of the account: two providers with a directory each ask
+	// about two different sign-ins, whatever their endpoint says.
+	return strings.Join([]string{key, hostOf(p.BaseURL), p.Quota, p.QuotaCmd,
+		strings.Join(vars, "&"), config.ExpandHome(p.HomeDir())}, "\x00")
 }
 
 // Query resolves the provider's source and asks it. A provider with quota_cmd

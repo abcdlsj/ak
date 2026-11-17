@@ -604,6 +604,20 @@ func doctorAntigravity(d *doctor, cfg *config.Config) {
 		d.fine("every antigravity provider has its own environment and account")
 	}
 
+	// agy answers the plan itself, but asking costs its own startup, so the
+	// source is named rather than detected: say how, once, without calling it a
+	// problem.
+	var wanting []string
+	for _, name := range names {
+		if p := cfg.Providers[name]; p.Quota == "" && p.QuotaCmd == "" {
+			wanting = append(wanting, name)
+		}
+	}
+	if len(wanting) > 0 {
+		d.fine("no plan reading for %s", strings.Join(wanting, ", "))
+		d.hint("Set `quota = \"antigravity\"` on a provider to read agy's own 5h and weekly windows (agy -p \"/usage\")")
+	}
+
 	// agy's flag acceptance, asked without spending anything: an unknown flag
 	// fails before agy does any work.
 	bin := lookPathOr(cfg.Settings.AntigravityBin, "agy")

@@ -43,9 +43,31 @@ ak quota --json          # machine-readable
 | `minimax` | `api.minimaxi.com`, `api.minimax.cn` (Coding Plan) | 5h and weekly windows |
 | `minimax-intl` | `api.minimax.io` (Coding Plan) | 5h and weekly windows |
 | `newapi` | never detected; set `quota = "newapi"` | balance |
+| `antigravity` | never detected; set `quota = "antigravity"` | 5h and weekly windows, per group of models |
 
 For anything else, name a source with `--quota`, turn the query off with
 `--quota off`, write a plugin, or point `quota_cmd` at a script.
+
+**Antigravity.** An `antigravity` provider has no endpoint to match on, and its
+allowance belongs to Google's plan rather than to a balance any vendor serves,
+so ak asks the engine — named, never detected, because agy takes a few seconds
+to start:
+
+```toml
+[providers.agy-work]
+kind = "antigravity"
+gemini_dir = "~/.local/share/ak/agy/work"
+quota = "antigravity"
+```
+
+ak then runs `agy -p "/usage" --output-format json` with the provider's own
+environment — its `gemini_dir`, the `SSH_CONNECTION` that keeps the credential
+there — and reads the groups and windows agy reports, one window per group and
+allowance, with the share used and when it resets. ak calls no endpoint of its
+own and reads no keyring: what agy says is the answer, and a provider with no
+credential in its directory is not asked at all. `ak quota board` and
+`ak quota wait` read it the same way as any other plan; `ak doctor` points at
+the setting for a provider that does not have it.
 
 **New API relays.** `/api/user/self` wants a system access token and the user
 id, not the API key. Put them in the provider's `quota_vars` (the token falls

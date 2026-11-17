@@ -326,9 +326,14 @@ takes it, since a release that dropped it would send every provider to
 
 agy reports no token usage anywhere, so `ak usage` counts what it does keep —
 one row per conversation, its steps and when it was last used — and prices
-none of it. The plan's allowance is agy's own: `agy -p "/usage"` prints the
-five-hour and weekly limits left in each group, `agy -p "/credits"` the credits,
-and `ak` asks agy for neither.
+none of it. The plan's allowance is agy's own, and agy answers it itself: set
+`quota = "antigravity"` on the provider and `ak quota`, `ak status` and
+`ak quota board` read the five-hour and weekly windows of each group of models
+by running `agy -p "/usage" --output-format json` in the provider's own
+environment. It is named rather than detected because agy needs a few seconds to
+start; `ak doctor` says so for a provider that does not have it. agy's credits
+(`agy -p "/credits"`) are not read, and nothing else is: ak calls no Antigravity
+endpoint and keeps no client of its own.
 
 ## Pi
 

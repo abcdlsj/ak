@@ -54,6 +54,12 @@ func TestQuotaDedupKey(t *testing.T) {
 	if quota.DedupKey(a, "k") == quota.DedupKey(a, "k2") {
 		t.Fatal("different keys share a query")
 	}
+	// A directory is an account of its own: two native providers share nothing.
+	c := config.Provider{Kind: config.KindAntigravity, GeminiDir: "/tmp/a"}
+	d := config.Provider{Kind: config.KindAntigravity, GeminiDir: "/tmp/b"}
+	if quota.DedupKey(c, "") == quota.DedupKey(d, "") {
+		t.Fatal("two isolated accounts share a query")
+	}
 }
 
 func TestListEndpointForPiProvider(t *testing.T) {

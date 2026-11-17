@@ -16,7 +16,7 @@ import (
 var embedded embed.FS
 
 // goSources are the vendors a single request and a few paths cannot describe.
-var goSources = []Source{openrouter{}, moonshot{}, opendesign{}, remote{}}
+var goSources = []Source{openrouter{}, moonshot{}, opendesign{}, remote{}, antigravity{}}
 
 // builtins are the Go sources then the embedded plugins, by file name.
 var builtins = func() []Source {
