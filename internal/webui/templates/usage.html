@@ -1,12 +1,14 @@
 {{define "content"}}
 <div class="page-head">
   <div>
-    <h1>the last {{.Days}} days</h1>
-    <p class="lede">What each token, account and route asked for.</p>
+    <h1>{{if eq .Days 1}}today{{else}}the last {{.Days}} days{{end}}</h1>
+    <p class="lede">What each token, account, route and model asked for.</p>
   </div>
   <nav class="tabs">
+    <a href="/ui/usage?days=1"{{if eq .Days 1}} class="on"{{end}}>Today</a>
     <a href="/ui/usage?days=7"{{if eq .Days 7}} class="on"{{end}}>7 days</a>
     <a href="/ui/usage?days=30"{{if eq .Days 30}} class="on"{{end}}>30 days</a>
+    <a href="/ui/usage?days=90"{{if eq .Days 90}} class="on"{{end}}>90 days</a>
   </nav>
 </div>
 
@@ -51,13 +53,14 @@
 <h2>{{.Title}}</h2>
 {{if .Groups}}
 <table class="grid">
-  <thead><tr><th></th><th class="right">requests</th><th class="right">failed</th><th class="right">input</th><th class="right">output</th><th class="right">cache read</th><th class="right">cache write</th><th></th></tr></thead>
+  <thead><tr><th></th><th class="right">requests</th><th class="right">failed</th><th class="right">total</th><th class="right">input</th><th class="right">output</th><th class="right">cache read</th><th class="right">cache write</th><th></th></tr></thead>
   <tbody>
   {{range .Groups}}
   <tr>
     <td><b>{{.Name}}</b></td>
     <td class="right mono">{{num .Requests}}</td>
-    <td class="right mono">{{num .Failed}}</td>
+    <td class="right mono">{{if .Failed}}<span class="bad">{{num .Failed}}</span>{{else}}0{{end}}</td>
+    <td class="right mono">{{human .Total}}</td>
     <td class="right mono">{{human .Input}}</td>
     <td class="right mono">{{human .Output}}</td>
     <td class="right mono">{{human .CacheRead}}</td>

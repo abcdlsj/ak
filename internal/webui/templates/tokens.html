@@ -4,12 +4,18 @@
 
 {{with .Token}}
 <div class="issued">
-  <span class="tile-label">issued token — copy it now, it is not shown again</span>
+  <div class="issued-head">
+    <span class="tile-label">issued token — copy it now, it is not shown again</span>
+    <button type="button" class="copy" data-copy="{{.}}">Copy</button>
+  </div>
   <code class="select">{{.}}</code>
 </div>
 {{if $.Remote}}
 <div class="issued">
-  <span class="tile-label">on another machine, once ak is installed</span>
+  <div class="issued-head">
+    <span class="tile-label">on another machine, once ak is installed</span>
+    <button type="button" class="copy" data-copy="{{$.Remote}}">Copy</button>
+  </div>
   <code class="select">{{$.Remote}}</code>
 </div>
 {{with $.RemoteNote}}<p class="note">{{.}}</p>{{end}}
@@ -51,7 +57,10 @@
     {{range .Targets}}<label class="check"><input type="checkbox" name="routes" value="{{.}}"{{if contains $.Form.Routes .}} checked{{end}}> <span class="mono">{{.}}</span></label>{{end}}
     </div>
   </fieldset>
-  <button>{{if .Form.Editing}}Save{{else}}Issue{{end}}</button>
+  <div class="form-actions">
+    <button>{{if .Form.Editing}}Save{{else}}Issue{{end}}</button>
+    {{if .Form.Editing}}<a class="link" href="/ui/tokens">Cancel</a>{{end}}
+  </div>
   <p class="note">{{if .Form.Editing}}The token itself stays; only what it may ask changes.{{else}}None checked: the token may use every route.{{end}}</p>
 </form>
 </section>

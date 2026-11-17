@@ -18,6 +18,11 @@
   <div class="targets">
     {{if .Members}}{{template "chips" .Members}}{{else}}<span class="mono go">{{.Model}}</span>{{end}}
   </div>
+  {{with .Protocols}}
+  <div class="protos">
+    {{range .}}<span class="chip proto-{{.State}}">{{.Label}} · {{.State}}</span>{{end}}
+  </div>
+  {{end}}
   <form method="post" action="/ui/routes/remove" data-confirm="Remove route {{.Name}}?" class="card-foot">
     <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}">
     <button class="link bad">Remove</button>
@@ -41,15 +46,18 @@
       <option value="pool"{{if eq .Form.Kind "pool"}} selected{{end}}>pool</option>
     </select></label>
   </div>
-  <label>Alias of <input name="model" value="{{.Form.Model}}" placeholder="command-code/deepseek/deepseek-v4.1-flash"></label>
-  <label>Pool provider <select name="provider">
+  <label data-route-field="alias">Alias of <input name="model" value="{{.Form.Model}}" placeholder="command-code/deepseek/deepseek-v4.1-flash"></label>
+  <label data-route-field="pool">Pool provider <select name="provider">
     <option value=""{{if not .Form.Provider}} selected{{end}}>— none, list the members below —</option>
     {{$p := .Form.Provider}}{{range .PoolProviders}}<option value="{{.}}"{{if eq . $p}} selected{{end}}>{{.}}</option>{{end}}
   </select></label>
-  <label>Pool members, one per line <textarea name="members" rows="4" placeholder="bili/glm-5&#10;command-code&#10;opendesign/deepseek-v4-flash">{{.Form.Members}}</textarea>
+  <label data-route-field="pool-members">Pool members, one per line <textarea name="members" rows="4" placeholder="bili/glm-5&#10;command-code&#10;opendesign/deepseek-v4-flash">{{.Form.Members}}</textarea>
     <span class="note">A member is a provider, an account, or <span class="mono">&lt;account&gt;/&lt;model&gt;</span>. Naming a pool provider above takes the pool's own members.</span></label>
-  <label>Strategy <select name="strategy">{{range .Strategies}}<option{{if eq . $.Form.Strategy}} selected{{end}}>{{.}}</option>{{end}}</select></label>
-  <button>Save</button>
+  <label data-route-field="pool">Strategy <select name="strategy">{{range .Strategies}}<option{{if eq . $.Form.Strategy}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <div class="form-actions">
+    <button>Save</button>
+    {{if .Form.Editing}}<a class="link" href="/ui/routes">Cancel</a>{{end}}
+  </div>
   {{if .Form.Editing}}<p class="note">A route's name is fixed; remove it and add another to rename.</p>{{end}}
 </form>
 <p class="note">Accounts: {{template "chips" .Accounts}}</p>

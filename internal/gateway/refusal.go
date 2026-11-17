@@ -137,6 +137,26 @@ func (r *refusals) forgetAll() {
 	r.dirty = true
 }
 
+// forgetAccount drops every refusal remembered for account (or all when empty).
+func (r *refusals) forgetAccount(account string) {
+	if r == nil {
+		return
+	}
+	if account == "" {
+		r.forgetAll()
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	prefix := account + "\x00"
+	for k := range r.m {
+		if strings.HasPrefix(k, prefix) {
+			delete(r.m, k)
+			r.dirty = true
+		}
+	}
+}
+
 // RefusalRow is one model an account is known to refuse.
 type RefusalRow struct {
 	Model    string    `json:"model"`

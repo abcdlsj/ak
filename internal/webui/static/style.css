@@ -151,16 +151,30 @@ h3 { font-size: .95rem; margin: 0 0 .8rem }
 .card-head { display: flex; align-items: baseline; gap: .5rem; font-size: 1.05rem }
 .card-head .mark { color: var(--hue); font-size: .75rem }
 .sub { color: var(--text-muted); font-size: .82rem; margin: .1rem 0 .5rem }
-.card-foot { margin-top: auto; padding-top: .8rem; display: flex; justify-content: flex-end }
+.card-foot { margin-top: auto; padding-top: .8rem; display: flex; justify-content: flex-end; gap: .9rem; position: relative; z-index: 1 }
+.card-foot form { margin: 0 }
 .spacer { flex: 1 }
 /* The card is the link; its own controls sit above it. */
 .card .open { position: absolute; inset: 0; border-radius: 10px }
 .card .open:focus-visible { outline: 2px solid var(--action); outline-offset: -2px }
 .card:has(.open:hover) { border-color: var(--text-muted) }
-.card-foot { position: relative; z-index: 1 }
 .card-head .when { color: var(--text-muted); font-size: .78rem; font-variant-numeric: tabular-nums }
 .targets { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; margin-top: .2rem }
 .targets .go { font-size: .82rem; color: var(--text-main); overflow-wrap: break-word }
+.protos { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .55rem }
+.head-action { margin: .25rem 0 0 }
+.pill-btn {
+  padding: .34rem .85rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--background-alt);
+  color: var(--text-main);
+  font: inherit;
+  font-size: .84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pill-btn:hover { border-color: var(--links); color: var(--text-bright) }
 
 /* One allowance: name and reset left, the share used as a pixel number
    right, a tick bar under them. */
@@ -237,7 +251,7 @@ details.add[open] > summary { margin-bottom: 1.1rem }
 .stack { display: flex; flex-direction: column; gap: .8rem; margin: 0 }
 .stack label { display: flex; flex-direction: column; gap: .3rem; font-size: .88rem; color: var(--text-muted) }
 .stack input, .stack select, .stack textarea { margin: 0 }
-.stack > button, .panel button:not(.link) {
+.stack > button, .form-actions > button, .panel button:not(.link):not(.copy) {
   align-self: flex-start;
   padding: .4rem 1.2rem;
   margin: 0;
@@ -248,7 +262,8 @@ details.add[open] > summary { margin-bottom: 1.1rem }
   font-weight: 600;
   cursor: pointer;
 }
-.stack > button:hover, .panel button:not(.link):hover { filter: brightness(1.1) }
+.stack > button:hover, .form-actions > button:hover, .panel button:not(.link):not(.copy):hover { filter: brightness(1.1) }
+.form-actions { display: flex; align-items: center; gap: .9rem }
 .duo { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem }
 .checks { display: flex; flex-wrap: wrap; gap: .3rem .9rem }
 label.check {
@@ -297,7 +312,7 @@ a:focus-visible {
 }
 input[type='checkbox'], input[type='radio'] { width: 15px; height: 15px; margin: 0; accent-color: var(--action) }
 ::placeholder { color: var(--text-muted); opacity: 1 }
-button.link {
+button.link, a.link {
   border: 0;
   background: none;
   padding: 0;
@@ -305,9 +320,10 @@ button.link {
   color: var(--links);
   font: inherit;
   font-size: .85rem;
+  text-decoration: none;
   cursor: pointer;
 }
-button.link:hover { text-decoration: underline }
+button.link:hover, a.link:hover { text-decoration: underline }
 button.link.bad { color: var(--bad) }
 
 /* The gate: what AK is on the left, the way in on the right. */
@@ -455,6 +471,10 @@ td.bar-cell { width: 8rem }
   font-family: var(--mono);
   font-size: .78rem;
 }
+.chip.proto-native { border-color: var(--ok); color: var(--ok) }
+.chip.proto-translated, .chip.proto-mixed { color: var(--text-muted) }
+.chip.proto-refused { border-color: var(--bad); color: var(--bad) }
+.chip.proto-absent { opacity: .5 }
 
 /* A token is shown once, so it gets a box of its own. */
 .issued {
@@ -467,6 +487,20 @@ td.bar-cell { width: 8rem }
   margin-bottom: 1rem;
   background: var(--background-alt);
 }
+.issued-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem }
+.copy {
+  padding: .15rem .6rem;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--background);
+  color: var(--text-main);
+  font: inherit;
+  font-size: .75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.copy:hover { border-color: var(--links); color: var(--text-bright) }
 .issued code { font-size: .95rem; word-break: break-all; user-select: all }
 .select { user-select: all }
 

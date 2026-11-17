@@ -469,3 +469,158 @@ func TestRouteOverAProvider(t *testing.T) {
 		t.Errorf("saved route = %+v, want the provider kept", r)
 	}
 }
+
+type stubBackend struct {
+	backend
+	refusals  map[string][]gateway.RefusalRow
+	refreshed [][]string
+	usage     []gateway.UsageRow
+}
+
+func (b *stubBackend) RefreshQuotas(accounts []string) {
+	b.refreshed = append(b.refreshed, append([]string(nil), accounts...))
+}
+
+func (b *stubBackend) AccountRefusals(account string) []gateway.RefusalRow {
+	if b.refusals != nil {
+		return b.refusals[account]
+	}
+	return b.backend.AccountRefusals(account)
+}
+
+func (b *stubBackend) ForgetRefusals(account string) {
+	if b.refusals != nil {
+		delete(b.refusals, account)
+		return
+	}
+	b.backend.ForgetRefusals(account)
+}
+
+func (b *stubBackend) Usage(days int) []gateway.UsageRow {
+	if b.usage != nil {
+		return b.usage
+	}
+	return b.backend.Usage(days)
+}
+
+func TestAccountPlanModelAndRefresh(t *testing.T) {
+	s := newSite(t, true)
+	sb := &stubBackend{backend: backend{s.srv}}
+	s.srv.UI = New(sb)
+	s.h = s.srv.ServiceHandler()
+	s.login(password)
+
+	s.post("/ui/accounts", "/ui/accounts/key", url.Values{
+		"name": {"command-code"}, "vendor": {"command-code"}, "key": {"sk-secret"},
+	})
+	editPage := s.do("GET", "/ui/accounts?edit=command-code", nil).Body.String()
+	for _, want := range []string{"<h3>Plan model</h3>", `action="/ui/accounts/model"`, `>Cancel<`} {
+		if !strings.Contains(editPage, want) {
+			t.Errorf("accounts edit page lacks %q", want)
+		}
+	}
+
+	s.post("/ui/accounts", "/ui/accounts/model", url.Values{"name": {"command-code"}, "model": {"glm-5"}})
+	a := s.srv.Config().Accounts["command-code"]
+	if a.Model != "glm-5" || a.APIKey != "sk-secret" {
+		t.Fatalf("account after setting model = %+v, want Model=glm-5 and APIKey preserved", a)
+	}
+	page := s.do("GET", "/ui/accounts", nil).Body.String()
+	if !strings.Contains(page, "runs on") || !strings.Contains(page, "glm-5") {
+		t.Errorf("accounts page lacks plan model badge:\n%s", page)
+	}
+
+	s.post("/ui/accounts", "/ui/accounts/model", url.Values{"name": {"command-code"}, "model": {"-"}})
+	a = s.srv.Config().Accounts["command-code"]
+	if a.Model != "" || a.APIKey != "sk-secret" {
+		t.Fatalf("account after clearing model = %+v, want empty Model and APIKey preserved", a)
+	}
+
+	sb.refreshed = nil
+	rec := s.post("/ui/accounts", "/ui/accounts/refresh", url.Values{})
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/ui/accounts" {
+		t.Fatalf("refresh redirect = %d %s", rec.Code, rec.Header().Get("Location"))
+	}
+	if len(sb.refreshed) == 0 || len(sb.refreshed[0]) != 1 || sb.refreshed[0][0] != "command-code" {
+		t.Errorf("RefreshQuotas calls = %v, want [command-code]", sb.refreshed)
+	}
+	if after := s.do("GET", "/ui/accounts", nil).Body.String(); !strings.Contains(after, "Refreshing quotas…") {
+		t.Errorf("accounts page lacks refresh flash:\n%s", after)
+	}
+}
+
+func TestAccountRefusalsAndForget(t *testing.T) {
+	s := newSite(t, true)
+	sb := &stubBackend{
+		backend: backend{s.srv},
+		refusals: map[string][]gateway.RefusalRow{
+			"command-code": {{Model: "deepseek-v4", Protocol: "anthropic", Reason: gateway.RefusalPermission}},
+		},
+	}
+	s.srv.UI = New(sb)
+	s.h = s.srv.ServiceHandler()
+	s.login(password)
+	s.post("/ui/accounts", "/ui/accounts/key", url.Values{
+		"name": {"command-code"}, "vendor": {"command-code"}, "key": {"sk-secret"},
+	})
+
+	page := s.do("GET", "/ui/accounts", nil).Body.String()
+	for _, want := range []string{"Refused:", "deepseek-v4", "on anthropic (permission_error)", "Forget refusals"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("accounts page lacks %q:\n%s", want, page)
+		}
+	}
+
+	s.post("/ui/accounts", "/ui/accounts/forget", url.Values{"name": {"command-code"}})
+	after := s.do("GET", "/ui/accounts", nil).Body.String()
+	if strings.Contains(after, "Forget refusals") || !strings.Contains(after, "Cleared remembered refusals for command-code.") {
+		t.Errorf("accounts page after forget = \n%s", after)
+	}
+}
+
+func TestRouteProtocolBadgesCopyAndUsageViews(t *testing.T) {
+	s := newSite(t, true)
+	sb := &stubBackend{
+		backend: backend{s.srv},
+		usage: []gateway.UsageRow{
+			{Day: time.Now().UTC().Format("2006-01-02"), Token: "laptop", Account: "command-code",
+				Route: "main", Model: "glm-5", Requests: 4, Failed: 1,
+				Tokens: gateway.Tokens{Input: 100, Output: 50, CacheRead: 25}},
+		},
+	}
+	s.srv.UI = New(sb)
+	s.h = s.srv.ServiceHandler()
+	s.login(password)
+	s.post("/ui/accounts", "/ui/accounts/key", url.Values{
+		"name": {"command-code"}, "vendor": {"command-code"}, "key": {"sk-secret"},
+	})
+	s.post("/ui/routes", "/ui/routes/save", url.Values{"name": {"main"}, "type": {"alias"}, "model": {"command-code"}})
+
+	routesPage := s.do("GET", "/ui/routes", nil).Body.String()
+	for _, want := range []string{"proto-", "claude ·", "codex ·", "chat ·"} {
+		if !strings.Contains(routesPage, want) {
+			t.Errorf("routes page lacks %q:\n%s", want, routesPage)
+		}
+	}
+	routeEdit := s.do("GET", "/ui/routes?edit=main", nil).Body.String()
+	if !strings.Contains(routeEdit, `<a class="link" href="/ui/routes">Cancel</a>`) {
+		t.Errorf("route edit form lacks Cancel link")
+	}
+
+	s.post("/ui/tokens", "/ui/tokens/add", url.Values{"name": {"laptop"}, "routes": {"main"}})
+	tokPage := s.do("GET", "/ui/tokens", nil).Body.String()
+	if !strings.Contains(tokPage, `data-copy="ak_`) || !strings.Contains(tokPage, `data-copy="ak remote add laptop `) {
+		t.Errorf("tokens page lacks copy attributes:\n%s", tokPage)
+	}
+
+	todayPage := s.do("GET", "/ui/usage?days=1", nil).Body.String()
+	for _, want := range []string{"<h1>today</h1>", ">Tokens<", "<h2>By model</h2>", "glm-5", `<td class="right mono"><span class="bad">1</span></td>`, `<td class="right mono">175</td>`, "90 days"} {
+		if !strings.Contains(todayPage, want) {
+			t.Errorf("usage ?days=1 lacks %q:\n%s", want, todayPage)
+		}
+	}
+	ninetyPage := s.do("GET", "/ui/usage?days=90", nil).Body.String()
+	if !strings.Contains(ninetyPage, "<h1>the last 90 days</h1>") {
+		t.Errorf("usage ?days=90 lacks 90-day heading")
+	}
+}

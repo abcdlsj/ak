@@ -673,6 +673,27 @@ func (s *Server) handleLatency(w http.ResponseWriter, r *http.Request) {
 // Usage is every token's usage over the last days days, for the web UI.
 func (s *Server) Usage(days int) []UsageRow { return s.meter.since(days, "") }
 
+// RouteReach returns how each protocol reaches route name (native, translated,
+// mixed, refused, or absent).
+func (s *Server) RouteReach(name string) map[string]string {
+	return s.reach(s.config(), name)
+}
+
+// AccountRefusals returns the remembered refusals for account.
+func (s *Server) AccountRefusals(account string) []RefusalRow {
+	rows := s.ref.of(account)
+	slices.SortFunc(rows, func(a, b RefusalRow) int {
+		return strings.Compare(a.Model+a.Protocol, b.Model+b.Protocol)
+	})
+	return rows
+}
+
+// ForgetRefusals drops remembered refusals for account (or all if empty).
+func (s *Server) ForgetRefusals(account string) {
+	s.ref.forgetAccount(account)
+	s.ref.save(s.refusalPath)
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)

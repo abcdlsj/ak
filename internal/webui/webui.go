@@ -48,6 +48,9 @@ type Backend interface {
 	RefreshQuotas(accounts []string)
 	Latencies() []gateway.LatencyRow
 	Forget(account string)
+	RouteReach(name string) map[string]string
+	AccountRefusals(account string) []gateway.RefusalRow
+	ForgetRefusals(account string)
 }
 
 // maxFormBytes is the largest form the UI reads: a key, a few routes.
@@ -144,6 +147,12 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/login", http.StatusSeeOther)
 	case path == "/accounts" && r.Method == http.MethodGet:
 		c.accounts()
+	case path == "/accounts/refresh" && r.Method == http.MethodPost:
+		c.refreshAccounts()
+	case path == "/accounts/forget" && r.Method == http.MethodPost:
+		c.forgetRefusals()
+	case path == "/accounts/model" && r.Method == http.MethodPost:
+		c.setAccountModel()
 	case path == "/accounts/key" && r.Method == http.MethodPost:
 		c.addKey()
 	case path == "/accounts/device" && r.Method == http.MethodPost:
@@ -294,6 +303,7 @@ type accountView struct {
 	Act      activity
 	Meters   []meterView
 	Balance  *amountView
+	Refusals []gateway.RefusalRow
 	Err      string
 	NoSource bool
 	NoQuota  bool
@@ -314,7 +324,8 @@ func (c *call) accounts() {
 		v, _ := vendor.Lookup(a.Vendor)
 		q := qs[i]
 		views[i] = accountView{Name: n, Vendor: v.Name, User: a.User, Model: a.Model, Users: cfg.UsersOf(n),
-			Hue: hueOf(v.ID), Meters: meters(q), Err: q.Error, NoSource: q.NoSource, Act: act[n]}
+			Hue: hueOf(v.ID), Meters: meters(q), Refusals: c.u.b.AccountRefusals(n),
+			Err: q.Error, NoSource: q.NoSource, Act: act[n]}
 		if q.Balance != nil {
 			amount := money(*q.Balance)
 			views[i].Balance = &amountView{Name: "Balance", Note: q.Currency, Value: amount,
@@ -333,14 +344,54 @@ func (c *call) accounts() {
 	}
 	// ?edit=<name> opens the sign-in form set to that account, so a new key
 	// replaces the one stored.
-	edit, editVendor := "", ""
+	edit, editVendor, editModel := "", "", ""
 	if e := c.r.URL.Query().Get("edit"); e != "" {
 		if a, ok := cfg.Accounts[e]; ok {
-			edit, editVendor = e, a.Vendor
+			edit, editVendor, editModel = e, a.Vendor, a.Model
 		}
 	}
 	c.u.render(c.w, "accounts", map[string]any{"Accounts": views, "Vendors": vendors,
-		"Edit": edit, "EditVendor": editVendor}, c)
+		"Edit": edit, "EditVendor": editVendor, "EditModel": editModel}, c)
+}
+
+func (c *call) refreshAccounts() {
+	names := c.u.b.Config().AccountNames()
+	for _, n := range names {
+		c.u.b.Forget(n)
+	}
+	c.u.b.RefreshQuotas(names)
+	c.back("accounts", "Refreshing quotas…")
+}
+
+func (c *call) forgetRefusals() {
+	name := field(c.r, "name")
+	c.u.b.ForgetRefusals(name)
+	c.u.b.Forget(name)
+	c.back("accounts", "Cleared remembered refusals for "+name+".")
+}
+
+func (c *call) setAccountModel() {
+	name := field(c.r, "name")
+	model := field(c.r, "model")
+	if model == "-" {
+		model = ""
+	}
+	err := c.change(func(cfg *config.Config) error {
+		a, ok := cfg.Accounts[name]
+		if !ok {
+			return fmt.Errorf("no account %q", name)
+		}
+		a.Model = model
+		return core.SetAccount(cfg, name, a)
+	})
+	if err == nil {
+		c.u.b.ForgetRefusals(name)
+	}
+	msg := "Cleared plan model for " + name + "."
+	if model != "" {
+		msg = name + " runs on " + model + "."
+	}
+	c.back("accounts", done(err, msg))
 }
 
 // deviceLogin is a vendor's device sign-in, if it has one.
@@ -378,6 +429,10 @@ func (c *call) removeAccount() {
 	c.back("accounts", done(err, "Removed "+name+"."))
 }
 
+type protoBadge struct {
+	Label, State string
+}
+
 // routeView is a route as the Routes page shows it.
 type routeView struct {
 	Name, Model, Strategy, Kind string
@@ -387,9 +442,10 @@ type routeView struct {
 	Provider string
 	// Members is what the route answers with, one entry per member: the
 	// account and the model it is asked for.
-	Members []string
-	Hue     int
-	Act     activity
+	Members   []string
+	Protocols []protoBadge
+	Hue       int
+	Act       activity
 }
 
 // routeForm is the add form's values, filled from a route when ?edit names
@@ -405,8 +461,14 @@ func (c *call) routes() {
 	var views []routeView
 	for _, n := range cfg.Service.RouteNames() {
 		r := cfg.Service.Routes[n]
+		reach := c.u.b.RouteReach(n)
 		v := routeView{Name: n, Model: r.Model, Members: routeMembers(cfg, r.Members), Provider: r.Provider,
-			Strategy: r.Strategy, Kind: "alias", Hue: hueOf(n)}
+			Strategy: r.Strategy, Kind: "alias", Hue: hueOf(n),
+			Protocols: []protoBadge{
+				{Label: "claude", State: cmp.Or(reach["anthropic"], "absent")},
+				{Label: "codex", State: cmp.Or(reach["responses"], "absent")},
+				{Label: "chat", State: cmp.Or(reach["chat"], "absent")},
+			}}
 		if r.IsPool() {
 			v.Kind = "pool"
 			if v.Strategy == "" {
@@ -627,10 +689,19 @@ type usageGroup struct {
 	gateway.Tokens
 }
 
+func (g usageGroup) Total() int64 {
+	return g.Input + g.Output + g.CacheRead + g.CacheWrite
+}
+
 func (c *call) usage() {
 	days := 7
-	if c.r.URL.Query().Get("days") == "30" {
+	switch c.r.URL.Query().Get("days") {
+	case "1":
+		days = 1
+	case "30":
 		days = 30
+	case "90":
+		days = 90
 	}
 	rows := c.u.b.Usage(days)
 	by := func(key func(gateway.UsageRow) string) []usageGroup {
@@ -674,6 +745,7 @@ func (c *call) usage() {
 		"Heat":    buildHeatYear(c.u.b.Usage(usageYear), c.u.now()),
 		"Latency": latencyRows(c.u.b.Latencies()),
 		"Tiles": []tileView{
+			tile("Tokens", totals.Input+totals.Output+totals.Cache, ""),
 			tile("Requests", totals.Requests, ""),
 			tile("Failed", totals.Failed, ""),
 			tile("Input", totals.Input, ""),
@@ -687,6 +759,7 @@ func (c *call) usage() {
 			{"By token", by(func(r gateway.UsageRow) string { return r.Token })},
 			{"By account", by(func(r gateway.UsageRow) string { return r.Account })},
 			{"By route", by(func(r gateway.UsageRow) string { return r.Route })},
+			{"By model", by(func(r gateway.UsageRow) string { return r.Model })},
 		},
 	}, c)
 }

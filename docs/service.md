@@ -220,19 +220,24 @@ favicon and the header's; the login page is that mark above a quiet card.
 
 - **Accounts**: the board's cards, one per account: its hue from the
   vendor's id, each window's share used as the board's pixel number with a
-  tick bar under it, amber past 80% and red once spent, the balance below.
-  Sign in to a vendor by device code or by pasting a key; remove one no
+  tick bar under it, amber past 80% and red once spent, the balance below,
+  and any cached model refusals with a button to clear them. Trigger a
+  quota refresh from the header, sign in to a vendor by device code or by
+  pasting a key, set an account's default plan model, or remove one no
   provider, route or token uses.
-- **Routes**: aliases and pools as a table, members as chips, with the
-  model-name legend beside the form that adds them.
-- **Tokens**: issue one (shown once), the `ak remote add` line that uses it
-  beside it, limit it to routes, revoke it.
-- **Usage**: counts as tiles; the year's tokens a day as GitHub draws it, a
-  column a week, the months above, four shades by quantile, the year's total
-  in the pixel font and the peak day named; then requests and tokens by
-  token, account and route over 7 or 30 days, each row with a bar against
-  the largest; and what a route's callers waited for, the first byte and the
-  whole request, p50 and p95 over its last 256 requests.
+- **Routes**: aliases and pools as a table, live protocol-reach chips
+  (`claude`, `codex`, `chat`) beside each route's strategy, members as
+  chips, and an adaptive form with the model-name legend beside it.
+- **Tokens**: issue one (shown once) with one-click copy buttons for the
+  secret and the `ak remote add` line beside it, limit it to routes,
+  revoke it.
+- **Usage**: counts as tiles (`Tokens`, `Requests`, `Failed`, `Input`, `Output`, `Cache`),
+  the year's tokens a day as GitHub draws it, a column a week, the months
+  above, four shades by quantile, the year's total in the pixel font and
+  the peak day named; then requests and tokens by token, account, route
+  and model over `Today`, 7, 30 or 90 days, each row with a bar against
+  the largest; and what a route's callers waited for, the first byte and
+  the whole request, p50 and p95 over its last 256 requests.
 
 A page shows what there is first: adding an account, a route or a token is
 behind a `+` at the bottom, so the cards and tables have the page to

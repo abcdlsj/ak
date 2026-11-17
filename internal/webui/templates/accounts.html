@@ -1,12 +1,22 @@
 {{define "content"}}
-<h1>{{plural (len .Accounts) "account" "accounts"}}</h1>
-<p class="lede">Every plan and balance, one card each.</p>
+<div class="page-head">
+  <div>
+    <h1>{{plural (len .Accounts) "account" "accounts"}}</h1>
+    <p class="lede">Every plan and balance, one card each.</p>
+  </div>
+  {{if .Accounts}}
+  <form method="post" action="/ui/accounts/refresh" class="head-action">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <button class="pill-btn">Refresh</button>
+  </form>
+  {{end}}
+</div>
 
 {{if .Accounts}}
 <div class="cards">
 {{range .Accounts}}
 <section class="card hue-{{.Hue}}">
-  <a class="open" href="/ui/accounts?edit={{.Name}}" aria-label="Sign in again as {{.Name}}"></a>
+  <a class="open" href="/ui/accounts?edit={{.Name}}" aria-label="Edit or sign in again as {{.Name}}"></a>
   <div class="card-head">
     <span class="mark">■</span><b>{{.Name}}</b>
     <span class="spacer"></span>
@@ -15,15 +25,24 @@
   <p class="sub">{{.Vendor}}{{with .User}} · {{.}}{{end}}{{with .Users}} · {{join . ", "}}{{end}}</p>
   {{with .Model}}<p class="sub">runs on <span class="mono">{{.}}</span></p>{{end}}
   {{with .Err}}<p class="bad">✗ {{.}}</p>{{end}}
-  {{if .Pending}}<p class="note">reading…</p>{{end}}
+  {{with .Refusals}}<p class="note bad">Refused: {{range $i, $r := .}}{{if $i}}, {{end}}<span class="mono">{{$r.Model}}</span> on {{$r.Protocol}} ({{$r.Reason}}){{end}}</p>{{end}}
+  {{if .Pending}}<p class="note" data-pending="1">reading…</p>{{end}}
   {{range .Meters}}{{template "meter" .}}{{end}}
   {{with .Balance}}{{template "amount" .}}{{end}}
   {{if .Meters}}{{else if .NoQuota}}<p class="note">the vendor reported nothing to show</p>{{end}}
   {{if .NoSource}}<p class="note">no balance source for this vendor</p>{{end}}
-  <form method="post" action="/ui/accounts/remove" data-confirm="Remove account {{.Name}}?" class="card-foot">
-    <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}">
-    <button class="link bad">Remove</button>
-  </form>
+  <div class="card-foot">
+    {{if .Refusals}}
+    <form method="post" action="/ui/accounts/forget">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}">
+      <button class="link">Forget refusals</button>
+    </form>
+    {{end}}
+    <form method="post" action="/ui/accounts/remove" data-confirm="Remove account {{.Name}}?">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}">
+      <button class="link bad">Remove</button>
+    </form>
+  </div>
 </section>
 {{end}}
 </div>
@@ -41,10 +60,28 @@
       <label>Vendor <select name="vendor">{{range .Vendors}}<option value="{{.ID}}"{{if eq .ID $.EditVendor}} selected{{end}}>{{.Name}} ({{.ID}})</option>{{end}}</select></label>
       <label>Account name <input name="name" value="{{.Edit}}" placeholder="the vendor's id" pattern="[a-z0-9][a-z0-9._\-]*"{{if .Edit}} readonly{{end}}></label>
       <label>{{if .Edit}}New key{{else}}Key{{end}} <input type="password" name="key" autocomplete="off" required></label>
-      <button>{{if .Edit}}Replace the key{{else}}Save{{end}}</button>
+      <div class="form-actions">
+        <button>{{if .Edit}}Replace the key{{else}}Save{{end}}</button>
+        {{if .Edit}}<a class="link" href="/ui/accounts">Cancel</a>{{end}}
+      </div>
       {{if .Edit}}<p class="note">The vendor's key is replaced; providers on this account keep working.</p>{{end}}
     </form>
   </section>
+  {{if .Edit}}
+  <section class="panel">
+    <h3>Plan model</h3>
+    <form method="post" action="/ui/accounts/model" class="stack">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="name" value="{{.Edit}}">
+      <label>Model <input name="model" value="{{.EditModel}}" placeholder="vendor default"></label>
+      <div class="form-actions">
+        <button>Save model</button>
+        <a class="link" href="/ui/accounts">Cancel</a>
+      </div>
+      <p class="note">Every engine on {{.Edit}} uses this model unless overridden; leave blank to use the vendor's default.</p>
+    </form>
+  </section>
+  {{end}}
   <section class="panel">
     <h3>Approve in the browser</h3>
     <form method="post" action="/ui/accounts/device" class="stack">

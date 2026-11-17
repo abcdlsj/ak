@@ -691,3 +691,31 @@ func TestServiceRouteOverAProviderPool(t *testing.T) {
 		t.Errorf("member was asked for %v (%d requests)", r.both.last(t).body["model"], r.both.count())
 	}
 }
+
+func TestServiceRouteReachAndForgetRefusals(t *testing.T) {
+	r := newRig(t, func(c *config.Config) {
+		c.Service.Routes = map[string]config.Route{
+			"kimiroute": {Model: "kimi"},
+			"mix":       {Members: []string{"bili", "dsk"}},
+		}
+	})
+	kimiReach := r.srv.RouteReach("kimiroute")
+	if kimiReach["anthropic"] != "native" || kimiReach["responses"] != "translated" || kimiReach["chat"] != "translated" {
+		t.Errorf("kimiroute reach = %v, want anthropic=native, responses/chat=translated", kimiReach)
+	}
+	mixReach := r.srv.RouteReach("mix")
+	if mixReach["anthropic"] != "mixed" || mixReach["responses"] != "mixed" || mixReach["chat"] != "mixed" {
+		t.Errorf("mix reach = %v, want mixed across protocols", mixReach)
+	}
+
+	r.both.statusPath = map[string]int{"/v1/messages": http.StatusForbidden}
+	r.do(t, "/v1/messages", withModel(t, "claude_request.json", "bili", false))
+	rows := r.srv.AccountRefusals("bili")
+	if len(rows) != 1 || rows[0].Model != "glm-5" || rows[0].Protocol != "anthropic" || rows[0].Reason != RefusalPermission {
+		t.Fatalf("AccountRefusals(bili) = %+v, want glm-5/anthropic/%s", rows, RefusalPermission)
+	}
+	r.srv.ForgetRefusals("bili")
+	if got := r.srv.AccountRefusals("bili"); len(got) != 0 {
+		t.Errorf("AccountRefusals after ForgetRefusals = %+v, want empty", got)
+	}
+}

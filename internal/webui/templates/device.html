@@ -1,11 +1,23 @@
 {{define "content"}}
-<section class="gate">
-  <h1>Sign in {{.Account}}</h1>
-  {{if .Err}}<p class="flash bad">{{.}}</p>
-  {{else if .Done}}<p>Signed in. <a href="/ui/accounts">Back to accounts</a></p>
-  {{else}}
-  <p>Open <a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.URL}}</a> and approve{{with .Code}} the code <code class="select">{{.}}</code>{{end}}.</p>
-  <p class="note" id="device-status" data-id="{{.ID}}">Waiting for the approval…</p>
-  {{end}}
-</section>
+<div class="gate">
+  <section class="panel narrow">
+    <h2>Sign in {{.Account}}</h2>
+    {{if .Err}}<p class="flash bad">{{.}}</p>
+    {{else if .Done}}<p>Signed in. <a href="/ui/accounts">Back to accounts</a></p>
+    {{else}}
+    <p class="lede">Open the verification link in your browser and confirm the code.</p>
+    <p><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.URL}}</a></p>
+    {{with .Code}}
+    <div class="issued">
+      <div class="issued-head">
+        <span class="tile-label">verification code</span>
+        <button type="button" class="copy" data-copy="{{.}}">Copy</button>
+      </div>
+      <code class="select">{{.}}</code>
+    </div>
+    {{end}}
+    <p class="note" id="device-status" data-id="{{.ID}}">Waiting for the approval…</p>
+    {{end}}
+  </section>
+</div>
 {{end}}
