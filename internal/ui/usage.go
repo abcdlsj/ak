@@ -104,51 +104,69 @@ func (p *usagePage) view(a *app, width, height int) string {
 	}
 
 	sum := usage.Summarize(a.usage.rows, a.cfg, p.filter())
+	var agyRows []usage.AgyActivity
+	for _, r := range a.usage.agy[usageRanges[p.rng].days] {
+		if r.Conversations > 0 && (p.provider == "" || r.Provider == p.provider) {
+			agyRows = append(agyRows, r)
+		}
+	}
 	var b strings.Builder
 	b.WriteString(p.rangeBar())
 	b.WriteString("\n\n")
-	if sum.TotalTokens == 0 {
+	if sum.TotalTokens == 0 && len(agyRows) == 0 {
 		b.WriteString(dimStyle.Render("No usage recorded in this window."))
 		return b.String()
 	}
 
-	b.WriteString(statTiles(sum))
-	b.WriteString("\n\n")
-	heat := section("Daily tokens", width) + "\n" + renderHeatmap(buildHeatmap(sum.ByDate), width) + "\n"
-	if p.provider != "" {
-		// Room left after the heatmap and a few model rows, minus the
-		// chart's heading and axis.
-		chartH := clamp(height-lipgloss.Height(b.String())-lipgloss.Height(heat)-8, 3, 8)
-		if c := timelineChart(p.timeline(a.usage.rows), p.filter().Since, width, chartH); c != "" {
-			b.WriteString(c)
-			b.WriteString("\n\n")
+	if sum.TotalTokens > 0 {
+		b.WriteString(statTiles(sum))
+		b.WriteString("\n\n")
+		heat := section("Daily tokens", width) + "\n" + renderHeatmap(buildHeatmap(sum.ByDate), width) + "\n"
+		if p.provider != "" {
+			// Room left after the heatmap and a few model rows, minus the
+			// chart's heading and axis.
+			chartH := clamp(height-lipgloss.Height(b.String())-lipgloss.Height(heat)-8, 3, 8)
+			if c := timelineChart(p.timeline(a.usage.rows), p.filter().Since, width, chartH); c != "" {
+				b.WriteString(c)
+				b.WriteString("\n\n")
+			}
+		}
+		b.WriteString(heat)
+
+		used := lipgloss.Height(b.String())
+		agyNeed := 0
+		if len(agyRows) > 0 {
+			agyNeed = len(agyRows) + 3
+		}
+		limit := clamp(height-used-agyNeed-3, 3, 12)
+
+		// Side by side when there is room; stacked, each table gets the full width
+		// and half the rows, so the models stay on a normal-height terminal.
+		side := width >= 96
+		tableW := width
+		if side {
+			tableW = width/2 - 2
+		} else {
+			limit = max(limit/2, 3)
+		}
+		right := modelTable(sum.ByModel, tableW, limit)
+		if p.provider != "" {
+			b.WriteString(modelTable(sum.ByModel, width, limit*2))
+		} else {
+			p.cursor = clamp(p.cursor, 0, max(len(sum.ByProvider)-1, 0))
+			left := providerTable(sum.ByProvider, tableW, limit, p.cursor)
+			if side {
+				b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(width/2).Render(left), right))
+			} else {
+				b.WriteString(left + right)
+			}
 		}
 	}
-	b.WriteString(heat)
-
-	used := lipgloss.Height(b.String())
-	limit := clamp(height-used-3, 3, 12)
-
-	// Side by side when there is room; stacked, each table gets the full width
-	// and half the rows, so the models stay on a normal-height terminal.
-	side := width >= 96
-	tableW := width
-	if side {
-		tableW = width/2 - 2
-	} else {
-		limit = max(limit/2, 3)
-	}
-	right := modelTable(sum.ByModel, tableW, limit)
-	if p.provider != "" {
-		b.WriteString(modelTable(sum.ByModel, width, limit*2))
-		return b.String()
-	}
-	p.cursor = clamp(p.cursor, 0, max(len(sum.ByProvider)-1, 0))
-	left := providerTable(sum.ByProvider, tableW, limit, p.cursor)
-	if side {
-		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(width/2).Render(left), right))
-	} else {
-		b.WriteString(left + right)
+	if len(agyRows) > 0 {
+		if sum.TotalTokens > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(agyTable(agyRows, width))
 	}
 	return b.String()
 }
@@ -260,4 +278,27 @@ func costCell(c float64) string {
 		return dimStyle.Render(fmt.Sprintf("%9s", "-"))
 	}
 	return fmt.Sprintf("%9s", "$"+humanizeMoney(c))
+}
+
+func agyTable(rows []usage.AgyActivity, width int) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(section("Antigravity · conversations & steps (unpriced)", width))
+	b.WriteString("\n")
+	nameW := 16
+	for _, r := range rows {
+		nameW = max(nameW, lipgloss.Width(r.Provider))
+	}
+	nameW = min(nameW, max(width-36, 12))
+	for _, r := range rows {
+		last := "-"
+		if !r.Last.IsZero() {
+			last = r.Last.Local().Format("01-02 15:04")
+		}
+		b.WriteString(fmt.Sprintf("  %-*s %6d conv  %8s steps  %s\n",
+			nameW, truncate(r.Provider, nameW), r.Conversations, humanize(r.Steps), dimStyle.Render(last)))
+	}
+	return b.String()
 }

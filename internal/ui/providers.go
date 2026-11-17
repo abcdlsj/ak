@@ -10,6 +10,8 @@ import (
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/abcdlsj/ak/internal/out"
+	"github.com/abcdlsj/ak/internal/probe"
 	"github.com/abcdlsj/ak/internal/provider"
 	"github.com/abcdlsj/ak/internal/usage"
 	"github.com/abcdlsj/ak/internal/vendor"
@@ -44,7 +46,7 @@ func (p *providersPage) help() []string {
 	if p.filtering {
 		return []string{"enter keep filter", "esc clear"}
 	}
-	return []string{"enter/1-9 launch", "e edit", "a add", "d delete", "* default", "/ filter", "s sync"}
+	return []string{"enter/1-9 launch", "e edit", "a add", "d delete", "c check", "l login", "r refresh", "* default", "/ filter"}
 }
 
 // focus puts the cursor on the named provider.
@@ -122,12 +124,33 @@ func (p *providersPage) update(a *app, msg tea.Msg) tea.Cmd {
 		return a.open(newFormOverlay(NewDraft("")))
 	case "s":
 		return a.sync()
+	case "r":
+		cmds := []tea.Cmd{a.loadStatuses(), a.loadUsage(), a.notify("refreshed", false)}
+		if has {
+			if qcmd := a.quotas.readOne(a.cfg, name); qcmd != nil {
+				cmds = append(cmds, qcmd)
+			}
+		}
+		return tea.Batch(cmds...)
 	}
 	if !has {
 		return nil
 	}
 
 	switch key.String() {
+	case "c":
+		return a.checkProvider(name)
+	case "l":
+		pr := a.cfg.Providers[name]
+		switch {
+		case pr.Account != "":
+			v, _ := vendor.Lookup(a.cfg.Accounts[pr.Account].Vendor)
+			return a.open(newLoginOverlay(v, pr.Account, nil))
+		case pr.UsesEngineLogin():
+			return a.launch(Selection{Provider: name, SignIn: true})
+		default:
+			return a.notify("edit the provider (e) to change its API key", false)
+		}
 	case "e":
 		return a.open(newFormOverlay(EditDraft(a.cfg, name)))
 	case "d":
@@ -223,8 +246,9 @@ func (p *providersPage) view(a *app, width, height int) string {
 	if width >= 100 {
 		// The detail is as wide as its longest lines need; the list keeps the rest.
 		listW := width - min(max(width*2/5, 46), 60) - 2
-		list := p.list(a, names, listW, height-lipgloss.Height(top))
-		detail := detailPanel(a, name, width-listW-2)
+		availH := height - lipgloss.Height(top)
+		list := p.list(a, names, listW, availH)
+		detail := detailPanel(a, name, width-listW-2, availH)
 		return top + lipgloss.JoinHorizontal(lipgloss.Top,
 			lipgloss.NewStyle().Width(listW).Render(list), "  ", detail)
 	}
@@ -401,7 +425,7 @@ func mappingSummary(p config.Provider) string {
 // detailPanel shows one provider at a glance: what it runs on and how it
 // signs in, its models, what is left of its plan when that has been read,
 // and its recent usage. A field with nothing to say is left out.
-func detailPanel(a *app, name string, width int) string {
+func detailPanel(a *app, name string, width, maxHeight int) string {
 	cfg := a.cfg
 	p := cfg.Providers[name]
 	inner := max(width-4, 10)
@@ -450,6 +474,9 @@ func detailPanel(a *app, name string, width int) string {
 		}
 	}
 	field("sign-in", authSummary(cfg, p))
+	if here := boundEngines(a, name); len(here) > 0 {
+		field("here", strings.Join(here, ", "))
+	}
 	flush()
 
 	field("model", p.Model)
@@ -471,7 +498,20 @@ func detailPanel(a *app, name string, width int) string {
 			field("pi api", cmp.Or(p.PiAPI, "anthropic-messages"))
 		}
 	}
+	if p.ContextWindow > 0 || p.MaxTokens > 0 {
+		var parts []string
+		if p.ContextWindow > 0 {
+			parts = append(parts, fmt.Sprintf("ctx %d", p.ContextWindow))
+		}
+		if p.MaxTokens > 0 {
+			parts = append(parts, fmt.Sprintf("max %d", p.MaxTokens))
+		}
+		field("limits", strings.Join(parts, " · "))
+	}
 	field("launch", launchSummary(cfg, name))
+	if chk := checkLine(a, name); chk != "" {
+		field("check", chk)
+	}
 	flush()
 
 	block(planSummary(a, name, inner))
@@ -486,7 +526,69 @@ func detailPanel(a *app, name string, width int) string {
 		flush()
 	}
 	b.WriteString(strings.Join(blocks, "\n\n"))
-	return panelStyle.Width(width - 2).Render(b.String())
+	content := strings.TrimRight(b.String(), "\n")
+	if maxHeight > 4 {
+		lines := strings.Split(content, "\n")
+		if len(lines) > maxHeight-2 {
+			lines = lines[:maxHeight-2]
+			content = strings.Join(lines, "\n")
+		}
+	}
+	return panelStyle.Width(width - 2).Render(content)
+}
+
+func boundEngines(a *app, name string) []string {
+	var out []string
+	for _, k := range config.Kinds {
+		if target := a.bound[k]; target != "" {
+			if tn, tv, _ := strings.Cut(target, ":"); tn == name {
+				s := k.CommandName() + " bound here"
+				if tv != "" {
+					s += " (:" + tv + ")"
+				}
+				out = append(out, s)
+				continue
+			}
+		}
+		if def := a.cfg.Settings.EngineDefault(k); def != "" {
+			if dn, dv, _ := strings.Cut(def, ":"); dn == name {
+				s := k.CommandName() + " default"
+				if dv != "" {
+					s += " (:" + dv + ")"
+				}
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+func checkLine(a *app, name string) string {
+	cs, ok := a.checks[name]
+	if !ok {
+		return ""
+	}
+	if cs.checking {
+		return a.spinner.View() + " checking…"
+	}
+	if !cs.has {
+		return ""
+	}
+	r := cs.res
+	switch r.Status {
+	case probe.StatusOK:
+		return okStyle.Render(fmt.Sprintf("ok (%dms)", r.LatencyMS))
+	case probe.StatusSlow:
+		return warnStyle.Render(fmt.Sprintf("slow (%dms)", r.LatencyMS))
+	case probe.StatusSkip:
+		return dimStyle.Render(r.Detail)
+	default:
+		msg := string(r.Status)
+		if r.Detail != "" {
+			msg += ": " + out.Reason(r.Detail)
+		}
+		return errStyle.Render(msg)
+	}
 }
 
 // detailLabelW is the width of the detail panel's labels.
@@ -613,6 +715,14 @@ func usageSummary(a *app, name string) string {
 		return ""
 	case !a.usage.loaded:
 		return dimStyle.Render("usage: scanning…") + "\n"
+	}
+	if a.cfg.Providers[name].Kind == config.KindAntigravity {
+		for _, act := range a.usage.agy[30] {
+			if act.Provider == name && act.Conversations > 0 {
+				return labelStyle.Render("30 days  ") + fmt.Sprintf("%d conversations · %s steps", act.Conversations, humanize(act.Steps)) + "\n"
+			}
+		}
+		return dimStyle.Render("no conversations in the last 30 days") + "\n"
 	}
 	s := usage.Summarize(a.usage.rows, a.cfg, usage.Filter{Since: usage.SinceDays(30), Provider: name})
 	if s.TotalTokens == 0 {

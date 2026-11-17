@@ -80,6 +80,9 @@ func boardCards(cfg *config.Config) []*card {
 		if acc.User != "" {
 			sub += " · " + acc.User
 		}
+		if acc.Model != "" {
+			sub += " · " + acc.Model
+		}
 		if len(h.Users) > 0 {
 			sub += " · " + strings.Join(h.Users, ", ")
 		}
@@ -140,6 +143,14 @@ func (b *board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			b.scroll++
 		case "up", "k":
 			b.scroll = max(b.scroll-1, 0)
+		case "pgdown", "ctrl+d":
+			b.scroll += max(b.height-8, 4)
+		case "pgup", "ctrl+u":
+			b.scroll = max(b.scroll-max(b.height-8, 4), 0)
+		case "home", "g":
+			b.scroll = 0
+		case "end", "G":
+			b.scroll = math.MaxInt
 		}
 	}
 	return b, nil
@@ -173,6 +184,7 @@ func (b *board) View() string {
 	lines := strings.Split(body, "\n")
 	if h := b.height - 6; h > 0 && len(lines) > h {
 		b.scroll = min(b.scroll, len(lines)-h)
+		foot = dimStyle.Render(fmt.Sprintf("r refresh  ·  ↑/↓ / pgup/pgdn scroll (%d-%d/%d)  ·  q quit", b.scroll+1, b.scroll+h, len(lines)))
 		lines = lines[b.scroll : b.scroll+h]
 	}
 	return appStyle.Render(head + "\n\n" + strings.Join(lines, "\n") + "\n\n" + foot)

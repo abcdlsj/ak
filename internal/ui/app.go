@@ -6,14 +6,22 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/abcdlsj/ak/internal/bind"
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/gateway"
+	"github.com/abcdlsj/ak/internal/out"
+	"github.com/abcdlsj/ak/internal/probe"
+	"github.com/abcdlsj/ak/internal/quota"
+	"github.com/abcdlsj/ak/internal/secrets"
 	"github.com/abcdlsj/ak/internal/shim"
 	"github.com/abcdlsj/ak/internal/usage"
+	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -23,6 +31,7 @@ import (
 type Selection struct {
 	Provider string
 	Variant  string
+	SignIn   bool
 }
 
 // RunUI opens the TUI on the provider focus and returns what the user picked
@@ -75,9 +84,16 @@ type overlay interface {
 // usageState is the usage data shared by every page.
 type usageState struct {
 	rows    []usage.Row
+	agy     map[int][]usage.AgyActivity
 	err     error
 	loading bool
 	loaded  bool
+}
+
+type checkState struct {
+	checking bool
+	res      probe.Result
+	has      bool
 }
 
 type app struct {
@@ -86,6 +102,9 @@ type app struct {
 	active   int
 	overlay  overlay
 	statuses map[string]core.Status
+	checks   map[string]checkState
+	wd       string
+	bound    map[config.Kind]string
 	// routes is what each remote service said its names answer with, so a
 	// provider asking a route shows the models behind it.
 	routes  core.RemoteModels
@@ -114,10 +133,18 @@ type flash struct {
 type (
 	usageLoadedMsg struct {
 		rows []usage.Row
+		agy  map[int][]usage.AgyActivity
 		err  error
 	}
-	statusesMsg map[string]core.Status
-	routesMsg   struct {
+	usageRefinedMsg struct {
+		rows []usage.Row
+	}
+	statusesMsg        map[string]core.Status
+	providerCheckedMsg struct {
+		name string
+		res  probe.Result
+	}
+	routesMsg struct {
 		routes core.RemoteModels
 		err    error
 	}
@@ -139,10 +166,24 @@ func newApp(cfg *config.Config) *app {
 	home := newProvidersPage()
 	// Open on the default provider so enter alone launches it.
 	home.focus(cfg, cfg.Settings.Default)
+	wd, _ := os.Getwd()
+	bound := map[config.Kind]string{}
+	if wd != "" {
+		if store, err := bind.Default(); err == nil {
+			for _, k := range config.Kinds {
+				if b, ok, err := store.Lookup(wd, string(k)); err == nil && ok {
+					bound[k] = b.Target
+				}
+			}
+		}
+	}
 	return &app{
 		cfg:     cfg,
 		routes:  core.RemoteRoutes(cfg),
 		pages:   []page{home, newAccountsPage(), newUsagePage()},
+		checks:  map[string]checkState{},
+		wd:      wd,
+		bound:   bound,
 		spinner: sp,
 	}
 }
@@ -168,8 +209,96 @@ func (a *app) loadUsage() tea.Cmd {
 	cfg := a.cfg
 	return func() tea.Msg {
 		rows, err := usage.Load(cfg)
-		return usageLoadedMsg{rows, err}
+		agy := map[int][]usage.AgyActivity{}
+		if err == nil {
+			for _, d := range []int{7, 30, 90, 0} {
+				agy[d] = usage.AgyActivities(cfg, usage.Filter{Since: usage.SinceDays(d)})
+			}
+		}
+		return usageLoadedMsg{rows: rows, agy: agy, err: err}
 	}
+}
+
+func hasRemoteAccounts(cfg *config.Config) bool {
+	for _, a := range cfg.Accounts {
+		if v, ok := vendor.Lookup(a.Vendor); ok && v.Quota == quota.RemoteSource {
+			return true
+		}
+	}
+	return false
+}
+
+// refineUsage asks remote ak services what their routes served so route tokens
+// can be attributed and priced by model without blocking initial log loading.
+func (a *app) refineUsage() tea.Cmd {
+	if !hasRemoteAccounts(a.cfg) {
+		return nil
+	}
+	cfg := a.cfg
+	rows := a.usage.rows
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		served, _ := usage.FetchRemoteUsage(ctx, cfg, 0)
+		if len(served) == 0 {
+			return nil
+		}
+		return usageRefinedMsg{rows: usage.Refine(rows, served, cfg)}
+	}
+}
+
+// checkProvider sends a minimal live probe to provider name (or its pool members).
+func (a *app) checkProvider(name string) tea.Cmd {
+	p, ok := a.cfg.Providers[name]
+	if !ok {
+		return nil
+	}
+	prev := a.checks[name]
+	if prev.checking {
+		return nil
+	}
+	prev.checking = true
+	a.checks[name] = prev
+	cfg := a.cfg
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		res := runCheck(ctx, cfg, name, p)
+		return providerCheckedMsg{name: name, res: res}
+	}
+}
+
+func runCheck(ctx context.Context, cfg *config.Config, name string, p config.Provider) probe.Result {
+	resolver := secrets.Default()
+	if !p.IsPool() {
+		key, err := resolver.Resolve(p)
+		if err != nil {
+			return probe.Result{Provider: name, Status: probe.StatusFail, Detail: "key: " + err.Error()}
+		}
+		r := probe.Check(ctx, p, key)
+		r.Provider = name
+		return r
+	}
+	leaves := cfg.Leaves(name)
+	members := make([]probe.Result, len(leaves))
+	var wg sync.WaitGroup
+	for i, m := range leaves {
+		wg.Add(1)
+		go func(i int, m string) {
+			defer wg.Done()
+			mp := cfg.Providers[m]
+			key, err := resolver.Resolve(mp)
+			if err != nil {
+				members[i] = probe.Result{Provider: m, Status: probe.StatusFail, Detail: "key: " + err.Error()}
+				return
+			}
+			r := probe.Check(ctx, mp, key)
+			r.Provider = m
+			members[i] = r
+		}(i, m)
+	}
+	wg.Wait()
+	return probe.Aggregate(name, members)
 }
 
 // hasPools reports whether any provider is a pool.
@@ -244,8 +373,26 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
 	case usageLoadedMsg:
-		a.usage = usageState{rows: msg.rows, err: msg.err, loaded: true}
+		a.usage = usageState{rows: msg.rows, agy: msg.agy, err: msg.err, loaded: true}
+		if msg.err == nil {
+			return a, a.refineUsage()
+		}
 		return a, nil
+	case usageRefinedMsg:
+		if a.usage.loaded && !a.usage.loading && len(msg.rows) > 0 {
+			a.usage.rows = msg.rows
+		}
+		return a, nil
+	case providerCheckedMsg:
+		a.checks[msg.name] = checkState{res: msg.res, has: true}
+		switch msg.res.Status {
+		case probe.StatusOK, probe.StatusSlow:
+			return a, a.notify(fmt.Sprintf("%s: %s (%dms)", msg.name, msg.res.Status, msg.res.LatencyMS), false)
+		case probe.StatusSkip:
+			return a, a.notify(fmt.Sprintf("%s: %s", msg.name, msg.res.Detail), false)
+		default:
+			return a, a.notify(fmt.Sprintf("%s: %s (%s)", msg.name, msg.res.Status, out.Reason(msg.res.Detail)), true)
+		}
 	case statusesMsg:
 		a.statuses = msg
 		return a, nil
@@ -293,13 +440,14 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key.String() {
 		case "ctrl+c", "q":
 			return a.quit()
+		case "?":
+			return a, a.open(newHelpOverlay(a.active))
 		case "tab":
 			return a, a.show((a.active + 1) % len(a.pages))
 		case "shift+tab":
 			return a, a.show((a.active + len(a.pages) - 1) % len(a.pages))
 		case "u":
-			a.active = pageUsage
-			return a, nil
+			return a, a.show(pageUsage)
 		case "esc":
 			if a.active != pageHome && !a.pages[a.active].consumesEsc() {
 				a.active = pageHome
@@ -352,7 +500,7 @@ func (a *app) View() string {
 }
 
 // header shows the product name and the page tabs, the active one filled,
-// with a rule under them.
+// with the current directory on the right and a rule under them.
 func (a *app) header(width int) string {
 	row := titleStyle.Render("ak") + " "
 	for i, p := range a.pages {
@@ -364,6 +512,14 @@ func (a *app) header(width int) string {
 	}
 	if a.usage.loading && a.active != pageHome {
 		row += "  " + a.spinner.View() + dimStyle.Render(" scanning logs")
+	}
+	if a.wd != "" {
+		dir := shortHome(a.wd)
+		avail := width - lipgloss.Width(row) - 2
+		if avail >= 10 {
+			right := dimStyle.Render(truncate(dir, avail))
+			row = spread(row, right, width)
+		}
 	}
 	return row + "\n" + ruleStyle.Render(strings.Repeat("─", max(width, 1)))
 }
@@ -380,7 +536,7 @@ func (a *app) footer(width int) string {
 	var keys []string
 	if a.overlay == nil {
 		keys = a.pages[a.active].help()
-		keys = append(keys, "tab switch", "q quit")
+		keys = append(keys, "? help", "tab switch", "q quit")
 	}
 	return dimStyle.Render(truncate(strings.Join(keys, "  ·  "), width))
 }

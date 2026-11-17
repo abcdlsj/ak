@@ -3,11 +3,14 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/provider"
+	"github.com/abcdlsj/ak/internal/vendor"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -126,5 +129,73 @@ func TestNativeAndAgySummaryAndDraft(t *testing.T) {
 	final := d.Finalize("work")
 	if final.HomeDir() == "" || final.Kind != config.KindAntigravity {
 		t.Fatalf("Finalize agy = %+v", final)
+	}
+}
+
+func TestAccountsNewProviderAndPlanModelOverlay(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(config.DirEnv, dir)
+	t.Setenv("HOME", t.TempDir())
+	t.Cleanup(func() { vendor.LoadDir(t.TempDir()) })
+
+	if err := os.MkdirAll(filepath.Join(dir, "vendors.d"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vendors.d", "single.toml"),
+		[]byte("id = \"single\"\nname = \"Single\"\n[engines.claude]\nbase_url = \"https://single.example\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.Accounts["alpha"] = config.Account{Vendor: "single", APIKey: "k1"}
+	cfg.Accounts["beta"] = config.Account{Vendor: "single", APIKey: "k2"}
+	cfg.Resolve()
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = config.Load()
+
+	a := newApp(cfg)
+	a.quotas.reset(cfg)
+	a.active = pageAccounts
+
+	// end/G moves to beta, home/g back to alpha.
+	press(a, "G")
+	if c, ok := a.pages[pageAccounts].(*accountsPage).selected(a); !ok || c.title != "beta" {
+		t.Fatalf("after G selected = %+v", c)
+	}
+	press(a, "g")
+	if c, ok := a.pages[pageAccounts].(*accountsPage).selected(a); !ok || c.title != "alpha" {
+		t.Fatalf("after g selected = %+v", c)
+	}
+
+	// Single-engine vendor skips PickForm when pressing n.
+	press(a, "n")
+	fo, ok := a.overlay.(*formOverlay)
+	if !ok || fo.picking || fo.draft.Account != "alpha" || fo.draft.Kind != "claude" {
+		t.Fatalf("n on single-engine = %+v (picking=%v)", fo, fo != nil && fo.picking)
+	}
+	press(a, "esc")
+
+	// Pressing m opens accountModelOverlay and saves the model.
+	press(a, "m")
+	if _, ok := a.overlay.(*accountModelOverlay); !ok {
+		t.Fatalf("overlay = %T, want *accountModelOverlay", a.overlay)
+	}
+	for _, r := range "claude-opus-5-5" {
+		a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	_, cmd := a.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if a.overlay != nil {
+		t.Fatalf("overlay still open: %T", a.overlay)
+	}
+	if cmd != nil {
+		a.Update(cmd())
+	}
+	if got := a.cfg.Accounts["alpha"].Model; got != "claude-opus-5-5" {
+		t.Errorf("account model = %q, want claude-opus-5-5", got)
+	}
+	if !strings.Contains(a.flash.text, "claude-opus-5-5") {
+		t.Errorf("flash = %q", a.flash.text)
 	}
 }

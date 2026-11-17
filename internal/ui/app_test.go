@@ -3,10 +3,15 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abcdlsj/ak/internal/config"
+	"github.com/abcdlsj/ak/internal/probe"
 	"github.com/abcdlsj/ak/internal/quota"
+	"github.com/abcdlsj/ak/internal/usage"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func testConfig() *config.Config {
@@ -205,5 +210,64 @@ func TestBoardShowsRemoteAccounts(t *testing.T) {
 	}
 	if strings.Join(titles, ",") != "kimi,home/a,home/b" {
 		t.Errorf("cards = %v", titles)
+	}
+}
+
+func TestHelpOverlayToggle(t *testing.T) {
+	a := newApp(testConfig())
+	press(a, "?")
+	o, ok := a.overlay.(*helpOverlay)
+	if !ok {
+		t.Fatalf("overlay = %T, want *helpOverlay", a.overlay)
+	}
+	view := ansi.Strip(o.view(a, 90))
+	if !strings.Contains(view, "Launch shortcuts") || !strings.Contains(view, "live health check") {
+		t.Errorf("help view = %s", view)
+	}
+	press(a, "?")
+	if a.overlay != nil || a.quitting {
+		t.Fatalf("second ? should close help: overlay=%v quitting=%v", a.overlay, a.quitting)
+	}
+}
+
+func TestAntigravityUsageSummaryAndUsagePage(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["work"] = config.Provider{Kind: config.KindAntigravity, GeminiDir: "/tmp/work"}
+	a := newApp(cfg)
+	a.Update(usageLoadedMsg{
+		agy: map[int][]usage.AgyActivity{
+			30: {{Provider: "work", Conversations: 4, Steps: 35, Last: time.Now()}},
+			0:  {{Provider: "work", Conversations: 6, Steps: 50, Last: time.Now()}},
+		},
+	})
+	if got := ansi.Strip(usageSummary(a, "work")); !strings.Contains(got, "4 conversations · 35 steps") {
+		t.Errorf("usageSummary = %q", got)
+	}
+	press(a, "u")
+	view := ansi.Strip(a.pages[pageUsage].view(a, 100, 30))
+	if !strings.Contains(view, "Antigravity") || !strings.Contains(view, "6 conv") || !strings.Contains(view, "50 steps") {
+		t.Errorf("usage page missing agy section:\n%s", view)
+	}
+}
+
+func TestHomeCheckSignInAndBoundDetail(t *testing.T) {
+	cfg := testConfig()
+	cfg.Providers["cx-native"] = config.Provider{Kind: config.KindCodex, CodexHome: "/tmp/cx"}
+	a := newApp(cfg)
+	a.bound[config.KindClaude] = "alpha"
+	a.Update(providerCheckedMsg{name: "alpha", res: probe.Result{Provider: "alpha", Status: probe.StatusOK, LatencyMS: 120}})
+	detail := ansi.Strip(detailPanel(a, "alpha", 56, 14))
+	if !strings.Contains(detail, "claude bound here") || !strings.Contains(detail, "ok (120ms)") {
+		t.Errorf("detailPanel = \n%s", detail)
+	}
+	if h := lipgloss.Height(detail); h > 14 {
+		t.Errorf("detailPanel height = %d, want <= 14", h)
+	}
+
+	// Select cx-native and press l -> SignIn selection.
+	a.home().focus(cfg, "cx-native")
+	press(a, "l")
+	if !a.selection.SignIn || a.selection.Provider != "cx-native" || !a.quitting {
+		t.Errorf("selection = %+v, quitting=%v", a.selection, a.quitting)
 	}
 }

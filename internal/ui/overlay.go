@@ -7,6 +7,7 @@ import (
 
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 )
@@ -212,4 +213,140 @@ func (o *pickOverlay) view(a *app, width int) string {
 	}
 	b.WriteString("\n" + dimStyle.Render("enter launch  ·  esc back"))
 	return panelStyle.Render(b.String())
+}
+
+// helpOverlay shows the active page's and global keyboard shortcuts.
+type helpOverlay struct {
+	page int
+}
+
+func newHelpOverlay(page int) *helpOverlay {
+	return &helpOverlay{page: page}
+}
+
+func (o *helpOverlay) update(_ *app, msg tea.Msg) (bool, tea.Cmd) {
+	k, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return false, nil
+	}
+	switch k.String() {
+	case "?", "esc", "enter", "q", "ctrl+c":
+		return true, nil
+	}
+	return false, nil
+}
+
+func (o *helpOverlay) view(a *app, width int) string {
+	type shortcut struct{ key, desc string }
+	var title string
+	var items []shortcut
+	switch o.page {
+	case pageAccounts:
+		title = "Accounts shortcuts"
+		items = []shortcut{
+			{"↑/↓, j/k", "move selection"},
+			{"a", "sign in to a vendor"},
+			{"enter / e", "sign in again (or edit standalone provider)"},
+			{"m", "set or clear an account's plan model"},
+			{"n", "add a provider on the selected account"},
+			{"d", "remove an account"},
+			{"r", "refresh all balances and quotas"},
+		}
+	case pageUsage:
+		title = "Usage shortcuts"
+		items = []shortcut{
+			{"[ / ] or ←/→", "switch window (7d, 30d, 90d, all)"},
+			{"↑/↓, j/k", "move provider selection"},
+			{"enter", "drill down into selected provider"},
+			{"esc", "back to all providers"},
+			{"r", "rescan session logs"},
+		}
+	default:
+		title = "Launch shortcuts"
+		items = []shortcut{
+			{"enter / 1-9", "launch selected or numbered provider"},
+			{"↑/↓, j/k", "move selection"},
+			{"/", "filter by name, model, account or host"},
+			{"a / e / d", "add, edit or delete provider"},
+			{"*", "toggle default provider"},
+			{"c", "live health check on selected provider"},
+			{"l", "sign in to account or native provider"},
+			{"r", "refresh health, usage and selected quota"},
+			{"s", "sync ak-* shims"},
+		}
+	}
+	global := []shortcut{
+		{"tab / shift+tab", "switch page (Launch, Accounts, Usage)"},
+		{"u", "jump to Usage"},
+		{"?", "toggle this help"},
+		{"esc", "clear filter / return to Launch"},
+		{"q / ctrl+c", "quit"},
+	}
+
+	var b strings.Builder
+	b.WriteString(titleStyle.Render(title) + "\n\n")
+	for _, s := range items {
+		b.WriteString(fmt.Sprintf("  %-18s %s\n", badgeStyle.Render(s.key), s.desc))
+	}
+	b.WriteString("\n" + headStyle.Render("GLOBAL") + "\n\n")
+	for _, s := range global {
+		b.WriteString(fmt.Sprintf("  %-18s %s\n", badgeStyle.Render(s.key), s.desc))
+	}
+	b.WriteString("\n" + dimStyle.Render("press ?, enter or esc to close"))
+	return panelStyle.Width(min(max(width-4, 40), 72)).Render(b.String())
+}
+
+// accountModelOverlay edits an account's plan model without touching its key.
+type accountModelOverlay struct {
+	account string
+	input   textinput.Model
+}
+
+func newAccountModelOverlay(account, current string) *accountModelOverlay {
+	ti := textinput.New()
+	ti.Prompt = "model: "
+	ti.Placeholder = "blank or - clears"
+	ti.SetValue(current)
+	ti.Focus()
+	return &accountModelOverlay{account: account, input: ti}
+}
+
+func (o *accountModelOverlay) init(_ *app) tea.Cmd { return textinput.Blink }
+
+func (o *accountModelOverlay) update(a *app, msg tea.Msg) (bool, tea.Cmd) {
+	if k, ok := msg.(tea.KeyMsg); ok {
+		switch k.String() {
+		case "esc", "ctrl+c":
+			return true, a.notify("cancelled", false)
+		case "enter":
+			model := strings.TrimSpace(o.input.Value())
+			if model == "-" {
+				model = ""
+			}
+			acc, ok := a.cfg.Accounts[o.account]
+			if !ok {
+				return true, a.notify("account not found", true)
+			}
+			acc.Model = model
+			if err := core.SetAccount(a.cfg, o.account, acc); err != nil {
+				return false, a.notify(err.Error(), true)
+			}
+			a.quotas.reset(a.cfg)
+			if model == "" {
+				return true, a.notify(o.account+" model cleared", false)
+			}
+			return true, a.notify(o.account+" runs on "+model, false)
+		}
+	}
+	var cmd tea.Cmd
+	o.input, cmd = o.input.Update(msg)
+	return false, cmd
+}
+
+func (o *accountModelOverlay) view(_ *app, width int) string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Plan model for "+o.account) + "\n\n")
+	b.WriteString(o.input.View() + "\n\n")
+	b.WriteString(dimStyle.Render("Every engine on this account uses this model unless overridden.\nenter save  ·  esc cancel"))
+	return panelStyle.Width(min(max(width-4, 40), 68)).Render(b.String())
 }

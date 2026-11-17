@@ -71,6 +71,22 @@ func (s *quotaStore) read(cfg *config.Config) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// readOne reads the balance of provider name's holder, if it has one.
+func (s *quotaStore) readOne(cfg *config.Config, name string) tea.Cmd {
+	p, ok := cfg.Providers[name]
+	if !ok || p.IsPool() {
+		return nil
+	}
+	s.reset(cfg)
+	s.started = true
+	c, ok := s.byKey[keyOf(p, name)]
+	if !ok || c.reading {
+		return nil
+	}
+	c.reading = true
+	return readCard(c)
+}
+
 // readCard reads one card's balance.
 func readCard(c *card) tea.Cmd {
 	p, title, key := c.p, c.title, c.key

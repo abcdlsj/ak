@@ -39,6 +39,9 @@ func runLauncher() error {
 	if err != nil || sel.Provider == "" {
 		return err
 	}
+	if sel.SignIn {
+		return loginNativeProvider(cfg, sel.Provider, cfg.Providers[sel.Provider])
+	}
 	return execProvider(cfg, sel.Provider, sel.Variant, nil)
 }
 

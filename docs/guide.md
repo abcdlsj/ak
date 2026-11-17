@@ -79,18 +79,21 @@ on the one last launched in this directory (else in another worktree of the
 same repository, else the default). `enter` launches the selected one and
 `1`-`9` launch a row directly, asking for a variant first when there are any,
 unless the provider names a `default_variant`; `/` filters. On a wide terminal
-the selected provider's details, health and last 30 days of usage sit beside
+the selected provider's details, bindings, health and last 30 days of usage sit beside
 the list. `e` edits (the name too, which renames the command), `a` / `d` add
-and delete, `*` sets the default and `s` syncs. In the form `↑` / `↓` move
-between fields, `←` / `→` change a choice and `ctrl+s` saves from any field.
+and delete, `c` runs a live health check, `l` signs in, `r` refreshes status,
+usage and the selected quota, `*` sets the default and `s` syncs; `?` opens the
+shortcut help overlay. In the form `↑` / `↓` move between fields, `←` / `→`
+change a choice and `ctrl+s` saves from any field.
 
 Launch, Accounts and Usage are tabs: `tab` / `shift+tab` cycle them, `u`
 jumps to Usage, and `esc` comes back to Launch:
 
 - Accounts lists each account with its vendor, who signed in, the providers
   on it and what is left of its plan, read when the page is first opened and
-  again on `b`. `a` signs in to a vendor, `enter` signs in again, `n` adds a
-  provider on the account and `d` removes it.
+  again on `r`. `a` signs in to a vendor, `enter` signs in again, `m` sets or
+  clears the account's plan model, `n` adds a provider on the account and `d`
+  removes it.
 - `u` Usage opens on all history and switches to 7, 30 or 90 days with `[`
   `]`; `enter` on a provider narrows the page to it and adds a tokens-over-time
   curve for the range, 5-minute points merged into round intervals to fit.

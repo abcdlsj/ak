@@ -26,7 +26,7 @@ func (p *accountsPage) capturing() bool   { return false }
 func (p *accountsPage) consumesEsc() bool { return false }
 
 func (p *accountsPage) help() []string {
-	return []string{"a sign in", "enter sign in again", "n new provider", "d remove", "r refresh"}
+	return []string{"a sign in", "enter sign in again", "m model", "n new provider", "d remove", "r refresh"}
 }
 
 // shown reads the balances the first time the page is opened: a key away
@@ -61,6 +61,12 @@ func (p *accountsPage) update(a *app, msg tea.Msg) tea.Cmd {
 		p.cursor++
 		p.selected(a)
 		return nil
+	case "home", "g":
+		p.cursor = 0
+		return nil
+	case "end", "G":
+		p.cursor = max(len(a.quotas.cards)-1, 0)
+		return nil
 	case "a":
 		return a.open(newLoginOverlay(vendor.Vendor{}, "", nil))
 	case "r":
@@ -82,9 +88,20 @@ func (p *accountsPage) update(a *app, msg tea.Msg) tea.Cmd {
 	switch k.String() {
 	case "enter", "e":
 		return a.open(newLoginOverlay(v, name, nil))
+	case "m":
+		return a.open(newAccountModelOverlay(name, a.cfg.Accounts[name].Model))
 	case "n":
+		kinds := v.Kinds()
+		if len(kinds) == 0 {
+			return a.notify(v.Name+" serves no engines", true)
+		}
 		d := NewDraft("")
-		d.Kind, d.choice = v.Kinds()[0], choiceAccount+name
+		d.Kind = kinds[0]
+		if len(kinds) == 1 {
+			d.UseAccount(a.cfg, name)
+			return a.open(&formOverlay{draft: d, picking: false})
+		}
+		d.choice = choiceAccount + name
 		return a.open(newFormOverlay(d))
 	case "d":
 		return a.open(newConfirmOverlay("Remove account "+name+" and its key?", func(a *app) tea.Cmd {
@@ -104,7 +121,7 @@ func (p *accountsPage) view(a *app, width, height int) string {
 		return dimStyle.Render("No accounts yet. Press a to sign in to a vendor; its providers then share one key and one balance.")
 	}
 	sel, _ := p.selected(a)
-	list := p.list(a, cards, max(width-cardWidth-2, 24))
+	list := p.list(a, cards, max(width-cardWidth-2, 24), height)
 	if width < cardWidth+28 {
 		return list + "\n" + sel.view(a.spinner.View())
 	}
@@ -113,14 +130,23 @@ func (p *accountsPage) view(a *app, width, height int) string {
 
 // list is one row per holder: its mark, name, what it is and who uses it,
 // and the fullest window at a glance.
-func (p *accountsPage) list(a *app, cards []*card, width int) string {
+func (p *accountsPage) list(a *app, cards []*card, width, height int) string {
 	nameW := len("ACCOUNT")
 	for _, c := range cards {
 		nameW = max(nameW, lipgloss.Width(c.title))
 	}
 	var b strings.Builder
 	b.WriteString(headStyle.Render(fmt.Sprintf("    %-*s  %-6s  %s", nameW, "ACCOUNT", "USED", "FOR")) + "\n")
-	for i, c := range cards {
+	rows := len(cards)
+	if height > 3 {
+		rows = max(height-2, 3)
+	}
+	start := 0
+	if p.cursor >= rows {
+		start = p.cursor - rows + 1
+	}
+	for i := start; i < len(cards) && i < start+rows; i++ {
+		c := cards[i]
 		r := row{picked: i == p.cursor}
 		if r.picked {
 			r.add(rowStyle, "▌ ")
@@ -133,6 +159,9 @@ func (p *accountsPage) list(a *app, cards []*card, width int) string {
 		r.add(fullest(c, a.spinner.View()))
 		r.add(dimStyle, "  "+truncate(usedBy(a.cfg, c), max(width-nameW-16, 8)))
 		b.WriteString(r.render(width) + "\n")
+	}
+	if len(cards) > start+rows {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more", len(cards)-start-rows)))
 	}
 	return b.String()
 }
