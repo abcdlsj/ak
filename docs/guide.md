@@ -311,6 +311,12 @@ pasted back rather than calling back into the terminal.
 takes it, since a release that dropped it would send every provider to
 `~/.gemini`.
 
+agy reports no token usage anywhere, so `ak usage` counts what it does keep —
+one row per conversation, its steps and when it was last used — and prices
+none of it. The plan's allowance is agy's own: `agy -p "/usage"` prints the
+five-hour and weekly limits left in each group, `agy -p "/credits"` the credits,
+and `ak` asks agy for neither.
+
 ## Pi
 
 A `kind = "pi"` provider runs the pi coding agent. There are two shapes:

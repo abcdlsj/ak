@@ -123,7 +123,10 @@ func printStatus(cfg *config.Config, names []string, health map[string]core.Stat
 	var noSource []string
 	for _, n := range names {
 		q := quotas[n]
-		if q.NoSource {
+		// An antigravity provider has no balance to ask anyone for: agy's plan
+		// allowance is agy's own, so listing it as missing a source says
+		// nothing the user can act on.
+		if q.NoSource && cfg.Providers[n].Kind != config.KindAntigravity {
 			noSource = append(noSource, n)
 		}
 		u := used[n]

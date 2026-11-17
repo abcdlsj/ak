@@ -24,7 +24,7 @@ func newUsageCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "usage [name]",
-		Short: "Report token usage across claude, codex and pi",
+		Short: "Report token usage across claude, codex, pi, and what agy recorded",
 		Long: `Aggregate usage by parsing the local session logs.
 
   ak usage                 all history
@@ -37,6 +37,9 @@ func newUsageCmd() *cobra.Command {
 The first scan parses the whole history and takes a few seconds; later runs
 are incremental and near-instant. Cost is estimated from models.dev pricing;
 models with no pricing contribute tokens only, never a dollar figure.
+
+Antigravity is counted apart: agy records no token usage at all, so what it
+leaves behind is a conversation and its steps, and those are what ak reports.
 
 A provider on a remote account asks a service for a name the service chose,
 which may be a route over several models rather than a model. The service is
@@ -77,12 +80,16 @@ model; --no-remote keeps ak offline and reports the route name as logged.`,
 				rows = kept
 			}
 			sum := usage.Summarize(rows, cfg, f)
+			agy := usage.AgyActivities(cfg, f)
 			if asJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
-				return enc.Encode(sum)
+				return enc.Encode(struct {
+					usage.Summary
+					Agy []usage.AgyActivity `json:"agy,omitempty"`
+				}{sum, agy})
 			}
-			printUsage(sum, cfg)
+			printUsage(sum, cfg, agy)
 			return nil
 		},
 	}
@@ -135,7 +142,7 @@ func refineRemote(cmd *cobra.Command, cfg *config.Config, rows []usage.Row, days
 
 // printUsage prints a summary: the total, by provider, by model, and the span
 // of the history it covers.
-func printUsage(s usage.Summary, cfg *config.Config) {
+func printUsage(s usage.Summary, cfg *config.Config, agy []usage.AgyActivity) {
 	printUsageTotal(s)
 
 	// ak's own providers first; engine logins and ids from other tools
@@ -148,6 +155,9 @@ func printUsage(s usage.Summary, cfg *config.Config) {
 	if len(other) > 0 {
 		printUsageHead("Outside ak", "engine logins and other tools, not run through ak")
 		printUsageProviders(other)
+	}
+	if len(agy) > 0 {
+		printUsageAgy(agy)
 	}
 	if len(s.ByModel) > 0 {
 		printUsageHead("By model", "")
@@ -170,6 +180,27 @@ func printUsageTotal(s usage.Summary) {
 	if s.UnpricedTokens > 0 {
 		out.Hint(os.Stdout, "%s tokens have no pricing data and are excluded from cost", humanizeInt(s.UnpricedTokens))
 	}
+}
+
+// printUsageAgy prints what the antigravity providers have to say, which is
+// conversations and steps: agy keeps no token counts, so no row here has a
+// token or a cost figure, and saying so is the honest report.
+func printUsageAgy(rows []usage.AgyActivity) {
+	printUsageHead("Antigravity", "agy records conversations and their steps, not tokens: nothing here is priced")
+	cells := make([][]string, len(rows))
+	for i, r := range rows {
+		cells[i] = []string{r.Provider, humanizeInt(int64(r.Conversations)), humanizeInt(r.Steps), agyLastCell(r.Last)}
+	}
+	out.Table(os.Stdout, []string{"provider", "conversations", "steps", "last used"}, cells)
+}
+
+// agyLastCell is when a provider was last used, or a dim dash when nothing is
+// recorded.
+func agyLastCell(t time.Time) string {
+	if t.IsZero() {
+		return out.Or("")
+	}
+	return t.Local().Format("2006-01-02 15:04")
 }
 
 // printUsageHead starts a section: its title, and a note under it when one is

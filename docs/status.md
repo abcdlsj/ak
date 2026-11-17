@@ -156,6 +156,13 @@ overrides them: either explicit per-million prices, or a `discount` multiplier
 on the models.dev figure. A model with no price anywhere is counted in tokens
 and named in one line under the total, never added to the cost as zero.
 
+**Antigravity.** agy records no token usage at all — its conversations hold
+content, its summaries a step count — so an antigravity provider is reported in
+a section of its own: the conversations last used in the window, the steps agy
+recorded for them, and when it was last used. Nothing there is priced, and the
+token total does not include it. `ak usage --json` carries the same rows under
+`agy`.
+
 **Routes and remotes.** A provider on a remote account asks a service for a
 model name the service chose, and that name may be a route — a fallback chain
 over several models, `main` for instance — rather than a model. No price
