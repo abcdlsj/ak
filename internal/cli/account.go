@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
@@ -20,16 +21,16 @@ import (
 func newLoginCmd() *cobra.Command {
 	var method string
 	cmd := &cobra.Command{
-		Use:               "login <vendor> [account]",
+		Use:               "login <vendor|provider> [account]",
 		ValidArgsFunction: completeLogin,
-		Short:             "Sign in to a vendor, making or renewing an account",
+		Short:             "Sign in to a vendor or a native-login provider",
 		Long: `Sign in to a vendor and keep the credentials as an account (named after the
-vendor unless given). Every provider on the account runs with them, on
-whichever engines the vendor serves.
+vendor unless given), or sign in a native-login provider through its own engine.
 
   ak login command-code          # reads the Command Code CLI's sign-in
   ak login opendesign            # approve a code in the browser
   ak login kimi-coding --key -   # paste a key, out of shell history
+  ak login plus                  # sign in a native provider inside its own directory
 
 Given no --method, ak offers the ways that work here: reading another tool's
 sign-in when it has one, a device sign-in, or pasting a key.`,
@@ -183,6 +184,7 @@ func newLogoutCmd() *cobra.Command {
 }
 
 func newAccountsCmd() *cobra.Command {
+	var asJSON bool
 	cmd := &cobra.Command{
 		Use:     "accounts",
 		Aliases: []string{"account"},
@@ -192,6 +194,36 @@ func newAccountsCmd() *cobra.Command {
 			cfg, err := loadConfig()
 			if err != nil {
 				return err
+			}
+			if asJSON {
+				type accountRow struct {
+					Account   string   `json:"account"`
+					Vendor    string   `json:"vendor"`
+					User      string   `json:"user,omitempty"`
+					Auth      string   `json:"auth"`
+					Model     string   `json:"model,omitempty"`
+					Providers []string `json:"providers,omitempty"`
+				}
+				outRows := make([]accountRow, 0, len(cfg.Accounts))
+				for _, n := range cfg.AccountNames() {
+					a := cfg.Accounts[n]
+					auth := "missing"
+					switch {
+					case a.APIKeyRef != "":
+						auth = "ref " + a.APIKeyRef
+					case a.APIKey != "":
+						auth = "set"
+					}
+					outRows = append(outRows, accountRow{
+						Account:   n,
+						Vendor:    a.Vendor,
+						User:      a.User,
+						Auth:      auth,
+						Model:     a.Model,
+						Providers: cfg.UsersOf(n),
+					})
+				}
+				return json.NewEncoder(os.Stdout).Encode(outRows)
 			}
 			if len(cfg.Accounts) == 0 {
 				out.Empty(os.Stdout, "No accounts yet.", "Sign in with `ak login <vendor>`; `ak vendor list` lists the vendors.")
@@ -207,6 +239,7 @@ func newAccountsCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.AddCommand(&cobra.Command{
 		Use:   "model <account> <model|->",
 		Short: "Set the model an account's plan serves, or - to clear it",
@@ -270,11 +303,20 @@ func accountKey(a config.Account) string {
 	return out.Mark(out.Broken) + " missing"
 }
 
-// completeLogin completes a vendor, then an account of it.
+// completeLogin completes a vendor or native-login provider, then an account.
 func completeLogin(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	switch len(args) {
 	case 0:
-		return completeVendors(cmd, args, toComplete)
+		out, _ := completeVendors(cmd, args, toComplete)
+		if cfg, err := core.Load(); err == nil {
+			for _, n := range cfg.Names() {
+				p := cfg.Providers[n]
+				if p.UsesEngineLogin() && strings.HasPrefix(n, toComplete) {
+					out = append(out, n+"\t"+p.Kind.CommandName()+" native sign-in")
+				}
+			}
+		}
+		return out, cobra.ShellCompDirectiveNoFileComp
 	case 1:
 		return completeAccounts(cmd, args, toComplete)
 	}

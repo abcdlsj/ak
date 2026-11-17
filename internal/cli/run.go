@@ -72,7 +72,7 @@ func withoutOverride(environ []string) []string {
 // that takes a key still needs one during the launch that would add it.
 func launchRefusal(name string, p config.Provider, st core.Status, signIn bool) error {
 	if st.NeedsLogin && !signIn {
-		return fmt.Errorf("%s is not signed in; run `ak agy login %s` and finish the sign-in it opens", name, name)
+		return fmt.Errorf("%s is not signed in; run `ak login %s` (or `ak agy login %s`) and finish the sign-in it opens", name, name, name)
 	}
 	if st.NoKey {
 		if p.IsPool() {

@@ -63,7 +63,7 @@ still need one.`,
 	}
 	cmd.Flags().StringVar(&addr, "addr", "", "listen address, host:port (default settings.gateway_addr)")
 	cmd.Flags().StringVar(&service, "service", "", "the service's listen address, host:port (default service.addr)")
-	cmd.AddCommand(newServeTokenCmd(), newServeAdminCmd(), newServeAfterCmd())
+	cmd.AddCommand(newServeRouteCmd(), newServeTokenCmd(), newServeAdminCmd(), newServeAfterCmd())
 	return cmd
 }
 

@@ -6,6 +6,7 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/provider"
+	"github.com/abcdlsj/ak/internal/quota"
 	"github.com/abcdlsj/ak/internal/vendor"
 	"github.com/spf13/cobra"
 )
@@ -140,6 +141,186 @@ func completeAccounts(cmd *cobra.Command, _ []string, toComplete string) ([]stri
 	for _, n := range cfg.AccountNames() {
 		if strings.HasPrefix(n, toComplete) {
 			out = append(out, n+"\t"+cfg.Accounts[n].Vendor)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeHolders completes accounts first, then providers not shadowed by an account.
+func completeHolders(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	cfg, err := core.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	skip := map[string]bool{}
+	for _, a := range args {
+		skip[a] = true
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, n := range cfg.AccountNames() {
+		seen[n] = true
+		if !skip[n] && strings.HasPrefix(n, toComplete) {
+			out = append(out, n+"\taccount · "+cfg.Accounts[n].Vendor)
+		}
+	}
+	for _, n := range cfg.Names() {
+		if !seen[n] && !skip[n] && strings.HasPrefix(n, toComplete) {
+			out = append(out, n+"\t"+describeProvider(cfg, n))
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeShow completes provider names, service route names, and accounts.
+func completeShow(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	cfg, err := core.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, n := range cfg.Names() {
+		seen[n] = true
+		if strings.HasPrefix(n, toComplete) {
+			out = append(out, n+"\t"+describeProvider(cfg, n))
+		}
+	}
+	for _, n := range cfg.Service.RouteNames() {
+		if !seen[n] && strings.HasPrefix(n, toComplete) {
+			seen[n] = true
+			out = append(out, n+"\tservice route")
+		}
+	}
+	for _, n := range cfg.AccountNames() {
+		if !seen[n] && strings.HasPrefix(n, toComplete) {
+			seen[n] = true
+			out = append(out, n+"\taccount · "+cfg.Accounts[n].Vendor)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeDefault completes `ak default` arguments: engine or provider first,
+// then matching providers or native when an engine was given.
+func completeDefault(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	cfg, err := core.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	if len(args) == 0 {
+		var out []string
+		for _, k := range config.Kinds {
+			n := k.CommandName()
+			if strings.HasPrefix(n, toComplete) {
+				out = append(out, n+"\tengine default")
+			}
+		}
+		out = append(out, matchNames(cfg, nil, toComplete)...)
+		return out, cobra.ShellCompDirectiveNoFileComp
+	}
+	if len(args) == 1 {
+		k, ok := parseKind(args[0])
+		if !ok {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		var out []string
+		for _, n := range cfg.Names() {
+			if cfg.Providers[n].Kind == k && strings.HasPrefix(n, toComplete) {
+				out = append(out, n+"\t"+describeProvider(cfg, n))
+			}
+		}
+		if strings.HasPrefix("native", toComplete) {
+			out = append(out, "native\tkeep the engine's own command")
+		}
+		return out, cobra.ShellCompDirectiveNoFileComp
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeRoutes(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	cfg, err := core.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var out []string
+	for _, n := range cfg.Service.RouteNames() {
+		if strings.HasPrefix(n, toComplete) {
+			out = append(out, n)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeRouteTargets(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	cfg, err := core.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var out []string
+	for _, n := range cfg.Service.RouteNames() {
+		if strings.HasPrefix(n, toComplete) {
+			out = append(out, n+"\troute")
+		}
+	}
+	for _, n := range cfg.AccountNames() {
+		if strings.HasPrefix(n, toComplete) {
+			out = append(out, n+"\taccount · "+cfg.Accounts[n].Vendor)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completePoolProviders(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	cfg, err := core.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var out []string
+	for _, n := range cfg.Names() {
+		if cfg.Providers[n].IsPool() && strings.HasPrefix(n, toComplete) {
+			out = append(out, n+"\t"+describeProvider(cfg, n))
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeTokens(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	cfg, err := core.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var out []string
+	for _, n := range cfg.Service.TokenNames() {
+		if strings.HasPrefix(n, toComplete) {
+			out = append(out, n)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeRemotes(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	cfg, err := core.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var out []string
+	for _, a := range cfg.AccountNames() {
+		v, ok := vendor.Lookup(cfg.Accounts[a].Vendor)
+		if ok && v.Quota == quota.RemoteSource && strings.HasPrefix(a, toComplete) {
+			out = append(out, a+"\t"+v.WebsiteURL)
 		}
 	}
 	return out, cobra.ShellCompDirectiveNoFileComp

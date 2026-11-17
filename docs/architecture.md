@@ -132,10 +132,11 @@ strategy = 'order'
 dpsk = { provider = 'dpsk' }
 ```
 
-**2. A leg, printed.** *(Not done.)* `ak show <name>` renders the resolved legs — account,
-model, protocol, endpoint, in fallback order — and `ak list --refresh` is what
-the TUI reads. One screen answers "what will actually be asked", so the four
-precedence rules never need to be remembered.
+**2. A leg, printed.** `ak show <name>` renders the resolved legs — member,
+account, model, protocol, endpoint, in fallback order — for providers, pools,
+service routes and accounts, and `ak list --refresh` is what the TUI reads. One
+screen answers "what will actually be asked", so the four precedence rules never
+need to be remembered.
 
 **3. Isolation as data.** *(Not done.)* Replace `config_dir`/`codex_home`/
 `gemini_dir` with `[providers.x.env]` plus one `home` field per engine,

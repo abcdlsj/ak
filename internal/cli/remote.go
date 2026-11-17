@@ -121,9 +121,10 @@ on that model name, so one command sets a machine up:
 		},
 	}
 	rm := &cobra.Command{
-		Use:   "rm <name>",
-		Short: "Remove a remote no provider runs on",
-		Args:  cobra.ExactArgs(1),
+		Use:               "rm <name>",
+		ValidArgsFunction: completeRemotes,
+		Short:             "Remove a remote no provider runs on",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {

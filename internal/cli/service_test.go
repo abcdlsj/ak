@@ -140,3 +140,57 @@ func TestServeRefusesPublicWithoutTokens(t *testing.T) {
 		t.Errorf("serve on a public address with no token: %v", err)
 	}
 }
+
+func TestServeRoutesAndTokenJSON(t *testing.T) {
+	t.Setenv(config.DirEnv, t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	cfg := config.Default()
+	cfg.Accounts["goat"] = config.Account{Vendor: "command-code", APIKey: "k1"}
+	cfg.Accounts["od"] = config.Account{Vendor: "opendesign", APIKey: "k2"}
+	cfg.Resolve()
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := runRoot(t, "", "serve", "route", "add", "fast", "--model", "goat/deepseek-v4"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runRoot(t, "", "serve", "route", "add", "main", "--member", "goat", "--member", "od", "--strategy", "smart"); err != nil {
+		t.Fatal(err)
+	}
+	listOut, err := runRoot(t, "", "serve", "route", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"fast", "main", "smart", "goat/deepseek-v4"} {
+		if !strings.Contains(listOut, want) {
+			t.Errorf("route list lacks %q:\n%s", want, listOut)
+		}
+	}
+	jsonOut, err := runRoot(t, "", "serve", "route", "list", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(jsonOut, `"main"`) || !strings.Contains(jsonOut, `"smart"`) {
+		t.Errorf("route list json:\n%s", jsonOut)
+	}
+	if _, err := runRoot(t, "", "serve", "route", "rm", "fast"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = config.Load()
+	if _, ok := cfg.Service.Routes["fast"]; ok {
+		t.Error("rm left route fast")
+	}
+
+	if _, err := runRoot(t, "", "serve", "token", "add", "laptop", "--route", "main"); err != nil {
+		t.Fatal(err)
+	}
+	tokJSON, err := runRoot(t, "", "serve", "token", "list", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(tokJSON, `"laptop"`) || !strings.Contains(tokJSON, `"main"`) {
+		t.Errorf("token list json:\n%s", tokJSON)
+	}
+}

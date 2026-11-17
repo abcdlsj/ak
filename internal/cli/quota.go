@@ -23,7 +23,7 @@ func newQuotaCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:               "quota [account|provider...]",
-		ValidArgsFunction: completeProviders,
+		ValidArgsFunction: completeHolders,
 		Short:             "Query the balance and plan of each account",
 		Long: `Ask what is left: once per account, which every provider on it shares,
 and once per provider with an endpoint of its own. A provider named is asked
@@ -100,7 +100,7 @@ While it waits it reads the quota again at the reset time the vendor gave, or
 every --every when there is none, and says when on stderr. It exits 1 on
 --timeout, and at once when the provider has no balance source.`,
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeFirstProvider,
+		ValidArgsFunction: completeHolders,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {

@@ -64,6 +64,8 @@ token may use every one.`,
 		},
 	}
 	add.Flags().StringArrayVar(&routes, "route", nil, "limit the token to this route or account (repeatable)")
+	_ = add.RegisterFlagCompletionFunc("route", completeRouteTargets)
+	var asJSON bool
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List the tokens",
@@ -74,6 +76,19 @@ token may use every one.`,
 				return err
 			}
 			names := cfg.Service.TokenNames()
+			if asJSON {
+				type tokenRow struct {
+					Name    string    `json:"name"`
+					Routes  []string  `json:"routes,omitempty"`
+					Created time.Time `json:"created,omitzero"`
+				}
+				rows := make([]tokenRow, 0, len(names))
+				for _, n := range names {
+					t := cfg.Service.Tokens[n]
+					rows = append(rows, tokenRow{Name: n, Routes: t.Routes, Created: t.Created})
+				}
+				return json.NewEncoder(os.Stdout).Encode(rows)
+			}
 			if len(names) == 0 {
 				out.Empty(os.Stdout, "no tokens", "issue one with `ak serve token add <name>`")
 				return nil
@@ -87,10 +102,12 @@ token may use every one.`,
 			return nil
 		},
 	}
+	list.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	revoke := &cobra.Command{
-		Use:   "revoke <name>",
-		Short: "Revoke a token; a running service refuses it on its next request",
-		Args:  cobra.ExactArgs(1),
+		Use:               "revoke <name>",
+		ValidArgsFunction: completeTokens,
+		Short:             "Revoke a token; a running service refuses it on its next request",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -254,4 +271,162 @@ func readPassword() (string, error) {
 		return "", fmt.Errorf("the password needs at least %d characters", minPassword)
 	}
 	return pw, nil
+}
+
+func newServeRouteCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "route",
+		Aliases: []string{"routes"},
+		Short:   "List, add and remove the service's routes",
+	}
+
+	var asJSON bool
+	list := &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List the service's routes",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			names := cfg.Service.RouteNames()
+			if asJSON {
+				type routeRow struct {
+					Name     string   `json:"name"`
+					Kind     string   `json:"kind"`
+					Model    string   `json:"model,omitempty"`
+					Provider string   `json:"provider,omitempty"`
+					Members  []string `json:"members,omitempty"`
+					Strategy string   `json:"strategy,omitempty"`
+				}
+				rows := make([]routeRow, 0, len(names))
+				for _, n := range names {
+					r := cfg.Service.Routes[n]
+					kind := "alias"
+					strat := ""
+					if r.IsPool() {
+						kind = "pool"
+						if r.Strategy != "" {
+							strat = r.Strategy
+						} else {
+							strat = config.StrategyOrder
+						}
+					}
+					rows = append(rows, routeRow{
+						Name:     n,
+						Kind:     kind,
+						Model:    r.Model,
+						Provider: r.Provider,
+						Members:  r.Members,
+						Strategy: strat,
+					})
+				}
+				return json.NewEncoder(os.Stdout).Encode(rows)
+			}
+			if len(names) == 0 {
+				out.Empty(os.Stdout, "no routes", "add one with `ak serve route add <name> --model <target>` or `--member <target>`")
+				return nil
+			}
+			rows := make([][]string, 0, len(names))
+			for _, n := range names {
+				r := cfg.Service.Routes[n]
+				kind, strat, answers := "alias", "", r.Model
+				if r.IsPool() {
+					kind = "pool"
+					strat = r.Strategy
+					if strat == "" {
+						strat = config.StrategyOrder
+					}
+					answers = strings.Join(r.Members, ", ")
+					if r.Provider != "" {
+						kind = "provider"
+						if answers != "" {
+							answers = r.Provider + " (" + answers + ")"
+						} else {
+							answers = r.Provider
+						}
+					}
+				}
+				rows = append(rows, []string{n, kind, out.Or(strat), out.Or(answers)})
+			}
+			out.Table(os.Stdout, []string{"route", "kind", "strategy", "answers with"}, rows)
+			return nil
+		},
+	}
+	list.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+
+	var (
+		model    string
+		provider string
+		strategy string
+		members  []string
+	)
+	add := &cobra.Command{
+		Use:   "add <name>",
+		Short: "Add or update a service route (alias, pool, or provider pool)",
+		Long: `Add or replace a named model route under [service.routes].
+
+  ak serve route add fast --model command-code/deepseek-v4
+  ak serve route add main --member command-code --member opendesign --strategy smart
+  ak serve route add dpsk --provider dpsk`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			name := args[0]
+			r := config.Route{
+				Model:    strings.TrimSpace(model),
+				Provider: strings.TrimSpace(provider),
+				Members:  parseMemberList(members),
+				Strategy: strings.TrimSpace(strategy),
+			}
+			if err := core.ChangeService(cfg, func(s *config.Service) {
+				if s.Routes == nil {
+					s.Routes = map[string]config.Route{}
+				}
+				s.Routes[name] = r
+			}); err != nil {
+				return err
+			}
+			out.Done(os.Stdout, "saved route %s", name)
+			return nil
+		},
+	}
+	add.Flags().StringVar(&model, "model", "", "target model name for an alias (<account>, <account>/<model>, or route)")
+	add.Flags().StringVar(&provider, "provider", "", "existing provider pool whose members this route answers with")
+	add.Flags().StringArrayVar(&members, "member", nil, "pool member target (repeatable)")
+	add.Flags().StringVar(&strategy, "strategy", "", "pool strategy: order, rotate, least-used or smart")
+	_ = add.RegisterFlagCompletionFunc("member", completeRouteTargets)
+	_ = add.RegisterFlagCompletionFunc("provider", completePoolProviders)
+	_ = add.RegisterFlagCompletionFunc("strategy", cobra.FixedCompletions([]string{"order", "rotate", "least-used", "smart"}, cobra.ShellCompDirectiveNoFileComp))
+
+	rm := &cobra.Command{
+		Use:               "rm <name>",
+		Aliases:           []string{"remove"},
+		ValidArgsFunction: completeRoutes,
+		Short:             "Remove a service route",
+		Args:              cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			name := args[0]
+			if _, ok := cfg.Service.Routes[name]; !ok {
+				return fmt.Errorf("no route %q; `ak serve route list` lists them", name)
+			}
+			if err := core.ChangeService(cfg, func(s *config.Service) { delete(s.Routes, name) }); err != nil {
+				return err
+			}
+			out.Done(os.Stdout, "removed route %s", name)
+			return nil
+		},
+	}
+
+	cmd.AddCommand(list, add, rm)
+	return cmd
 }

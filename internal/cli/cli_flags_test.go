@@ -118,3 +118,27 @@ func TestWaitQuota(t *testing.T) {
 		t.Fatalf("timeout: %v", err)
 	}
 }
+
+func TestManageContextWindowAndMaxTokensFlags(t *testing.T) {
+	t.Setenv(config.DirEnv, t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	if _, err := runRoot(t, "", "add", "c", "--kind", "claude", "--base-url", "https://a.example", "--key", "sk-1", "--context-window", "200000", "--max-tokens", "32000"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := cfg.Providers["c"]; p.ContextWindow != 200000 || p.MaxTokens != 32000 {
+		t.Fatalf("added limits = %+v", p)
+	}
+
+	if _, err := runRoot(t, "", "edit", "c", "--max-tokens", "0"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = config.Load()
+	if p := cfg.Providers["c"]; p.ContextWindow != 200000 || p.MaxTokens != 0 {
+		t.Fatalf("edited limits = %+v", p)
+	}
+}

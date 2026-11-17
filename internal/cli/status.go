@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -21,7 +22,8 @@ const statusDays = 7
 // health, balance and recent usage. It sends no model request; `ak check`
 // does that.
 func newStatusCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:               "status [name...]",
 		ValidArgsFunction: completeProviders,
 		Short:             "Show each provider's health, balance and recent usage",
@@ -45,6 +47,9 @@ ak usage. No model request is sent: ak check does that.`,
 				}
 			}
 			if len(names) == 0 {
+				if asJSON {
+					return json.NewEncoder(os.Stdout).Encode([]statusRow{})
+				}
 				out.Empty(os.Stdout, "No providers yet.", "Add one by running `ak`.")
 				return nil
 			}
@@ -68,11 +73,60 @@ ak usage. No model request is sent: ak check does that.`,
 					used[r.Name] = r
 				}
 			}
+			agyUsed := map[string]usage.AgyActivity{}
+			for _, a := range usage.AgyActivities(cfg, usage.Filter{Since: usage.SinceDays(statusDays)}) {
+				agyUsed[a.Provider] = a
+			}
 
-			printStatus(cfg, names, health, quotas, used)
+			if asJSON {
+				return json.NewEncoder(os.Stdout).Encode(buildStatusRows(cfg, names, health, quotas, used, agyUsed))
+			}
+			printStatus(cfg, names, health, quotas, used, agyUsed)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+type statusRow struct {
+	Provider         string       `json:"provider"`
+	Engine           string       `json:"engine"`
+	OK               bool         `json:"ok"`
+	Problems         []string     `json:"problems,omitempty"`
+	Quota            *quota.Quota `json:"quota,omitempty"`
+	Tokens           int64        `json:"tokens"`
+	Cost             float64      `json:"cost,omitempty"`
+	AgyConversations int          `json:"agy_conversations,omitempty"`
+	AgySteps         int64        `json:"agy_steps,omitempty"`
+}
+
+func buildStatusRows(cfg *config.Config, names []string, health map[string]core.Status,
+	quotas map[string]quota.Quota, used map[string]usage.ProviderRow, agyUsed map[string]usage.AgyActivity) []statusRow {
+	rows := make([]statusRow, 0, len(names))
+	for _, n := range names {
+		p := cfg.Providers[n]
+		st := health[n]
+		u := used[n]
+		r := statusRow{
+			Provider: n,
+			Engine:   string(p.Kind),
+			OK:       st.OK(),
+			Problems: st.Problems(),
+			Tokens:   u.Tokens,
+			Cost:     u.Cost,
+		}
+		if q, ok := quotas[n]; ok && !q.NoSource {
+			qc := q
+			r.Quota = &qc
+		}
+		if a, ok := agyUsed[n]; ok && a.Conversations > 0 {
+			r.AgyConversations = a.Conversations
+			r.AgySteps = a.Steps
+		}
+		rows = append(rows, r)
+	}
+	return rows
 }
 
 // providerQuotas reads each holder among names once and gives every
@@ -118,25 +172,36 @@ func holderKey(account bool, name string) string {
 // printStatus writes the table, then what to do about providers no balance
 // source serves.
 func printStatus(cfg *config.Config, names []string, health map[string]core.Status,
-	quotas map[string]quota.Quota, used map[string]usage.ProviderRow) {
+	quotas map[string]quota.Quota, used map[string]usage.ProviderRow, agyUsed map[string]usage.AgyActivity) {
 	cells := make([][]string, 0, len(names))
 	var noSource []string
 	for _, n := range names {
+		p := cfg.Providers[n]
 		q := quotas[n]
 		// A provider that signs in through the engine itself has no balance API
 		// for ak to query, so listing it as missing a source says nothing the
 		// user can act on.
-		if q.NoSource && !cfg.Providers[n].UsesEngineLogin() {
+		if q.NoSource && !p.UsesEngineLogin() {
 			noSource = append(noSource, n)
 		}
 		u := used[n]
+		usageCol := humanizeInt(u.Tokens)
+		costCol := costStr(u.Cost)
+		if p.Kind == config.KindAntigravity {
+			if a, ok := agyUsed[n]; ok && a.Conversations > 0 {
+				usageCol = fmt.Sprintf("%d conv · %s steps", a.Conversations, humanizeInt(a.Steps))
+			} else {
+				usageCol = out.Or("")
+			}
+			costCol = out.Or("")
+		}
 		cells = append(cells, []string{
 			n,
-			string(cfg.Providers[n].Kind),
+			string(p.Kind),
 			healthText(health[n]),
 			planCell(q),
-			humanizeInt(u.Tokens),
-			costStr(u.Cost),
+			usageCol,
+			costCol,
 		})
 	}
 	head := []string{"provider", "engine", "health", "plan",

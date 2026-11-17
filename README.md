@@ -68,17 +68,19 @@ ak <name>[:variant] [args...]   launch; args go to the engine untouched
 ak                              launcher, opens on what you last used here
 ak status [name...]             health, balance and last 7 days of usage
 ak list                         providers
+ak show <name>                  inspect a provider, pool, route or account and its resolved legs
 ak add / edit / rm / rename     change providers (flags, or a form)
-ak login <vendor> / logout      sign in to a vendor as an account, or remove one
+ak login <vendor|provider> / logout   sign in to a vendor or native provider, or remove an account
 ak accounts                     accounts and the providers on each
 ak import --from <source>       copy providers over
 ak usage | quota | check | models   the parts of status, for scripts
 ak quota board                  every plan and balance as cards, full screen
-ak bind / unbind / bindings     what claude/codex/pi typed in a repository run on
+ak bind / unbind / bindings     what claude/codex/pi/agy typed in a repository run on
 ak default <engine> <name>      what they run on where nothing is bound
 ak which                        what they run on here, and why
 ak acp <engine>                 that engine's ACP server on the provider here
 ak serve                        the pool gateway; with service.addr, the service for other machines
+ak serve route add|list|rm      manage the service's named aliases and pool routes
 ak serve token add|list|revoke  the service's tokens, one per machine
 ak remote add <name> <url>      use an ak service as a vendor and account; --model sets the providers up too
 ak install / uninstall          set up the shell for the above (zsh, bash, fish)

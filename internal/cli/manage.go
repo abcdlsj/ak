@@ -68,6 +68,37 @@ func addProviderFlags(cmd *cobra.Command, withDefaults bool) {
 		}
 		cmd.Flags().String(f.name, def, f.usage)
 	}
+	cmd.Flags().Int("context-window", 0, "Context window in tokens (0 uses models.dev or the engine default)")
+	cmd.Flags().Int("max-tokens", 0, "Maximum reply tokens (0 uses models.dev or the engine default)")
+	registerProviderFlagCompletions(cmd)
+}
+
+func registerProviderFlagCompletions(cmd *cobra.Command) {
+	_ = cmd.RegisterFlagCompletionFunc("kind", cobra.FixedCompletions([]string{"claude", "codex", "pi", "agy"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("wire-api", cobra.FixedCompletions([]string{"responses", "chat"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("pi-api", cobra.FixedCompletions([]string{"anthropic-messages", "openai-completions", "openai-responses"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("key-field", cobra.FixedCompletions([]string{"auth_token", "api_key"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("reasoning", cobra.FixedCompletions(config.ReasoningLevels(), cobra.ShellCompDirectiveNoFileComp))
+}
+
+func applyModelLimitFlags(cmd *cobra.Command, p *config.Provider, onlyChanged bool) (changed int) {
+	if cmd.Flags().Changed("context-window") || !onlyChanged {
+		if v, err := cmd.Flags().GetInt("context-window"); err == nil && (v > 0 || cmd.Flags().Changed("context-window")) {
+			p.ContextWindow = v
+			if cmd.Flags().Changed("context-window") {
+				changed++
+			}
+		}
+	}
+	if cmd.Flags().Changed("max-tokens") || !onlyChanged {
+		if v, err := cmd.Flags().GetInt("max-tokens"); err == nil && (v > 0 || cmd.Flags().Changed("max-tokens")) {
+			p.MaxTokens = v
+			if cmd.Flags().Changed("max-tokens") {
+				changed++
+			}
+		}
+	}
+	return changed
 }
 
 // readKeyFlag replaces --key - with a key read from stdin: typed without echo
@@ -294,6 +325,7 @@ its vendor (kimi, commandcode, dpsk), the provider pi knows, or its host.
 			if err != nil {
 				return err
 			}
+			applyModelLimitFlags(cmd, &p, false)
 			if _, err := applyPoolFlags(cmd, &p, false); err != nil {
 				return err
 			}
@@ -380,6 +412,7 @@ func newEditCmd() *cobra.Command {
 			p = cfg.Stored(p)
 			newName := name
 			changed := applyProviderFlags(cmd, &p, true)
+			changed += applyModelLimitFlags(cmd, &p, true)
 			if p.Account != "" && cmd.Flags().Changed("key") {
 				return fmt.Errorf("%s runs on account %s, whose key it uses; change it with `ak login %s %s`",
 					name, p.Account, cfg.Accounts[p.Account].Vendor, p.Account)
@@ -511,7 +544,7 @@ removed; the default and usage history follow the new name.`,
 func newDefaultCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:               "default [name] | default <engine> [provider[:variant]|native]",
-		ValidArgsFunction: completeFirstProvider,
+		ValidArgsFunction: completeDefault,
 		Short:             "Show or set the default provider, or what an engine's own command runs on",
 		Long: `default with a provider sets the one the launcher opens on.
 

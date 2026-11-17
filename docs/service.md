@@ -173,9 +173,13 @@ request bifrost cannot convert fails over to the next member like an
 upstream error, and alone it is answered with 400 naming the reason.
 `count_tokens` is Anthropic's own and goes only to an Anthropic upstream.
 
-## Tokens
+## Routes and tokens
 
 ```
+ak serve route add fast --model command-code/deepseek/deepseek-v4.1-flash
+ak serve route add main --member command-code --member opendesign --strategy smart
+ak serve route list
+ak serve route rm fast
 ak serve token add laptop [--route main --route bili]   prints the token once
 ak serve token list                                       name, routes, created
 ak serve token revoke laptop
