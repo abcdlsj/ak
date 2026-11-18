@@ -49,7 +49,7 @@ func TestBoardCardsFit(t *testing.T) {
 	if os.Getenv("AK_BOARD_SHOW") != "" {
 		t.Log("\n" + view)
 	}
-	for _, want := range []string{"goat", "Command Code", "5h", "in 2h 14m", "weekly", "Balance"} {
+	for _, want := range []string{"goat", "Command Code", "5h", "in 2h 14m", "weekly", "Balance", "14.47 of 20.00 left"} {
 		if !strings.Contains(ansi.Strip(view), want) {
 			t.Errorf("board lacks %q:\n%s", want, ansi.Strip(view))
 		}
@@ -58,6 +58,18 @@ func TestBoardCardsFit(t *testing.T) {
 		if w := ansi.StringWidth(line); w != cardWidth {
 			t.Fatalf("card line is %d wide, want %d: %q", w, cardWidth, ansi.Strip(line))
 		}
+	}
+}
+
+func TestWindowLeftDisplay(t *testing.T) {
+	q := quota.Quota{Windows: []quota.Window{{Name: "5h", Used: 30}, {Name: "weekly", Used: 85}}}
+	bars := ansi.Strip(planBars(q, 50))
+	if !strings.Contains(bars, "70%") || !strings.Contains(bars, "15%") {
+		t.Errorf("planBars = %q, want 70%% and 15%% left", bars)
+	}
+	_, cell := fullest(&card{read: true, q: q}, "")
+	if got := strings.TrimSpace(ansi.Strip(cell)); got != "15%" {
+		t.Errorf("fullest = %q, want 15%%", got)
 	}
 }
 

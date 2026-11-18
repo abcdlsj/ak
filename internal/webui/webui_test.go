@@ -338,8 +338,8 @@ func TestPages(t *testing.T) {
 		t.Fatalf("the service was not reloaded with the account: %+v", a)
 	}
 	page := s.do("GET", "/ui/accounts", nil).Body.String()
-	if !strings.Contains(page, "command-code") || !strings.Contains(page, `data-pct="85"`) ||
-		!strings.Contains(page, `class="pix"`) || !strings.Contains(page, "--fill:85%") || strings.Contains(page, "sk-secret") {
+	if !strings.Contains(page, "command-code") || !strings.Contains(page, `data-pct="15"`) ||
+		!strings.Contains(page, `class="pix"`) || !strings.Contains(page, "--fill:15%") || strings.Contains(page, "sk-secret") {
 		t.Errorf("accounts page:\n%s", page)
 	}
 

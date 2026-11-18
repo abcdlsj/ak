@@ -201,7 +201,7 @@ func tile(label string, n int64, _ string) tileView {
 func meters(q quota.Quota) []meterView {
 	out := make([]meterView, 0, len(q.Windows))
 	for _, w := range q.Windows {
-		pct := int(w.Used + 0.5)
+		pct := int(w.Left() + 0.5)
 		out = append(out, meterView{Name: w.Name, Pct: pct, Fill: min(pct, 100),
 			Reset: resetText(w.Resets), Level: levelName(w.Used)})
 	}

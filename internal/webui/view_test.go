@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/abcdlsj/ak/internal/gateway"
+	"github.com/abcdlsj/ak/internal/quota"
 )
 
 // TestPix covers the pixel font: lit pixels become rectangles, a rune it
@@ -165,5 +166,25 @@ func TestBarWidth(t *testing.T) {
 		if got := barWidth(int64(tc.v), int64(tc.most)); got != tc.want {
 			t.Errorf("barWidth(%d, %d) = %d, want %d", tc.v, tc.most, got, tc.want)
 		}
+	}
+}
+
+func TestMetersLeft(t *testing.T) {
+	ms := meters(quota.Quota{Windows: []quota.Window{
+		{Name: "5h", Used: 25},
+		{Name: "weekly", Used: 85},
+		{Name: "monthly", Used: 100},
+	}})
+	if len(ms) != 3 {
+		t.Fatalf("len(meters) = %d, want 3", len(ms))
+	}
+	if ms[0].Pct != 75 || ms[0].Fill != 75 || ms[0].Level != "" {
+		t.Errorf("ms[0] = %+v, want 75%% left, level empty", ms[0])
+	}
+	if ms[1].Pct != 15 || ms[1].Fill != 15 || ms[1].Level != "high" {
+		t.Errorf("ms[1] = %+v, want 15%% left, level high", ms[1])
+	}
+	if ms[2].Pct != 0 || ms[2].Fill != 0 || ms[2].Level != "spent" {
+		t.Errorf("ms[2] = %+v, want 0%% left, level spent", ms[2])
 	}
 }

@@ -1,7 +1,7 @@
 {{define "meter"}}
 <div class="meter{{with .Level}} {{.}}{{end}}" data-pct="{{.Pct}}">
   <div class="meter-name"><b>{{.Name}}</b>{{with .Reset}}<span class="when">{{.}}</span>{{end}}</div>
-  <div class="value" role="img" aria-label="{{.Pct}}% used">{{pix (print .Pct)}}<span class="pct">%</span></div>
+  <div class="value" role="img" aria-label="{{.Pct}}% left">{{pix (print .Pct)}}<span class="pct">%</span></div>
   <div class="ticks" style="--fill:{{.Fill}}%"></div>
 </div>
 {{end}}

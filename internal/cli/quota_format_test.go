@@ -27,7 +27,7 @@ func TestQuotaNumbersAreRounded(t *testing.T) {
 // usageTextWant builds the expected string with the real separator, so the
 // test does not depend on it.
 func usageTextWant(q quota.Quota) string {
-	return joinParts([]string{"4.01/20", "5h 33.3%", "weekly 50%"})
+	return joinParts([]string{"4.01/20", "5h 66.7% left", "weekly 50% left"})
 }
 
 // A reset time today is a time; another day carries its date.
@@ -48,7 +48,7 @@ func TestPlanText(t *testing.T) {
 	b, reset := 12.5, time.Now().Add(3*time.Hour)
 	q := quota.Quota{Balance: &b, Currency: "USD",
 		Windows: []quota.Window{{Name: "5h", Used: 12}, {Name: "weekly", Used: 40, Resets: &reset}}}
-	want := joinParts([]string{"12.5 USD", "5h 12%", "weekly 40% " + resetText(reset)})
+	want := joinParts([]string{"12.5 USD", "5h 88% left", "weekly 60% left " + resetText(reset)})
 	if got := planText(q); got != want {
 		t.Errorf("plan = %q, want %q", got, want)
 	}

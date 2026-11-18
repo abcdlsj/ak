@@ -69,7 +69,7 @@ func newQuotaBoardCmd() *cobra.Command {
 		Aliases: []string{"ui"},
 		Short:   "Every plan and balance as cards, in a full-screen view",
 		Long: `Show each account, and each provider on its own with a balance source, as a
-card: every allowance window with the share used as a big pixel number, a
+card: every allowance window with the share left as a big pixel number, a
 tick bar and when it resets, and money left. r reads them again.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -316,11 +316,11 @@ func planText(q quota.Quota) string {
 	return joinParts(parts)
 }
 
-// windowParts is each plan window: its share used and when it resets.
+// windowParts is each plan window: its share left and when it resets.
 func windowParts(q quota.Quota) []string {
 	parts := make([]string, 0, len(q.Windows))
 	for _, win := range q.Windows {
-		s := win.Name + " " + percent(win.Used)
+		s := win.Name + " " + percent(win.Left()) + " left"
 		if win.Resets != nil {
 			s += " " + resetText(*win.Resets)
 		}

@@ -19,7 +19,7 @@ import (
 )
 
 // RunBoard shows every plan and balance as a card: each allowance window
-// with what is used as a pixel number, a tick bar and when it resets. The
+// with what is left as a pixel number, a tick bar and when it resets. The
 // cards are the accounts, then providers with an endpoint of their own
 // that have a balance source.
 func RunBoard(cfg *config.Config) error {
@@ -241,11 +241,12 @@ func (c *card) freshness(spin string) string {
 	return dimStyle.Render("↻ " + short(d) + " ago")
 }
 
-// window is one allowance: its name and reset on the left, the share used
+// window is one allowance: its name and reset on the left, the share left
 // as a pixel number on the right, a tick bar under them.
 func window(w quota.Window, hue lipgloss.AdaptiveColor) string {
+	leftPct := w.Left()
 	on := lipgloss.NewStyle().Foreground(usedColor(w.Used, hue))
-	num := pixels(strconv.Itoa(int(math.Round(w.Used))), on.Bold(true))
+	num := pixels(strconv.Itoa(int(math.Round(leftPct))), on.Bold(true))
 	left := [pixelRows]string{
 		lipgloss.NewStyle().Bold(true).Render(w.Name),
 		dimStyle.Render(resetText(w.Resets)),
@@ -255,7 +256,7 @@ func window(w quota.Window, hue lipgloss.AdaptiveColor) string {
 	for i := range num {
 		s.WriteString(spread(left[i], num[i]+pctMark(i, on), inner) + "\n")
 	}
-	s.WriteString(ticks(w.Used/100, inner, on, lipgloss.NewStyle().Foreground(lineColor)) + "\n")
+	s.WriteString(ticks(leftPct/100, inner, on, lipgloss.NewStyle().Foreground(lineColor)) + "\n")
 	return s.String()
 }
 
@@ -276,9 +277,9 @@ func balance(q quota.Quota, hue lipgloss.AdaptiveColor) string {
 	for i := range num {
 		s.WriteString(spread(left[i], num[i], inner) + "\n")
 	}
-	if q.Used != nil && q.Limit != nil && *q.Limit > 0 {
-		s.WriteString(ticks(*q.Used / *q.Limit, inner, style, lipgloss.NewStyle().Foreground(lineColor)) + "\n")
-		s.WriteString(spread("", dimStyle.Render(fmt.Sprintf("%s of %s used", money(*q.Used), money(*q.Limit))), inner) + "\n")
+	if q.Limit != nil && *q.Limit > 0 {
+		s.WriteString(ticks(min(1, max(0, *q.Balance / *q.Limit)), inner, style, lipgloss.NewStyle().Foreground(lineColor)) + "\n")
+		s.WriteString(spread("", dimStyle.Render(fmt.Sprintf("%s of %s left", money(*q.Balance), money(*q.Limit))), inner) + "\n")
 	}
 	return s.String()
 }

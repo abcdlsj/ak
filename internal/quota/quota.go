@@ -34,6 +34,11 @@ type Window struct {
 	Resets *time.Time `json:"resets,omitempty"`
 }
 
+// Left reports the share remaining in the window, clamped to 0-100.
+func (w Window) Left() float64 {
+	return max(0, min(100, 100-w.Used))
+}
+
 // Quota is one provider's balance or plan usage. Numbers that the source did
 // not report are nil rather than zero.
 type Quota struct {

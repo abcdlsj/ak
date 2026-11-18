@@ -136,7 +136,7 @@ func (p *accountsPage) list(a *app, cards []*card, width, height int) string {
 		nameW = max(nameW, lipgloss.Width(c.title))
 	}
 	var b strings.Builder
-	b.WriteString(headStyle.Render(fmt.Sprintf("    %-*s  %-6s  %s", nameW, "ACCOUNT", "USED", "FOR")) + "\n")
+	b.WriteString(headStyle.Render(fmt.Sprintf("    %-*s  %-6s  %s", nameW, "ACCOUNT", "LEFT", "FOR")) + "\n")
 	rows := len(cards)
 	if height > 3 {
 		rows = max(height-2, 3)
@@ -181,7 +181,7 @@ func holderMark(cfg *config.Config, c *card) (lipgloss.Style, string) {
 	return okStyle, "●"
 }
 
-// fullest is the share used of the holder's fullest window, coloured, six
+// fullest is the share left of the holder's tightest window, coloured, six
 // cells wide: the one number that says whether it can take more work.
 func fullest(c *card, spin string) (lipgloss.Style, string) {
 	switch {
@@ -193,8 +193,10 @@ func fullest(c *card, spin string) (lipgloss.Style, string) {
 		return errStyle, pad("✗", 6)
 	}
 	most := -1.0
+	least := 100.0
 	for _, w := range c.q.Windows {
 		most = max(most, w.Used)
+		least = min(least, w.Left())
 	}
 	if most < 0 {
 		if c.q.Balance != nil {
@@ -202,7 +204,7 @@ func fullest(c *card, spin string) (lipgloss.Style, string) {
 		}
 		return dimStyle, pad("-", 6)
 	}
-	return lipgloss.NewStyle().Foreground(usedColor(most, accentColor)), pad(fmt.Sprintf("%.0f%%", most), 6)
+	return lipgloss.NewStyle().Foreground(usedColor(most, accentColor)), pad(fmt.Sprintf("%.0f%%", least), 6)
 }
 
 // usedBy is who uses the holder: an account's providers, or a provider's

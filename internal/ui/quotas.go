@@ -145,7 +145,7 @@ func shortReset(t *time.Time) string {
 }
 
 // planBars is a reading as one line per window, a bar of ticks between the
-// name and the share used, then a balance line: the detail panel's compact
+// name and the share left, then a balance line: the detail panel's compact
 // form of a card.
 func planBars(q quota.Quota, width int) string {
 	nameW := len("balance")
@@ -156,9 +156,10 @@ func planBars(q quota.Quota, width int) string {
 	barW := max(width-nameW-4-9-3, 6)
 	var b strings.Builder
 	for _, w := range q.Windows {
+		left := w.Left()
 		on := lipgloss.NewStyle().Foreground(usedColor(w.Used, accentColor))
-		pct := on.Render(fmt.Sprintf("%3d%%", int(math.Round(w.Used))))
-		line := labelStyle.Render(pad(w.Name, nameW)) + " " + ticks(w.Used/100, barW, on, lipgloss.NewStyle().Foreground(lineColor)) + " " + pct
+		pct := on.Render(fmt.Sprintf("%3d%%", int(math.Round(left))))
+		line := labelStyle.Render(pad(w.Name, nameW)) + " " + ticks(left/100, barW, on, lipgloss.NewStyle().Foreground(lineColor)) + " " + pct
 		if r := shortReset(w.Resets); r != "" {
 			line += dimStyle.Render(" ↻ " + r)
 		}
