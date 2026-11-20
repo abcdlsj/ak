@@ -25,7 +25,7 @@ What a command runs on is decided in this order, first match wins:
 4. The engine's own command, with its own settings, as if ak were not there.
 
 `ak which` shows what each engine runs on here and which rule chose it;
-`ak bindings` lists them all and `ak unbind [engine]` removes the one here.
+`ak which --all` lists every binding, and `ak unbind [engine]` removes the one here.
 Bindings live in `~/.config/ak/bindings.json`; nothing is written into the
 repositories. A binding or default naming a provider that is gone, or one of
 another kind, stops the command with the fix rather than quietly running the

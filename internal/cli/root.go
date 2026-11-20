@@ -98,7 +98,6 @@ Run with no arguments to open the launcher.`,
 		newShowCmd(),
 		newBindCmd(),
 		newUnbindCmd(),
-		newBindingsCmd(),
 		newDefaultCmd(),
 		newWhichCmd(),
 		newEnvCmd(),
@@ -137,7 +136,6 @@ Run with no arguments to open the launcher.`,
 	)...)
 	root.AddCommand(
 		newRecordSessionCmd(),
-		newResolveCmd(),
 		newEngineCmd(),
 	)
 	return root

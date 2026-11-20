@@ -170,6 +170,36 @@ func addPoolFlags(cmd *cobra.Command) {
 	_ = cmd.RegisterFlagCompletionFunc("strategy", cobra.FixedCompletions([]string{"order", "rotate", "least-used", "smart"}, cobra.ShellCompDirectiveNoFileComp))
 }
 
+// addWriteFlags adds the flags `ak add` and `ak edit` share but that are not
+// plain provider fields: the claude settings layer and a balance query's
+// variables. Both commands write a provider, so both take them.
+func addWriteFlags(cmd *cobra.Command) {
+	cmd.Flags().String("settings", "", `claude settings layer as a JSON object, e.g. '{"effortLevel":"low"}'; '' clears it`)
+	cmd.Flags().StringArray("quota-var", nil, "value only the balance query reads, name=value (repeatable; name= removes it)")
+}
+
+// applyWriteFlags applies every field `ak add` and `ak edit` can set beyond the
+// plain provider flags, and counts what changed. onlyChanged leaves untouched
+// fields alone, which is what an edit needs.
+func applyWriteFlags(cmd *cobra.Command, p *config.Provider, onlyChanged bool) (changed int, err error) {
+	changed = applyModelLimitFlags(cmd, p, onlyChanged)
+	n, err := applyPoolFlags(cmd, p, onlyChanged)
+	if err != nil {
+		return changed, err
+	}
+	changed += n
+	n, err = applySettingsFlag(cmd, p)
+	if err != nil {
+		return changed, err
+	}
+	changed += n
+	n, err = applyQuotaVarFlag(cmd, p)
+	if err != nil {
+		return changed, err
+	}
+	return changed + n, nil
+}
+
 // applyPoolFlags sets the pool fields; onlyChanged skips flags the user did not
 // pass, so an edit leaves every other field alone. Passing --member replaces
 // the whole member list.
@@ -325,14 +355,7 @@ its vendor (kimi, commandcode, dpsk), the provider pi knows, or its host.
 			if err != nil {
 				return err
 			}
-			applyModelLimitFlags(cmd, &p, false)
-			if _, err := applyPoolFlags(cmd, &p, false); err != nil {
-				return err
-			}
-			if _, err := applySettingsFlag(cmd, &p); err != nil {
-				return err
-			}
-			if _, err := applyQuotaVarFlag(cmd, &p); err != nil {
+			if _, err := applyWriteFlags(cmd, &p, false); err != nil {
 				return err
 			}
 			native, _ := cmd.Flags().GetBool("native")
@@ -374,9 +397,8 @@ its vendor (kimi, commandcode, dpsk), the provider pi knows, or its host.
 	}
 	addProviderFlags(cmd, true)
 	addPoolFlags(cmd)
+	addWriteFlags(cmd)
 	cmd.Flags().Bool("native", false, "Use the engine's own OAuth sign-in in an isolated directory (~/.local/share/ak/<engine>/<name>)")
-	cmd.Flags().String("settings", "", `claude settings layer as a JSON object, e.g. '{"effortLevel":"low"}'; '' clears it`)
-	cmd.Flags().StringArray("quota-var", nil, "value only the balance query reads, name=value (repeatable; name= removes it)")
 	cmd.Flags().String("vendor", "", "Run on an account of this vendor (`ak vendor list`): --account, else one named after the vendor")
 	cmd.Flags().SetNormalizeFunc(presetIsVendor)
 	_ = cmd.RegisterFlagCompletionFunc("vendor", completeVendors)
@@ -412,22 +434,11 @@ func newEditCmd() *cobra.Command {
 			p = cfg.Stored(p)
 			newName := name
 			changed := applyProviderFlags(cmd, &p, true)
-			changed += applyModelLimitFlags(cmd, &p, true)
 			if p.Account != "" && cmd.Flags().Changed("key") {
 				return fmt.Errorf("%s runs on account %s, whose key it uses; change it with `ak login %s %s`",
 					name, p.Account, cfg.Accounts[p.Account].Vendor, p.Account)
 			}
-			n, err := applyPoolFlags(cmd, &p, true)
-			if err != nil {
-				return err
-			}
-			changed += n
-			n, err = applySettingsFlag(cmd, &p)
-			if err != nil {
-				return err
-			}
-			changed += n
-			n, err = applyQuotaVarFlag(cmd, &p)
+			n, err := applyWriteFlags(cmd, &p, true)
 			if err != nil {
 				return err
 			}
@@ -457,8 +468,7 @@ func newEditCmd() *cobra.Command {
 	}
 	addProviderFlags(cmd, false)
 	addPoolFlags(cmd)
-	cmd.Flags().String("settings", "", `claude settings layer as a JSON object, e.g. '{"effortLevel":"low"}'; '' clears it`)
-	cmd.Flags().StringArray("quota-var", nil, "value only the balance query reads, name=value (repeatable; name= removes it)")
+	addWriteFlags(cmd)
 	_ = cmd.RegisterFlagCompletionFunc("account", completeAccounts)
 	return cmd
 }

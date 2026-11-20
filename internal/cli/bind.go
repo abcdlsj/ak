@@ -205,34 +205,6 @@ func newUnbindCmd() *cobra.Command {
 	}
 }
 
-func newBindingsCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "bindings",
-		Short: "List every binding and the engine defaults",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadConfig()
-			if err != nil {
-				return err
-			}
-			store, err := bind.Default()
-			if err != nil {
-				return err
-			}
-			list, err := store.List()
-			if err != nil {
-				return err
-			}
-			if len(list) == 0 && !hasEngineDefaults(cfg) {
-				out.Empty(os.Stdout, "Nothing bound.", "Bind one with `ak bind <provider>`.")
-				return nil
-			}
-			out.Table(os.Stdout, []string{"engine", "runs on", "place"}, bindingRows(cfg, list))
-			return nil
-		},
-	}
-}
-
 // bindingRows is the engine defaults and the bindings: what each engine runs
 // on, and where that was set.
 func bindingRows(cfg *config.Config, list []bind.Binding) [][]string {
@@ -263,11 +235,20 @@ func hasEngineDefaults(cfg *config.Config) bool {
 }
 
 func newWhichCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:       "which [engine...]",
-		Short:     "Show what claude/codex/pi/agy typed here runs on, and why",
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "which [engine...]",
+		Short: "Show what claude/codex/pi/agy typed here runs on, and why",
+		Long: `Show what each engine's own command runs on here, and which rule chose it:
+the AK override, a binding, the engine default, or the engine itself.
+
+With --all, list every binding instead, wherever it was set, beside the
+engine defaults.`,
 		ValidArgs: []string{"claude", "codex", "pi", "agy", "antigravity"},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all {
+				return printBindings()
+			}
 			kinds := config.Kinds
 			if len(args) > 0 {
 				kinds = nil
@@ -299,6 +280,31 @@ func newWhichCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&all, "all", false, "List every binding and the engine defaults, wherever they were set")
+	return cmd
+}
+
+// printBindings lists every binding and the engine defaults, with where each
+// was set: what `ak which` shows for this directory, for all of them.
+func printBindings() error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	store, err := bind.Default()
+	if err != nil {
+		return err
+	}
+	list, err := store.List()
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 && !hasEngineDefaults(cfg) {
+		out.Empty(os.Stdout, "Nothing bound.", "Bind one with `ak bind <provider>`.")
+		return nil
+	}
+	out.Table(os.Stdout, []string{"engine", "runs on", "place"}, bindingRows(cfg, list))
+	return nil
 }
 
 // whichRows is what each engine runs on here, and which rule chose it; one
@@ -333,44 +339,6 @@ func whyLine(r resolution, err error) string {
 		return cause.Error()
 	}
 	return r.Source + ": " + cause.Error()
-}
-
-// newResolveCmd is what the shell functions ask before each engine command:
-// it prints the target to launch, or nothing for the engine's own command.
-// It reads only the config and the bindings, so it stays fast.
-func newResolveCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:    "__resolve <engine>",
-		Hidden: true,
-		Args:   cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			k, ok := parseKind(args[0])
-			if !ok {
-				return fmt.Errorf("unknown engine %q", args[0])
-			}
-			cfg, err := loadConfig()
-			if err != nil {
-				return err
-			}
-			store, err := bind.Default()
-			if err != nil {
-				return err
-			}
-			wd, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-			r, err := resolveEngine(cfg, store, k, wd)
-			if err != nil {
-				c := k.CommandName()
-				return fmt.Errorf("%w; fix it with `ak bind`, `ak unbind` or `ak default %s`, or run it natively with AK=native %s", err, c, c)
-			}
-			if r.Target != "" {
-				fmt.Println(r.Target)
-			}
-			return nil
-		},
-	}
 }
 
 // newEngineCmd is what the shell functions run for an engine command: it

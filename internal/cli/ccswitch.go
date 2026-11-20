@@ -201,8 +201,8 @@ func claudeProviderFromCCSwitch(settings string) (config.Provider, []string) {
 }
 
 // codexProviderFromCCSwitch maps a cc-switch codex settings_config onto a
-// provider. The profile is stored inline as a TOML string, so it reuses the
-// same parser as the codexa import; only the secret lookup differs.
+// provider. The profile is stored inline as a TOML string, so it is read with
+// the same parser a codex config.toml gets; only the secret lookup differs.
 func codexProviderFromCCSwitch(settings string) (config.Provider, []string) {
 	var doc struct {
 		Auth   map[string]string `json:"auth"`
@@ -214,7 +214,7 @@ func codexProviderFromCCSwitch(settings string) (config.Provider, []string) {
 	if strings.TrimSpace(doc.Config) == "" {
 		return config.Provider{}, []string{"no config"}
 	}
-	prof, err := parseCodexaProfile([]byte(doc.Config))
+	prof, err := parseCodexProfile([]byte(doc.Config))
 	if err != nil {
 		return config.Provider{}, []string{"unparseable config"}
 	}

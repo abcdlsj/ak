@@ -183,9 +183,6 @@ func New(cfg *config.Config) *Server {
 // config is the current config, which Reload may have replaced.
 func (s *Server) config() *config.Config { return s.cfg.Load() }
 
-// Config is the config the server runs on; it must not be changed in place.
-func (s *Server) Config() *config.Config { return s.config() }
-
 // Reload swaps in a new config; the running gateway picks up an edited pool
 // without a restart.
 func (s *Server) Reload(cfg *config.Config) {

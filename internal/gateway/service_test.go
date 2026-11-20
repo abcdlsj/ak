@@ -294,7 +294,7 @@ func TestServiceTranslates(t *testing.T) {
 	}
 
 	// Its usage is counted, under the route asked for and the account.
-	rows := r.srv.Usage(1)
+	rows := r.srv.meter.since(1, "")
 	var sum Tokens
 	for _, u := range rows {
 		if u.Token != "laptop" || u.Failed != 0 {
@@ -349,7 +349,7 @@ func TestServicePoolAndAlias(t *testing.T) {
 	if r.both.count() != 1 || r.anth.count() != 2 {
 		t.Errorf("the failed member was asked again: bili %d, kimi %d", r.both.count(), r.anth.count())
 	}
-	if u := r.srv.Usage(1); len(u) != 1 || u[0].Route != "main" || u[0].Account != "kimi" || u[0].Requests != 2 {
+	if u := r.srv.meter.since(1, ""); len(u) != 1 || u[0].Route != "main" || u[0].Account != "kimi" || u[0].Requests != 2 {
 		t.Errorf("usage = %+v", u)
 	}
 }
@@ -454,7 +454,7 @@ func TestServiceCountTokens(t *testing.T) {
 		!strings.Contains(rec.Body.String(), "count tokens") || r.chat.count() != 0 {
 		t.Errorf("count on a chat-only account: %d %s", rec.Code, rec.Body)
 	}
-	if len(r.srv.Usage(1)) != 0 {
+	if len(r.srv.meter.since(1, "")) != 0 {
 		t.Error("a token count was billed")
 	}
 }

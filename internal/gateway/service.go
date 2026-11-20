@@ -666,9 +666,6 @@ func (s *Server) handleLatency(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"routes": out})
 }
 
-// Usage is every token's usage over the last days days.
-func (s *Server) Usage(days int) []UsageRow { return s.meter.since(days, "") }
-
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)

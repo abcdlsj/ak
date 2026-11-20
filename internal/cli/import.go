@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -22,7 +21,6 @@ func newImportCmd() *cobra.Command {
 		Long: `Read providers from an existing configuration into ak.
 
   ak import --from claude-settings   # env block of ~/.claude/settings.json
-  ak import --from codexa            # ~/.codex/profiles/*/
   ak import --from pi                # ~/.pi/agent/models.json
   ak import --from cc-switch         # ~/.cc-switch/cc-switch.db, pick from a list`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -33,18 +31,16 @@ func newImportCmd() *cobra.Command {
 			switch from {
 			case "claude-settings":
 				return importClaudeSettings(cfg)
-			case "codexa":
-				return importCodexa(cfg)
 			case "cc-switch":
 				return importCCSwitch(cfg, all)
 			case "pi":
 				return importPi(cfg)
 			default:
-				return fmt.Errorf("--from must be claude-settings, codexa, pi or cc-switch, got %q", from)
+				return fmt.Errorf("--from must be claude-settings, pi, cc-switch or vendor, got %q", from)
 			}
 		},
 	}
-	cmd.Flags().StringVar(&from, "from", "", "Source: claude-settings, codexa, pi or cc-switch")
+	cmd.Flags().StringVar(&from, "from", "", "Source: claude-settings, pi or cc-switch")
 	cmd.Flags().BoolVar(&all, "all", false, "Import every provider without the selection prompt (cc-switch only)")
 	cmd.MarkFlagRequired("from")
 	return cmd
@@ -176,128 +172,7 @@ func claudeProviderFromEnv(env map[string]string) (config.Provider, map[string]b
 	return p, consumed
 }
 
-// importCodexa reads codexa's profiles and merges duplicates.
-//
-// The source is only ever read: profile directories hold GB-sized log
-// databases, some symlinked back to the primary home, and deleting or
-// following those is irreversible.
-func importCodexa(cfg *config.Config) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	root := filepath.Join(home, ".codex", "profiles")
-	entries, err := os.ReadDir(root)
-	if os.IsNotExist(err) {
-		return fmt.Errorf("%s does not exist, codexa may never have been used", root)
-	}
-	if err != nil {
-		return err
-	}
-
-	type imported struct {
-		name string
-		p    config.Provider
-	}
-	var got []imported
-	seen := map[string]string{} // (base_url, model, wire) -> provider name already used
-
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		profile := e.Name()
-		cfgPath := filepath.Join(root, profile, "config.toml")
-		raw, err := os.ReadFile(cfgPath)
-		if err != nil || len(raw) == 0 {
-			skipLine(profile, "no config.toml or it is empty")
-			continue
-		}
-
-		prof, err := parseCodexaProfile(raw)
-		if err != nil {
-			skipLine(profile, err.Error())
-			continue
-		}
-		if prof.BaseURL == "" {
-			skipLine(profile, "no base_url found")
-			continue
-		}
-
-		// Deduplicate: profiles sharing base_url, model and wire_api are the
-		// same provider, and the first (shortest) name wins.
-		key := prof.BaseURL + "\x00" + prof.Model + "\x00" + prof.WireAPI
-		if prev, ok := seen[key]; ok {
-			fmt.Printf("%s %s has the same config as %s, merged\n", out.Mark(out.Unknown), profile, prev)
-			continue
-		}
-
-		name := uniqueName(cfg, profile)
-		p := config.Provider{
-			Kind:       config.KindCodex,
-			BaseURL:    prof.BaseURL,
-			Model:      prof.Model,
-			Reasoning:  prof.Reasoning,
-			WireAPI:    prof.WireAPI,
-			ProviderID: prof.ProviderID,
-			APIKey:     codexaKey(filepath.Join(root, profile), prof.EnvKey),
-			Display:    profile,
-		}
-		if p.APIKey == "" {
-			out.Hint(os.Stdout, "no key read for %s; fill it in with `ak edit %s`", profile, name)
-		}
-		got = append(got, imported{name: name, p: p})
-		seen[key] = name
-	}
-
-	if len(got) == 0 {
-		return fmt.Errorf("no profiles to import")
-	}
-
-	if cfg.Providers == nil {
-		cfg.Providers = map[string]config.Provider{}
-	}
-	for _, g := range got {
-		cfg.Providers[g.name] = g.p
-	}
-	if err := config.Validate(cfg); err != nil {
-		return err
-	}
-	if err := config.Save(cfg); err != nil {
-		return err
-	}
-	out.Done(os.Stdout, "imported %d provider(s)", len(got))
-	if err := runSync(cfg, false); err != nil {
-		return err
-	}
-	out.Hint(os.Stdout, "~/.codex/profiles/ is untouched")
-	return nil
-}
-
 // skipLine names one source entry that was left out, and why.
 func skipLine(name, reason string) {
 	fmt.Printf("%s %s  %s\n", out.Mark(out.Notice), name, out.Reason(reason))
-}
-
-// codexaProfile holds the settings extracted from a codexa profile.
-type codexaProfile struct {
-	ProviderID string
-	BaseURL    string
-	WireAPI    string
-	Model      string
-	Reasoning  string
-	EnvKey     string
-}
-
-// uniqueName returns a name that does not collide with an existing provider.
-func uniqueName(cfg *config.Config, base string) string {
-	if _, ok := cfg.Providers[base]; !ok {
-		return base
-	}
-	for i := 2; ; i++ {
-		cand := fmt.Sprintf("%s%d", base, i)
-		if _, ok := cfg.Providers[cand]; !ok {
-			return cand
-		}
-	}
 }

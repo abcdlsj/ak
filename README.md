@@ -58,8 +58,7 @@ claude_args = ['--dangerously-skip-permissions']
 ```
 
 `ak vendor list` shows the vendors to sign in to; `ak import --from cc-switch` (or
-`--from pi`, `--from claude-settings`, `--from codexa`) copies providers you
-already have.
+`--from pi`, `--from claude-settings`) copies providers you already have.
 
 ## Commands
 
@@ -75,9 +74,9 @@ ak accounts                     accounts and the providers on each
 ak import --from <source>       copy providers over
 ak usage | quota | check | models   the parts of status, for scripts
 ak quota board                  every plan and balance as cards, full screen
-ak bind / unbind / bindings     what claude/codex/pi/agy typed in a repository run on
+ak bind / unbind                what claude/codex/pi/agy typed in a repository run on
 ak default <engine> <name>      what they run on where nothing is bound
-ak which                        what they run on here, and why
+ak which [--all]                what they run on here, and why; --all lists every binding
 ak acp <engine>                 that engine's ACP server on the provider here
 ak serve                        the pool gateway; with service.addr, the service for other machines
 ak serve route add|list|rm      manage the service's named aliases and pool routes
