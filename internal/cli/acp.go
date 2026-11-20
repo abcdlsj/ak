@@ -15,13 +15,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// acpServer names the ACP adapter ak launches for an engine: an executable on
+// PATH, or an npm package ak runs through npx when no executable is installed.
+type acpServer struct {
+	Bin string
+	// Package is the npx fallback, published under npm.
+	Package string
+}
+
 // acpServers maps an engine to the ACP server ak launches for it. Only engines
 // whose adapter reads the provider environment are listed: a provider family
 // that configures its engine through arguments (codex) has nothing to gain
 // from this path yet, and silently launching the adapter against the wrong
 // provider would be worse than saying so.
-var acpServers = map[config.Kind]string{
-	config.KindClaude: "claude-agent-acp",
+var acpServers = map[config.Kind]acpServer{
+	config.KindClaude: {Bin: "claude-agent-acp"},
+	// pi has no acp subcommand; pi-acp is the adapter that starts pi and keeps
+	// PI_PROVIDER/PI_MODEL from the provider's plan.
+	config.KindPi: {Bin: "pi-acp", Package: "pi-acp@0.0.34"},
 }
 
 // acpBinEnv names the variable overriding an engine's ACP server executable.
@@ -30,7 +41,8 @@ func acpBinEnv(k config.Kind) string {
 }
 
 func newACPCmd() *cobra.Command {
-	return &cobra.Command{
+	var provider string
+	cmd := &cobra.Command{
 		Use:   "acp <engine> [args...]",
 		Short: "Run a provider's ACP server with that provider's environment",
 		Long: `acp starts the Agent Client Protocol server of an engine family with the
@@ -39,24 +51,26 @@ of the shell functions ak init installs: a client that would otherwise launch
 the adapter directly runs "ak acp claude", and the adapter sees the provider's
 credentials.
 
-The provider is chosen the same way a terminal launch chooses it: the AK
-override, then a repository binding, then the engine default, and the engine's
-own environment when none applies.`,
+The provider is chosen the same way a terminal launch chooses it: --provider,
+then the AK override, then a repository binding, then the engine default, and
+the engine's own environment when none applies.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			k, ok := parseKind(args[0])
 			if !ok {
 				return fmt.Errorf("unknown engine %q; one of %s", args[0], kindList())
 			}
-			return runACP(k, args[1:])
+			return runACP(k, args[1:], provider)
 		},
 	}
+	cmd.Flags().StringVar(&provider, "provider", "", "provider[:variant] to run instead of this directory's resolution")
+	return cmd
 }
 
 // runACP replaces ak with the engine's ACP server. The provider's environment
 // comes from the same launch plan its own command would get, so whatever the
 // provider needs to authenticate reaches the adapter.
-func runACP(k config.Kind, args []string) error {
+func runACP(k config.Kind, args []string, provider string) error {
 	server, ok := acpServers[k]
 	if !ok {
 		return fmt.Errorf("acp is not available for %s", k)
@@ -65,21 +79,32 @@ func runACP(k config.Kind, args []string) error {
 	if err != nil {
 		return err
 	}
-	bin, err := findACPBin(k, server)
+	prefix, err := findACPBin(k, server)
 	if err != nil {
 		return err
 	}
-	store, err := bind.Default()
-	if err != nil {
-		return err
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	r, err := resolveEngine(cfg, store, k, wd)
-	if err != nil {
-		return fmt.Errorf("%w; fix it with `ak bind`, `ak unbind` or `ak default %s`", err, k)
+	var r resolution
+	if provider != "" {
+		if err := config.ValidateTarget(cfg, k, provider); err != nil {
+			return fmt.Errorf("--provider %s: %w", provider, err)
+		}
+		r = resolution{Target: provider, Source: "--provider"}
+		if provider == bind.Native {
+			r.Target = ""
+		}
+	} else {
+		store, err := bind.Default()
+		if err != nil {
+			return err
+		}
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		r, err = resolveEngine(cfg, store, k, wd)
+		if err != nil {
+			return fmt.Errorf("%w; fix it with `ak bind`, `ak unbind` or `ak default %s`", err, k)
+		}
 	}
 	env := withoutOverride(os.Environ())
 	if r.Target != "" {
@@ -88,8 +113,8 @@ func runACP(k config.Kind, args []string) error {
 			return err
 		}
 	}
-	argv := append([]string{bin}, args...)
-	return syscall.Exec(bin, argv, env)
+	argv := append(prefix, args...)
+	return syscall.Exec(prefix[0], argv, env)
 }
 
 // acpProviderEnv builds the environment the adapter passes on to the engine.
@@ -132,23 +157,53 @@ func acpProviderEnv(cfg *config.Config, k config.Kind, target string, environ []
 		// engine it starts stay one provider.
 		return withEnv(plan.Env, "CLAUDE_CODE_EXECUTABLE", plan.Bin), nil
 	}
+	if k == config.KindPi {
+		// pi takes its provider and model from the environment when it is
+		// started by the adapter, so the plan's own choices travel as env.
+		env := plan.Env
+		if p := flagValue(plan.Argv, "--provider"); p != "" {
+			env = withEnv(env, "PI_PROVIDER", p)
+		}
+		if m := flagValue(plan.Argv, "--model"); m != "" {
+			env = withEnv(env, "PI_MODEL", m)
+		}
+		return env, nil
+	}
 	return plan.Env, nil
 }
 
-// findACPBin resolves the ACP server executable: the override variable, then
-// PATH.
-func findACPBin(k config.Kind, server string) (string, error) {
+// findACPBin resolves the argv that starts the ACP server: the override
+// variable, then the executable on PATH, then the npx fallback.
+func findACPBin(k config.Kind, server acpServer) ([]string, error) {
 	if override := os.Getenv(acpBinEnv(k)); override != "" {
 		info, err := os.Stat(override)
 		if err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
-			return "", fmt.Errorf("%s=%s is not an executable", acpBinEnv(k), override)
+			return nil, fmt.Errorf("%s=%s is not an executable", acpBinEnv(k), override)
 		}
-		return override, nil
+		return []string{override}, nil
 	}
-	if path, err := exec.LookPath(server); err == nil {
-		return path, nil
+	if path, err := exec.LookPath(server.Bin); err == nil {
+		return []string{path}, nil
 	}
-	return "", fmt.Errorf("%s not found; install the ACP adapter for %s or set %s", server, k, acpBinEnv(k))
+	if server.Package != "" {
+		if npx, err := exec.LookPath("npx"); err == nil {
+			return []string{npx, "-y", server.Package}, nil
+		}
+	}
+	return nil, fmt.Errorf("%s not found; install the ACP adapter for %s or set %s", server.Bin, k, acpBinEnv(k))
+}
+
+// flagValue returns the value of name in argv, or "" when absent.
+func flagValue(argv []string, name string) string {
+	for i, arg := range argv {
+		if v, ok := strings.CutPrefix(arg, name+"="); ok {
+			return v
+		}
+		if arg == name && i+1 < len(argv) {
+			return argv[i+1]
+		}
+	}
+	return ""
 }
 
 // withEnv replaces key in an environment list, keeping its position, or

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -51,12 +52,13 @@ func TestFindACPBinUsesOverrideThenPath(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	server := acpServers[config.KindClaude]
 	t.Setenv(acpBinEnv(config.KindClaude), bin)
-	if got, err := findACPBin(config.KindClaude, "claude-agent-acp"); err != nil || got != bin {
+	if got, err := findACPBin(config.KindClaude, server); err != nil || len(got) != 1 || got[0] != bin {
 		t.Fatalf("findACPBin = %q, %v; want the override", got, err)
 	}
 	t.Setenv(acpBinEnv(config.KindClaude), filepath.Join(t.TempDir(), "missing"))
-	if _, err := findACPBin(config.KindClaude, "claude-agent-acp"); err == nil {
+	if _, err := findACPBin(config.KindClaude, server); err == nil {
 		t.Fatal("a non-executable override was accepted")
 	}
 }
@@ -65,8 +67,61 @@ func TestACPIsUnavailableForEnginesWithoutAnAdapter(t *testing.T) {
 	if _, ok := acpServers[config.KindCodex]; ok {
 		t.Fatal("codex is listed although its adapter cannot read the provider environment")
 	}
-	if _, ok := acpServers[config.KindPi]; ok {
-		t.Fatal("pi has no ACP server")
+}
+
+func TestACPPiFallsBackToNpxWhenTheAdapterIsNotInstalled(t *testing.T) {
+	// Hide the adapter and keep npx reachable, so the fallback is what resolves.
+	t.Setenv("PATH", "/usr/bin:/bin")
+	if _, err := exec.LookPath("pi-acp"); err == nil {
+		t.Skip("pi-acp is installed on this machine")
+	}
+	t.Setenv(acpBinEnv(config.KindPi), "")
+	got, err := findACPBin(config.KindPi, acpServers[config.KindPi])
+	if _, lookErr := exec.LookPath("npx"); lookErr != nil {
+		if err == nil {
+			t.Fatalf("without npx the adapter must be reported missing, got %v", got)
+		}
+		return
+	}
+	if err != nil || len(got) != 3 || got[2] != "pi-acp@0.0.34" {
+		t.Fatalf("findACPBin = %q, %v; want the npx fallback", got, err)
+	}
+}
+
+func TestACPPiProviderEnvPinsProviderAndModel(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["od"] = config.Provider{
+		Kind: config.KindPi, BaseURL: "https://example.test/v1", Model: "deepseek-v4.1-flash", APIKey: "sk-x",
+	}
+	env, err := acpProviderEnv(cfg, config.KindPi, "od", os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{}
+	for _, kv := range env {
+		key, value, _ := strings.Cut(kv, "=")
+		values[key] = value
+	}
+	// ak registers its providers in pi's catalog under an ak- prefix.
+	if values["PI_PROVIDER"] != "ak-od" {
+		t.Fatalf("PI_PROVIDER = %q, want the plan's pi provider name", values["PI_PROVIDER"])
+	}
+	if values["PI_MODEL"] != "deepseek-v4.1-flash" {
+		t.Fatalf("PI_MODEL = %q, want the provider's model", values["PI_MODEL"])
+	}
+}
+
+func TestACPProviderFlagBeatsResolution(t *testing.T) {
+	cmd := newACPCmd()
+	flag := cmd.Flags().Lookup("provider")
+	if flag == nil {
+		t.Fatal("acp has no --provider flag")
+	}
+	if err := cmd.ParseFlags([]string{"--provider", "od"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := cmd.Flags().GetString("provider"); got != "od" {
+		t.Fatalf("--provider = %q", got)
 	}
 }
 
