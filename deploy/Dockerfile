@@ -8,9 +8,9 @@
 # defined, so issue one first:
 #
 #   docker run --rm -it -v ak:/data ghcr.io/abcdlsj/ak serve token add laptop
-#   docker run --rm -it -v ak:/data ghcr.io/abcdlsj/ak serve admin set-password
+#   docker run --rm -it -v ak:/data ghcr.io/abcdlsj/ak serve route add main --member …
 #
-# Then put TLS in front (deploy/Caddyfile) and sign in at https://…/ui/.
+# Then put TLS in front (deploy/Caddyfile); everything else is the CLI.
 #
 # GOPROXY is a build arg so a build behind a slow network can point at a
 # mirror: --build-arg GOPROXY=https://goproxy.cn,direct

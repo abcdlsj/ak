@@ -13,7 +13,6 @@ import (
 	"github.com/abcdlsj/ak/internal/config"
 	"github.com/abcdlsj/ak/internal/gateway"
 	"github.com/abcdlsj/ak/internal/out"
-	"github.com/abcdlsj/ak/internal/webui"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +52,6 @@ still need one.`,
 				service = cfg.Service.Addr
 			}
 			srv := gateway.New(cfg)
-			srv.UI = webui.New(srv)
 			hup := make(chan os.Signal, 1)
 			signal.Notify(hup, syscall.SIGHUP)
 			defer signal.Stop(hup)
@@ -63,7 +61,7 @@ still need one.`,
 	}
 	cmd.Flags().StringVar(&addr, "addr", "", "listen address, host:port (default settings.gateway_addr)")
 	cmd.Flags().StringVar(&service, "service", "", "the service's listen address, host:port (default service.addr)")
-	cmd.AddCommand(newServeRouteCmd(), newServeTokenCmd(), newServeAdminCmd(), newServeAfterCmd())
+	cmd.AddCommand(newServeRouteCmd(), newServeTokenCmd(), newServeAfterCmd())
 	return cmd
 }
 

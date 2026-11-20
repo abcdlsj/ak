@@ -117,21 +117,6 @@ func TestServeTokenPrintsRemoteAdd(t *testing.T) {
 	}
 }
 
-func TestServeAdminPassword(t *testing.T) {
-	t.Setenv(config.DirEnv, t.TempDir())
-	t.Setenv("HOME", t.TempDir())
-	if _, err := runRoot(t, "short\n", "serve", "admin", "set-password"); err == nil {
-		t.Error("a short password was taken")
-	}
-	if _, err := runRoot(t, "a-long-password\n", "serve", "admin", "set-password"); err != nil {
-		t.Fatal(err)
-	}
-	cfg, _ := config.Load()
-	if !strings.HasPrefix(cfg.Service.AdminPassword, "$2a$") {
-		t.Errorf("the password is not kept as bcrypt: %q", cfg.Service.AdminPassword)
-	}
-}
-
 func TestServeRefusesPublicWithoutTokens(t *testing.T) {
 	t.Setenv(config.DirEnv, t.TempDir())
 	t.Setenv("HOME", t.TempDir())

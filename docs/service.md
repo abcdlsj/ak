@@ -64,7 +64,6 @@ Everything the service adds is under `[service]` in `providers.toml`, so
 [service]
 addr = "127.0.0.1:8787"            # where the service listens; behind Caddy or nginx
 public_url = "https://ak.example.com"  # where other machines reach it, so a token prints its `ak remote add` line
-admin_password = "$2a$12$..."      # bcrypt, set by `ak serve admin set-password`
 
 [service.routes.main]              # a pool
 members = ["bili/glm-5", "command-code", "opendesign/deepseek-v4-pro"]
@@ -109,7 +108,6 @@ On `service.addr`:
 | `GET /ak/v1/usage?days=7` | token | the token's own usage by day, route and account |
 | `GET /ak/v1/stats` | token | each route's recent first-byte and whole-request p50 and p95 |
 | `GET /healthz` | none | `{"status":"ok"}`, nothing more |
-| `/ui/…` | admin session | the web UI |
 
 A token is sent as `Authorization: Bearer <token>` or `x-api-key: <token>`,
 the two ways the engines send a key. Each `/v1/models` entry carries an
@@ -197,62 +195,10 @@ sets a machine up, the token in it, so it is one copy and one paste:
 ak remote add laptop https://ak.example.com --token ak_...
 ```
 
-The UI's Tokens page prints the same line when it issues one; with no
-`public_url` set it names the address the page itself answered on, and says
-so, because another machine may not reach that one.
+With no `public_url` set the server prints the token alone.
 
 `ak serve` refuses to start the service on an address that is not loopback
 while no token is defined, and a request without a known token gets 401.
-
-## Admin login and the web UI
-
-`ak serve admin set-password` asks for the password twice and stores its
-bcrypt hash. With no password set the UI shows only how to set one.
-
-The UI is served by `ak serve` itself under `/ui/`: Go `html/template`,
-a little vanilla JS, embedded, no build step. It wears the TUI quota
-board's look, so the two read as one product: on water.css (v2.1.7, MIT,
-vendored and embedded) sits a small sheet of ak's own, in Avenir Next with
-system fallbacks. A page is a heading with a rule, cards or a table.
-
-Its mark is a pixel `k` on the same 5-pixel grid as the numbers, the
-favicon and the header's; the login page is that mark above a quiet card.
-
-- **Accounts**: the board's cards, one per account: its hue from the
-  vendor's id, each window's share used as the board's pixel number with a
-  tick bar under it, amber past 80% and red once spent, the balance below,
-  and any cached model refusals with a button to clear them. Trigger a
-  quota refresh from the header, sign in to a vendor by device code or by
-  pasting a key, set an account's default plan model, or remove one no
-  provider, route or token uses.
-- **Routes**: aliases and pools as a table, live protocol-reach chips
-  (`claude`, `codex`, `chat`) beside each route's strategy, members as
-  chips, and an adaptive form with the model-name legend beside it.
-- **Tokens**: issue one (shown once) with one-click copy buttons for the
-  secret and the `ak remote add` line beside it, limit it to routes,
-  revoke it.
-- **Usage**: counts as tiles (`Tokens`, `Requests`, `Failed`, `Input`, `Output`, `Cache`),
-  the year's tokens a day as GitHub draws it, a column a week, the months
-  above, four shades by quantile, the year's total in the pixel font and
-  the peak day named; then requests and tokens by token, account, route
-  and model over `Today`, 7, 30 or 90 days, each row with a bar against
-  the largest; and what a route's callers waited for, the first byte and
-  the whole request, p50 and p95 over its last 256 requests.
-
-A page shows what there is first: adding an account, a route or a token is
-behind a `+` at the bottom, so the cards and tables have the page to
-themselves. Pages follow the system's light or dark preference. The bars' shares are the
-only inline styles, and their values are numbers the server computes.
-
-The session is a random id in a cookie `ak_session`: HttpOnly,
-SameSite=Strict, Secure when the request came over TLS or with
-`X-Forwarded-Proto: https`, for 12 hours, held in memory (a restart signs
-out). Every form carries the session's CSRF token, and a POST that names no
-`Origin` or `Referer`, or another host, is refused. Five failed logins within five minutes
-lock the login for the rest of those minutes; the count is global, because
-behind a proxy every client has the proxy's address. Logout ends the
-session. An API token never opens the UI, and the session cookie is never
-accepted on `/v1/` or `/ak/v1/`.
 
 ## Clients
 
@@ -296,12 +242,15 @@ before it starts:
 ```sh
 docker run -d --name ak -v ak:/data -p 127.0.0.1:8787:8787 ghcr.io/abcdlsj/ak
 docker run --rm -it -v ak:/data ghcr.io/abcdlsj/ak serve token add laptop
-docker run --rm -it -v ak:/data ghcr.io/abcdlsj/ak serve admin set-password
 ```
 
+The service is the CLI alone: accounts, routes and tokens are managed with
+`ak login`, `ak serve route` and `ak serve token`, over `docker exec` or a
+one-off `docker run`, as above.
+
 `deploy/Dockerfile` builds it from a checkout; `--build-arg GOPROXY=…`
-points at a module mirror and `--build-arg VERSION=v1.2.3` is what the
-pages' footer then says.
+points at a module mirror and `--build-arg VERSION=v1.2.3` is what
+`ak --version` then says.
 
 One binary without a container, its state in `AK_CONFIG_DIR`: `providers.toml`, `auth.json`,
 `service-usage.json` (366 days of usage by day, token, route and account) and
@@ -315,7 +264,6 @@ On the server:
 
 ```sh
 ak login command-code --key -            # each subscription, as on a laptop
-ak serve admin set-password
 ak serve token add laptop                # prints the token, and the `ak remote add` line
 # providers.toml: [service] addr = "127.0.0.1:8787", public_url = "https://ak.example.com", routes as above
 systemctl enable --now ak                # deploy/ak.service
@@ -352,19 +300,15 @@ message rather than failing to parse it.
 - Upstream keys stay on the server: the client's credentials are stripped
   and each member's key set as its engine expects, as in the pool gateway.
   Keys and tokens are never logged or written in a reply.
-- Tokens are stored as SHA-256, the admin password as bcrypt.
+- Tokens are stored as SHA-256; the token itself is only shown once.
 - A vendor's redirect is followed only while it stays on the vendor's host:
   Go drops `Authorization` and `Cookie` across hosts but not `x-api-key`,
   which is where an injected key lives.
-- A form the UI reads is bounded at 1 MB; a request body at 32 MB.
+- A request body is bounded at 32 MB.
 - Cookies and the client's `Authorization` and `x-api-key` never go
   upstream.
 - Bodies are bounded (32 MB), as are streams that stall; in-flight
   requests are bounded by `settings.max_inflight`.
-- UI responses carry `Content-Security-Policy: default-src 'self';
-  style-src 'self' 'unsafe-inline'` (inline styles are the bars' widths and
-  heatmap colours, never text from a request), `X-Frame-Options: DENY` and
-  `Referrer-Policy: same-origin`.
 
 ## What reuses what
 
@@ -373,9 +317,9 @@ message rather than failing to parse it.
 | `gateway` | forwarding, key injection, retry, cooldown, failover, affinity, the strategies and smart's quota reads, the in-flight gate, stream bounds, reload |
 | `config` | accounts, vendors, `Resolve`, `Save`, `Validate`; `[service]` is a new section of the same file |
 | `vendor` | engines per vendor, which say which protocol an account speaks; `vendors.d` holds remotes |
-| `core` | `Holders` for the quota endpoint; account sign-in from the UI |
-| `quota` | readings for `/ak/v1/quota` and the UI; the `ak` source on clients |
-| `login` | device sign-in from the UI |
+| `core` | `Holders` for the quota endpoint |
+| `quota` | readings for `/ak/v1/quota`; the `ak` source on clients |
+| `login` | account sign-in from the CLI |
 | `out`, `ui` | the CLI commands and `ak quota board` on clients |
 
 ## Implementation plan
@@ -398,11 +342,9 @@ ten are done.
    Codex request served by an Anthropic upstream and the reverse, streams
    included; usage counted.
 6. `cli`: `ak serve` starts the service, refuses a public address without
-   tokens; `ak serve token add|list|revoke`; `ak serve admin set-password`.
+   tokens; `ak serve token add|list|revoke`.
 7. Clients: `ak remote add|list|rm`, the `ak` quota source, remote accounts
    in `ak quota` and the board.
-8. The web UI: login, sessions, CSRF, rate limit; Accounts, Routes, Tokens,
-   Usage. Tests for the security rules and each form.
 9. `deploy/` (systemd unit, Dockerfile, Caddyfile) and README.
 10. Clients, the short way: `[service] public_url`, so `ak serve token add`
     prints its `ak remote add` line ready to paste; `ak remote add` lists the

@@ -101,7 +101,7 @@ ak-<name> [args...]             the same as ak <name>, for scripts
 - [ak as a service](docs/service.md): one server holding every
   subscription, one base URL and token per machine, the model name picking
   the subscription; Anthropic and OpenAI protocols translated as needed; a
-  small web UI; `deploy/` has a systemd unit, a Dockerfile and proxy configs.
+  no UI beyond the CLI; `deploy/` has a systemd unit, a Dockerfile and proxy configs.
 - [Health, balance and usage](docs/status.md): `ak status`, `ak check`,
   `ak quota` and its plugins.
 

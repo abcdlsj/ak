@@ -1,11 +1,8 @@
 package cli
 
 import (
-	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,9 +12,7 @@ import (
 	"github.com/abcdlsj/ak/internal/core"
 	"github.com/abcdlsj/ak/internal/gateway"
 	"github.com/abcdlsj/ak/internal/out"
-	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
-	"golang.org/x/crypto/bcrypt"
 )
 
 func newServeTokenCmd() *cobra.Command {
@@ -199,78 +194,6 @@ them wrong before they expire: ` + "`--forget`" + ` drops them all.`,
 	}
 	cmd.Flags().Bool("forget", false, "drop every refusal, so the accounts are asked again")
 	return cmd
-}
-
-func newServeAdminCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "admin",
-		Short: "The web UI's admin login",
-	}
-	set := &cobra.Command{
-		Use:   "set-password",
-		Short: "Set the web UI's password; only its bcrypt hash is kept",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			pw, err := readPassword()
-			if err != nil {
-				return err
-			}
-			hash, err := bcrypt.GenerateFromPassword([]byte(pw), 12)
-			if err != nil {
-				return err
-			}
-			cfg, err := loadConfig()
-			if err != nil {
-				return err
-			}
-			if err := core.ChangeService(cfg, func(s *config.Service) { s.AdminPassword = string(hash) }); err != nil {
-				return err
-			}
-			out.Done(os.Stdout, "set the admin password")
-			return nil
-		},
-	}
-	cmd.AddCommand(set)
-	return cmd
-}
-
-// minPassword is the shortest admin password taken.
-const minPassword = 10
-
-// readPassword reads a new password: twice without echo on a terminal, or
-// the first line of a pipe.
-func readPassword() (string, error) {
-	var pw string
-	if term.IsTerminal(os.Stdin.Fd()) {
-		ask := func(prompt string) (string, error) {
-			fmt.Fprint(os.Stderr, prompt)
-			b, err := term.ReadPassword(os.Stdin.Fd())
-			fmt.Fprintln(os.Stderr)
-			return string(b), err
-		}
-		a, err := ask("New password: ")
-		if err != nil {
-			return "", err
-		}
-		b, err := ask("Again: ")
-		if err != nil {
-			return "", err
-		}
-		if a != b {
-			return "", errors.New("the passwords differ")
-		}
-		pw = a
-	} else {
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
-			return "", err
-		}
-		pw = strings.TrimRight(line, "\r\n")
-	}
-	if len(pw) < minPassword {
-		return "", fmt.Errorf("the password needs at least %d characters", minPassword)
-	}
-	return pw, nil
 }
 
 func newServeRouteCmd() *cobra.Command {

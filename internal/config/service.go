@@ -19,8 +19,6 @@ type Service struct {
 	// Addr is where the service listens, host:port. Empty: no service, only
 	// the loopback pool gateway.
 	Addr string `toml:"addr,omitempty"`
-	// AdminPassword is the bcrypt hash of the web UI's password.
-	AdminPassword string `toml:"admin_password,omitempty"`
 	// PublicURL is where other machines reach the service, so that
 	// `ak serve token add` can print the `ak remote add` line ready to paste.
 	// Empty: it prints the token alone.

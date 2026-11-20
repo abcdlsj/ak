@@ -4,7 +4,7 @@
 #   sudo install -m 0644 deploy/ak.service /etc/systemd/system/ak.service
 #   sudo systemctl daemon-reload && sudo systemctl enable --now ak
 # Configure as the ak user, e.g.:
-#   sudo -u ak AK_CONFIG_DIR=/var/lib/ak ak serve admin set-password
+#   sudo -u ak AK_CONFIG_DIR=/var/lib/ak ak serve token add laptop
 [Unit]
 Description=ak service: one base URL for every agent
 After=network-online.target

@@ -144,9 +144,6 @@ type Server struct {
 	readings        readings
 	// lat holds the service's recent timings per route.
 	lat *latencies
-
-	// UI, when set, is served by the service under /ui/.
-	UI http.Handler
 }
 
 // New builds a server over a config.
